@@ -1,0 +1,48 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/nuevo.py
+
+- Purpose
+  - Provides a base extractor for Nuevo-style videos by fetching and parsing an XML configuration to produce a standard video info dictionary for youtube-dl.
+
+- Main class
+  - NuevoBaseIE(InfoExtractor): Base extractor class used by Nuevo site extractors.
+
+- Core method
+  - _extract_nuevo(self, config_url, video_id, headers={}):
+    - Downloads and parses an XML config from config_url with optional HTTP headers, stripping whitespace from the XML.
+    - Extracts fields from the XML:
+      - title: required (fatal=True); trimmed.
+      - mediaid: custom video id; falls back to the provided video_id if missing.
+      - image/thumb: as potential thumbnail (checks both paths).
+      - duration: parsed to float if present (float_or_none applied to the string value).
+    - Builds video formats by reading two possible URLs from the config:
+      - 'file' → format_id 'sd'
+      - 'filehd' → format_id 'hd'
+      - For each present URL, appends a format dict with keys 'url' and 'format_id'.
+    - Validates formats with self._check_formats(formats, video_id) to ensure at least one usable format.
+    - Returns a dictionary with:
+      - 'id': final video_id
+      - 'title': extracted title
+      - 'thumbnail': first available thumbnail (from image or thumb)
+      - 'duration': numeric duration if present
+      - 'formats': list of format dictionaries
+
+- Key implementation details
+  - Uses xml-based extraction via xpath_text helper to read values from the XML config.
+  - Uses float_or_none to convert duration strings to float safely.
+  - Uses a transform_source callback to strip whitespace from the downloaded XML before parsing.
+  - Accepts optional headers to customize the HTTP request when fetching the config.
+  - Mutability note: default headers={} is a mutable default argument (a minor Python pitfall to be aware of).
+
+- Dependencies
+  - Inherits from InfoExtractor (youtube-dl core extractor class).
+  - Util functions: float_or_none, xpath_text from youtube_dl.utils.
+
+- Expected data model in output
+  - id: string
+  - title: string
+  - thumbnail: string or None
+  - duration: float or None
+  - formats: list of { 'url': string, 'format_id': string } dictionaries
+
+- Typical usage
+  - Used by specific Nuevo extractors that call _extract_nuevo with a config URL and initial video_id to obtain a standardized video info dict for downloading.

@@ -1,0 +1,33 @@
+Concise summary of file: ./youtube-dl/youtube_dl/extractor/worldstarhiphop.py
+
+- Purpose
+  - Implement a dedicated InfoExtractor for WorldStarHipHop video pages in youtube-dl.
+  - Extract video metadata and playback URLs from WorldStarHipHop pages.
+
+- Key class
+  - WorldStarHipHopIE(InfoExtractor)
+    - _VALID_URL: Regex that matches WorldStarHipHop video URLs on www or m subdomains, for candy or hiphop domains, and either /videos/video.php or /android/video.php with a query parameter v=<video_id>.
+    - _TESTS: Includes an example of a standard page URL with expected mp4 extension and title, and a mobile URL used for matching tests.
+
+- Main functionality (_real_extract)
+  - Extracts a video_id from the URL using _match_id(url) based on _VALID_URL.
+  - Downloads the page content with _download_webpage(url, video_id).
+  - Attempts to parse HTML5 video entries via _parse_html5_media_entries(url, webpage, video_id). These entries contain metadata and actual media URLs (ext, etc.).
+  - If no entries are found, falls back to the Generic extractor by returning self.url_result(url, 'Generic').
+  - If entries exist:
+    - Extracts a title from the page using _html_search_regex with two fallback patterns:
+      - (?s)<div class="content-heading">\s*<h1>(.*?)</h1>
+      - <span[^>]+class="tc-sp-pinned-title">(.*)</span>
+    - Takes the first entry (entries[0]) and updates it with:
+      - id: video_id
+      - title: title (as extracted)
+    - Returns the updated entry as the result.
+
+- Important implementation details
+  - Uses HTML5 media entry parsing to obtain the actual video information (e.g., direct MP4 URL, extension) via _parse_html5_media_entries.
+  - Provides a robust title extraction with two regex options to accommodate different page layouts.
+  - If parsing fails to yield an entry, gracefully falls back to a Generic extractor rather than failing.
+  - The _TESTS include both a full-site URL (with expected md5 and title) and a mobile URL (marked as only_matching to ensure URL pattern matching).
+
+- Outcome
+  - On success, returns a dict containing the video id, title, and metadata about the media entry (including extension such as mp4) suitable for youtube-dl to download. If not parsable by the specialized extractor, delegates to the Generic extractor.

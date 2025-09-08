@@ -1,0 +1,40 @@
+Summary of SRMediathek extractor (youtube-dl/youtube_dl/extractor/srmediathek.py)
+
+Overview
+- This extractor handles videos from the Saarländischer Rundfunk (SR) Mediathek.
+- It inherits from ARDMediathekBaseIE, reusing ARD Mediathek parsing logic to obtain media formats via the ARD player.
+
+Key details
+- Class and metadata:
+  - IE_NAME: "sr:mediathek"
+  - IE_DESC: "Saarländischer Rundfunk"
+  - _VALID_URL matches SR Mediathek pages with an id parameter: http(s)://sr-mediathek(.sr-online)?.de/index.php?...&id=<digits>
+
+Main functionality
+- _real_extract(url):
+  - Extracts video_id from the URL using _match_id.
+  - Downloads the page content.
+  - Checks for a not-available message in German; if found, raises ExtractorError with expected=True (video no longer available).
+  - Locates the ARD media collection URL via a data-mediacollection-ardplayer attribute in the page (data-mediacollection-ardplayer="...").
+  - Calls _extract_media_info(media_collection_url, webpage, video_id) to build the initial info dict with formats and media data (inherited behavior from ARD extractor).
+  - Enriches the info dict with:
+    - id: video_id
+    - title: text from the ARD player title element found by class "ardplayer-title" (via get_element_by_attribute)
+    - description: OpenGraph description from the page (_og_search_description)
+    - thumbnail: OpenGraph thumbnail from the page (_og_search_thumbnail)
+  - Returns the augmented info dict.
+
+Implementation details
+- Uses ARDMediathekBaseIE for common ARD Mediathek logic; relies on _extract_media_info to parse the media collection URL and extract formats.
+- Error handling: raises ExtractorError with expected=True when the video is no longer available on SR.
+- Title extraction: uses DOM search for an element with class "ardplayer-title" to get the video title.
+- Metadata extraction: uses OpenGraph tags for description and thumbnail.
+- Media collection discovery: identifies the ARD media collection URL from the page using the attribute data-mediacollection-ardplayer.
+
+Tests
+- _TESTS includes:
+  - A public SR Mediathek URL (id=28455) with expected mp4 format, title, and description; marked as not available (skip).
+  - A URL (id=37682) with mp4 format and a description MD5 hash; shows skip_download: True to avoid downloading the media (likely due to m3u8/HLS).
+  - A URL (id=7480) that should match but is not necessarily tested for extraction (only_matching).
+
+In short, the extractor fetches the SR Mediathek page, finds the ARD media collection, delegates to the common ARD parsing to obtain formats, and then supplements the result with the specific SR page title, description, and thumbnail. It handles unavailable videos gracefully with a specific ExtractorError.

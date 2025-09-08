@@ -1,0 +1,68 @@
+Summary of the code in youtube-dl/youtube_dl/extractor/teamcoco.py
+
+- Purpose
+  - Implement a video extractor for TeamCoco (Conan) videos. Uses TeamCoco’s GraphQL API to resolve a slug to a video, then builds streaming formats either via NGTV (Turner’s geo-bypassed service) or via TeamCoco’s internal _truman/d source data.
+
+- Key class
+  - TeamcocoIE(TurnerBaseIE)
+    - Inherits TurnerBaseIE, which provides common Turner/NGTV utilities (geo-bypass, NGTV info extraction, etc.).
+
+- URL matching and tests
+  - _VALID_URL matches TeamCoco video URLs (teamcoco.com) with arbitrary subdomains and path depth.
+  - _TESTS contains several sample URLs with expected metadata (id, title, description, duration, timestamps, ext, md5) and some with skip_download set for m3u8 sources.
+
+- Core data template
+  - _RECORD_TEMPL is a GraphQL projection string requesting fields:
+    id, title, teaser, publishOn, thumb.preview, tags.name, duration, turnerMediaId, turnerMediaAuthToken
+
+- GraphQL helper
+  - _graphql_call(query_template, object_type, object_id)
+    - Builds a GraphQL query name findObject (e.g., findSlug or findRecord).
+    - Sends a POST to https://teamcoco.com/graphql with a JSON payload containing the formatted query.
+    - Returns data for the requested object (response['data'][find_object]).
+
+- Real extraction logic
+  - _real_extract(url)
+    - display_id from the URL via _match_id.
+    - Initial GraphQL call on Slug to resolve to either a RecordSlug or PageSlug or NotFoundSlug (with status).
+    - If status exists on response, raise ExtractorError('This video is no longer available.', expected=True).
+    - If response has child, fetch the actual Record by child['id']; otherwise use response['record'].
+    - video_id = record['id'].
+    - Build base info dict:
+      - id, display_id, title, thumbnail (thumb.preview), description (teaser),
+        duration (parse_duration), timestamp (parse_iso8601 of publishOn)
+    - Source selection
+      - If record contains turnerMediaId (NGTV path):
+        - Initialize US geo bypass.
+        - info.update(self._extract_ngtv_info(media_id, {'accessToken': record['turnerMediaAuthToken'], 'accessTokenType': 'jws'}))
+      - Else (regular path):
+        - Fetch video sources metadata from https://teamcoco.com/_truman/d/{video_id} and read meta.src.
+        - Normalize to an iterable list if needed.
+        - Build formats:
+          - For each src dict with 'src' and optional 'label' (format_id) and 'type':
+            - ext = determine_ext(src_url, mimetype2ext(src.get('type')))
+            - If format_id == 'hls' or ext == 'm3u8':
+              - If src_url starts with '/': fix absolute URL by prefixing with http://ht.cdn.turner.com/tbs/big/teamcoco
+              - Use _extract_m3u8_formats(src_url, video_id, 'mp4', m3u8_id=format_id, fatal=False)
+            - Else (direct MP4):
+              - Skip if src_url starts with '/mp4:protected/' (not fully implemented here)
+              - tbr = int_or_none(self._search_regex(r'(\d+)k\.mp4', src_url, 'tbr', default=None))
+              - Append a format dict:
+                {'url': src_url, 'ext': ext, 'tbr': tbr, 'format_id': format_id, 'quality': get_quality(format_id)}
+        - Sort formats with self._sort_formats(formats) and assign to info['formats'].
+
+- Important implementation details
+  - Uses a two-stage GraphQL resolution: resolve slug to either a record directly or via a child video ID, then fetch the actual video record.
+  - Supports NGTV-based streaming when turnerMediaId is present (geo-bypass to US).
+  - Falls back to non-NGTV sources via TeamCoco’s _truman/d endpoint and processes both HLS (m3u8) and direct MP4 sources.
+  - m3u8 handling: properly resolves relative / absolute URLs and uses _extract_m3u8_formats for HLS streams.
+  - Direct MP4 handling: extracts bitrate (tbr) from URL pattern if available, uses quality ordering ('low', 'sd', 'hd', 'uhd').
+  - Handles not-found/expired videos gracefully with a specific ExtractorError.
+  - Uses common utility helpers: determine_ext, mimetype2ext, parse_duration, parse_iso8601, int_or_none, and qualities.
+
+- Notes on edge cases
+  - Video could be marked NotFoundSlug; raises a user-friendly error.
+  - Some sources marked as '/mp4:protected/' are currently skipped (not fully implemented in this code).
+  - Some test entries explicitly skip downloads for m3u8 sources.
+
+Overall, the extractor integrates TeamCoco’s GraphQL API with Turner’s NGTV/geo-bypass logic and TeamCoco’s internal source metadata to produce a list of video formats and metadata for TeamCoco videos.

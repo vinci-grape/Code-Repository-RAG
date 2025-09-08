@@ -1,0 +1,87 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/chaturbate.py
+
+Purpose
+- Implement a YouTube-DL extractor for Chaturbate live cam pages. It discovers live streaming m3u8 endpoints and exposes them as downloadable formats, along with metadata such as title, thumbnail, and age restriction.
+
+Key class
+- ChaturbateIE(InfoExtractor)
+  - Inherits common extractor helpers from youtube-dl.
+
+Main API elements
+- _VALID_URL
+  - Regex to recognize Chaturbate live room URLs, with support for subdomains and optional fullvideo parameter.
+- _TESTS
+  - Contains sample URLs and expected output structure (id, ext, title pattern, age_limit, is_live). Includes a test to ensure offline rooms are skipped.
+
+- _ROOM_OFFLINE
+  - Constant string used to detect offline rooms when no stream URL is found.
+
+Core method: _real_extract(self, url)
+- Workflow:
+  1) video_id = self._match_id(url)
+     - Extracts the room/identity portion from the URL.
+
+  2) webpage = self._download_webpage('https://chaturbate.com/%s/' % video_id, video_id, headers=self.geo_verification_headers())
+     - Fetches the room page using geo-verification headers to respect geolocation restrictions.
+
+  3) Collect candidate m3u8 URLs via multiple strategies:
+     a) Attempt to read initialRoomDossier JSON and extract hls_source:
+        - Uses _parse_json on a value acquired via a regex that pulls JSON from the page.
+        - If found, add hls_source (via url_or_none) to found_m3u8_urls.
+     b) If none found, search for obfuscated URLs in the page:
+        - Looks for patterns like \\u0027http... .m3u8... and decodes them.
+        - Adds to found_m3u8_urls.
+     c) If still none, search for standard quoted http... .m3u8 URLs:
+        - Adds to found_m3u8_urls.
+
+  4) Normalize URLs:
+     - Build m3u8_urls by combining pairs of variants for each found URL:
+       - For each found URL, derive m3u8_fast_url (same as found) and m3u8_no_fast_url (replace '_fast' with '').
+       - Add unique URLs to m3u8_urls.
+     - This aims to pick both fast and normal (slow) streaming variants if present.
+
+  5) If no m3u8 URLs found:
+     - Attempt to extract a readable error message from the HTML using two regex patterns targeting common UI elements.
+     - If no explicit error, check for offline indicators in the page (ROOM_OFFLINE, 'offline_tipping', 'tip_offline').
+     - If an error is identified, raise ExtractorError(error, expected=True). If no error, raise ExtractorError('Unable to find stream URL').
+
+  6) Build formats from m3u8 URLs:
+     - For each m3u8_url in m3u8_urls:
+       - Determine m3u8_id as 'fast' if the URL contains _fast, 'slow' otherwise.
+       - Use self._extract_m3u8_formats with:
+         - ext='mp4', m3u8_id=m3u8_id, live=True
+         - preference=-10 when m3u8_id == 'fast' (to prefer fast streams for ffmpeg)
+         - fatal=False to not fail extraction if individual URL parsing fails
+     - Accumulate formats and sort them via self._sort_formats(formats).
+
+  7) Return metadata dictionary:
+     - id: video_id
+     - title: self._live_title(video_id) (derived live title)
+     - thumbnail: 'https://roomimg.stream.highwebmedia.com/ri/%s.jpg' % video_id
+     - age_limit: self._rta_search(webpage) (age restriction inferred from page)
+     - is_live: True
+     - formats: the collected format objects
+
+Important implementation details
+- Multiple layered strategies to locate m3u8 streams to handle varying page structures:
+  - JSON data extraction from initialRoomDossier
+  - Decoding obfuscated URLs embedded in the page (Unicode escapes)
+  - Direct extraction of plain URLs
+- Deduplication and normalization of m3u8 URLs by generating both fast and normal variants and avoiding duplicates.
+- Robust error handling:
+  - If no stream URL is found, the code tries to extract a user-friendly error message from page content and also detects common offline indicators.
+  - Raises ExtractorError with the extracted error message or a generic "Unable to find stream URL" message.
+- Live stream handling:
+  - The extractor marks streams as live (is_live = True) and uses live-specific M3U8 extraction with preference for the fast variant when present.
+- Metadata and visuals:
+  - Title derived via _live_title(video_id) for live rooms.
+  - Thumbnail associated with the room (patterned URL using the video_id).
+  - Age restriction inferred via _rta_search(webpage).
+
+Helpers used (inherited or imported):
+- _match_id, _download_webpage, _parse_json, _search_regex, url_or_none, lowercase_escape
+- _extract_m3u8_formats, _sort_formats
+- _live_title, _rta_search
+- ExtractorError for error signaling
+
+Overall, this extractor focuses on retrieving live m3u8 streams from Chaturbate room pages, with resilient URL discovery, explicit handling for offline rooms, and proper metadata for consumption by youtube-dl.

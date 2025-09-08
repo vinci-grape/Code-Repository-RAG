@@ -1,0 +1,72 @@
+Here is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/curiositystream.py:
+
+What it implements
+- CuriosityStream extractor support for:
+  - Individual videos (CuriosityStreamIE)
+  - Collections/series (CuriosityStreamCollectionIE)
+  - Shared API access and common login/auth via a base class (CuriosityStreamBaseIE)
+
+Key classes and responsibilities
+- CuriosityStreamBaseIE
+  - Inherits from InfoExtractor.
+  - Handles API base URL, authentication, and error handling.
+  - _real_initialize: reads login info (email/password) and performs a login request to obtain an auth token, stored in self._auth_token.
+  - _call_api(path, video_id, query=None): calls CuriosityStream API endpoints using the base URL, adds X-Auth-Token header when authenticated, passes optional query parameters, and returns the data payload. Delegates error handling to _handle_errors.
+  - _handle_errors(result): inspects API response for error messages and raises ExtractorError with a user-friendly message if present.
+  - Common constants: _NETRC_MACHINE = 'curiositystream', _API_BASE_URL = 'https://api.curiositystream.com/v1/'.
+
+- CuriosityStreamIE (video extractor)
+  - IE_NAME = 'curiositystream'
+  - _VALID_URL matches CuriosityStream video URLs: https://(app.)curiositystream.com/video/<id>
+  - _TEST provides an example for testing (id=2, expected mp4, title, description, etc.).
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Builds a list of formats by querying the API for both m3u8 and mpd encodings:
+      - For each encoding_format in ('m3u8', 'mpd'):
+        - media = self._call_api('media/<video_id>', video_id, query={'encodingsNew': 'true', 'encodingsFormat': encoding_format})
+        - Iterates over media['encodings']:
+          - Uses master_playlist_url for m3u8 to extract formats via _extract_m3u8_formats (mp4 container, hls id).
+          - Uses master_playlist_url for mpd to extract formats via _extract_mpd_formats (dash id).
+          - If encoding has direct url or file_url, builds additional format entries:
+            - Collects common fields: width, height, video_bitrate, audio_bitrate, size_in_bytes, video_codec, audio_codec, container_type.
+            - For each of (encoding_url, file_url):
+              - If RTMP URL is detected (regex for rtmpl/rtmpe), builds an RTMP format with url, play_path, app, ext=flv, format_id='rtmp'.
+              - Otherwise, treats as HTTP(s) URL with format_id='http'.
+              - Appends all formats to the list.
+    - Sorts formats with self._sort_formats(formats).
+    - title = media['title']
+    - Subtitles: collects from media['closed_captions'] into a dict keyed by language code, each with a list of {'url': sub_url}.
+    - Returns a dict with id, formats, title, description, thumbnail (prioritizing image_large, then image_medium, then image_small), duration, tags, subtitles.
+
+- CuriosityStreamCollectionIE (collection/series extractor)
+  - IE_NAME = 'curiositystream:collection'
+  - _VALID_URL matches collections and series URLs.
+  - _TESTS includes multiple scenarios (app curio collection, non-app URLs with only_matching).
+  - _real_extract(url):
+    - collection_id = extracted ID from URL.
+    - collection = self._call_api('collections/' + collection_id, collection_id)
+    - Builds a playlist of entries by converting each media item into a video URL result:
+      - media_id = stringified media['id']
+      - entry = self.url_result('https://curiositystream.com/video/<media_id>', CuriosityStreamIE.ie_key(), media_id)
+    - Returns a playlist_result with entries, collection_id, title, and description.
+
+Important implementation details
+- Authentication
+  - Uses a NETRC-backed login routine via _real_initialize; stores token in self._auth_token.
+  - All API calls include X-Auth-Token header when token is present.
+- API interaction and error handling
+  - Centralized _call_api for making API requests and immediately checking _handle_errors.
+  - _handle_errors gracefully surfaces API error messages to the user.
+- Formats extraction
+  - Supports both m3u8 (HLS) and mpd (MPEG-DASH) encodings via _extract_m3u8_formats and _extract_mpd_formats.
+  - Also handles direct HTTP URLs and RTMP URLs with appropriate format metadata (rtmp vs http).
+  - Builds format dicts with common video/audio properties when available: width, height, vbr, abr, filesize, vcodec, acodec, container_type.
+  - Uses a combination of master_playlist_url and individual encoding URLs to populate formats.
+  - Subtitles are pulled from media['closed_captions'] with language code resolution (prefer code, then language, default 'en').
+- Video metadata
+  - title, description, thumbnail (image_large / image_medium / image_small), duration, tags are extracted from the media data.
+- Collections
+  - Produces a playlist of video entries by resolving each media item into an individual CuriosityStream video URL, leveraging CuriosityStreamIE for extraction, and returns a playlist with title/description.
+
+Overall
+- The file provides a robust integration with CuriosityStream’s API, enabling video extraction (including multiple encodings, RTMP/HTTP formats, and subtitles) and collection-based playlists, with authentication support and consistent error handling.

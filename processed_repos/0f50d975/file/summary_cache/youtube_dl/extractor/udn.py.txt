@@ -1,0 +1,64 @@
+Summary:
+- Purpose: A YouTube-DL extractor for United Daily News (UDN) embedded videos. It handles both embed and play URLs, fetches video information from the page, resolves direct video URLs, supports YouTube as a fallback, and builds a list of available formats.
+
+- Key class: UDNEmbedIE (inherits from InfoExtractor)
+  - Description: IE_DESC = '聯合影音'
+  - URL patterns:
+    - Protocol-relative: //video.udn.com/embed/news/<id>
+    - Protocol-relative: //video.udn.com/play/news/<id>
+    - Valid URL prefix: http(s):// plus the above
+  - Tests: _TESTS contains cases for:
+    - A typical embed URL returning id, ext, title, thumbnail, with skip_download and a JSON parse warning in tests
+    - Alternate http(s) forms and play/embed variations
+
+- Extraction flow (_real_extract):
+  - video_id = match from URL
+  - page = download the webpage
+  - Attempt to extract a JavaScript options object:
+    - options_str from var options = ...;
+    - trans_options_str = js_to_json(options_str)
+    - options = _parse_json(trans_options_str, 'options', fatal=False) or {}
+  - If options is non-empty:
+    - video_urls = options['video']
+    - title = options['title']
+    - poster = options.get('poster')
+  - Else (fallback path):
+    - video_urls = _parse_json(_html_search_regex('"video"\s*:\s*({.+?})\s*,', trans_options_str, 'video urls'), 'video urls')
+    - title = _html_search_regex(r"title\s*:\s*'(.+?)'\s*,", options_str, 'title')
+    - poster = _html_search_regex(r"poster\s*:\s*'(.+?)'\s*,", options_str, 'poster', default=None)
+
+- Special handling:
+  - If video_urls contains a YouTube URL, return a YouTube extractor result: self.url_result(video_urls.get('youtube'), 'Youtube')
+
+- Formats extraction:
+  - Iterate over video_urls items: (video_type, api_url)
+  - Skip if api_url is falsy
+  - Retrieve actual video URL by downloading the page at compat_urljoin(url, api_url)
+  - ext = determine_ext(video_url)
+  - If ext == 'm3u8': add formats via _extract_m3u8_formats(video_url, video_id, ext='mp4', m3u8_id='hls')
+  - If ext == 'f4m': add formats via _extract_f4m_formats(video_url, video_id, f4m_id='hds')
+  - Else (direct video file, e.g., mp4):
+    - Build a format dict: {'url': video_url, 'format_id': 'http-' + video_type}
+    - Try to parse height and tbr from the file name with regex _(?P<height>\d+)p_(?P<tbr>\d+)\.mp4
+    - If matched, set height and tbr accordingly
+    - Append the format to formats
+
+- Post-processing:
+  - self._sort_formats(formats)
+  - Return a dictionary with:
+    - 'id': video_id
+    - 'formats': formats
+    - 'title': title
+    - 'thumbnail': poster
+
+- Implementation details:
+  - Uses js_to_json to convert a JavaScript object string to JSON
+  - Falls back to alternative extraction if the primary options object isn’t available
+  - Uses determine_ext to distinguish m3u8/f4m/other formats
+  - Uses compat_urlparse for URL joining
+  - Returns a dict compatible with YouTube-DL’s standard InfoExtractor outputs
+
+- Important behavior notes:
+  - If any embedded video URL point to YouTube, the extractor delegates to the YouTube extractor.
+  - The tests expect a potential JSON parsing warning in one case, handled by fatal=False so extraction can continue.
+  - The code prefers HLS (m3u8) and fragmented formats via existing helper extractors when appropriate; otherwise it builds straightforward HTTP MP4 formats.

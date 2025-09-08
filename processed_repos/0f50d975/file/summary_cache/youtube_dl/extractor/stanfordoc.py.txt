@@ -1,0 +1,80 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/stanfordoc.py
+
+What it does
+- Implements an extractor for Stanford Open ClassRoom content to be used by youtube-dl.
+- Supports three levels of pages:
+  - Root page: Stanford OpenClassroom HomePage (playlist of courses)
+  - Course page: a course listing with multiple videos (playlist of videos)
+  - Video page: a specific video (direct video URL and metadata)
+
+Main class
+- StanfordOpenClassroomIE(InfoExtractor)
+  - IE_NAME: 'stanfordoc'
+  - IE_DESC: 'Stanford Open ClassRoom'
+  - _VALID_URL: Complex regex that matches:
+    - Root HomePage
+    - Course pages: MainFolder/CoursePage.php with course param
+    - Video pages: MainFolder/VideoPage.php with course and video params
+  - _TEST: Example test case with a specific video URL, expected id, ext, and title
+
+Key methods and logic
+- _real_extract(self, url)
+  - Parses URL with the _VALID_URL regex to determine the type of page being processed:
+    1) Specific video (course and video present)
+       - Constructs baseUrl = http://openclassroom.stanford.edu/MainFolder/courses/{course}/videos/
+       - xmlUrl = baseUrl + {video}.xml
+       - Downloads and parses the XML metadata
+         - Reads title from ./title
+         - Reads video file path from ./videoFile
+       - Returns an info dict:
+         - id: "{course}_{video}"
+         - title: value from XML
+         - url: full http URL to the video file
+         - uploader, upload_date: None (not provided)
+       - If XML is invalid (missing tags), raises ExtractorError('Invalid metadata XML file')
+    2) Course page (only course present)
+       - Creates a playlist-style info dict:
+         - id: course
+         - _type: 'playlist'
+         - title: extracted from the course page's <h1> tag (fallback to course id)
+         - description: extracted from <description> tag (optional)
+         - uploader, upload_date: None
+       - Downloads the course page HTML
+       - Finds all links to videos using regex: <a href="VideoPage.php?...">
+       - Builds entries as absolute URLs:
+         - entry URL: http://openclassroom.stanford.edu/MainFolder/{unescaped_link}
+         - Uses url_result to create per-video entries
+       - Returns the playlist info with entries
+    3) Root page (neither course nor video parameter present)
+       - Creates a root playlist:
+         - id: 'Stanford OpenClassroom'
+         - _type: 'playlist'
+         - title: same as id
+         - uploader, upload_date: None
+       - Downloads HomePage
+       - Finds all links to courses using regex: <a href="CoursePage.php?...">
+       - Builds entries as absolute URLs similarly to the course page
+       - Returns the root playlist with course entries
+
+Implementation details
+- Uses helper methods from InfoExtractor:
+  - _download_xml(url, video_id)
+  - _download_webpage(url, id, note=..., errnote=...)
+  - _html_search_regex(pattern, string, name, default=None, fatal=True)
+- Uses:
+  - unescapeHTML to clean links before constructing full URLs
+  - orderedSet to de-duplicate links while preserving order
+- Metadata extraction assumes:
+  - For video: XML contains <title> and <videoFile> tags
+  - For course page: HTML contains an <h1> with the title and an optional <description> tag
+  - Video/course links are found with specific HTML patterns:
+    - Video links: <a href="VideoPage.php?...">
+    - Course links: <a href="CoursePage.php?...">
+
+Notes and considerations
+- URL handling supports both http and https (via _VALID_URL).
+- The code builds absolute URLs by prefixing with http://openclassroom.stanford.edu/MainFolder/.
+- The approach is resilient to missing optional data (description, uploader/date) but requires valid metadata XML for a specific video.
+- The structure follows youtube-dl conventions: individual videos yield direct URLs; courses and root pages yield playlists of entries.
+
+In short, this extractor navigates Stanford Open ClassRoom pages at three levels (root, course, video), retrieves metadata, and emits either direct video URLs (for individual videos) or playlists listing the available videos for a course or the entire site.

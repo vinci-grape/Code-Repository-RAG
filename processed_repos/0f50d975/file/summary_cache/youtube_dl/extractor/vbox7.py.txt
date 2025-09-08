@@ -1,0 +1,73 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/vbox7.py
+
+Purpose
+- Implement a Youtube-DL (yt-dlp compatible) extractor for VBox7 videos. It supports both direct video pages and embedded/iframe URLs, handles multiple video formats (MPD/DASH, HLS/M3U8, and MP4 fallbacks), and constructs a complete video information dictionary.
+
+Main class
+- Vbox7IE(InfoExtractor)
+  - _VALID_URL: Regex to match VBox7 video pages (play: URLs and embedded/external player URLs) and capture the video id (hex string).
+  - _EMBED_REGEX: Regex to extract embed src URLs from an iframe on a page.
+  - _GEO_COUNTRIES: List of geo-restricted countries (['BG'] for Bulgaria).
+  - _TESTS: Example test cases including expected info, warnings, and some “only_matching” cases for embeds.
+
+Key methods and functionality
+- _extract_url(cls, webpage)
+  - Class method to extract the actual video URL from a page by applying the _EMBED_REGEX. Returns the embed URL when found.
+
+- _parse_json(self, json_string, video_id, *args, **kwargs)
+  - Overridden to handle ld+json (JSON-LD) that may contain problematic character combinations.
+  - If the string looks like ld+json (contains "@context"), optionally applies a transform function fix_chars to sanitize the JSON (replacing raw CRLFs inside quoted strings with escaped \n).
+  - Delegates to the base class _parse_json with the potentially modified transform_source argument.
+
+- _real_extract(self, url)
+  - Core extraction workflow:
+    - Extract video_id from the URL and rewrite a canonical play URL: https://vbox7.com/play:<video_id>.
+    - Fetch options via https://www.vbox7.com/aj/player/item/options with query vid=video_id and Referer header set to the canonical play URL.
+    - If the response contains an error, raise ExtractorError.
+    - src_url = response.options.src (the actual media URL).
+    - fmt_base = basename(src_url) up to the first extension, then up to the last underscore. This is used to derive format URLs and names.
+    - Geo-check: if fmt_base is 'na' or 'vn', raise geo restriction to BG ( Bulgaria ).
+    - ext = determine_ext(src_url)
+      - If ext == 'mpd' (DASH): attempt to parse MPD formats via _extract_mpd_formats_and_subtitles (fatal=False). If parsing fails (KeyError), warn and proceed with empty formats.
+      - elif ext != 'm3u8' (neither DASH nor HLS): build a minimal formats list with the direct src_url and empty subtitles.
+      - If src_url exists:
+        - Build HLS formats by constructing a .m3u8 URL from fmt_base and src_url base: {base(src_url) + fmt_base}.m3u8, using _extract_m3u8_formats (fatal=False) and m3u8_id='hls'. Extend formats with these.
+        - Also build MP4-based fallbacks:
+          - Determine highest resolution from response.options.highestRes or default to (1080, 720, 480, 240, 144).
+          - Build a list of mp4 formats using the pattern: {fmt_base}_{res}.mp4 with height=res and format_id like http-<res>.
+          - Extend formats with these MP4 entries.
+      - Sort formats with _sort_formats(formats).
+    - Download the page to extract metadata (webpage). Try to parse JSON-LD data from the page via _search_json_ld to populate info.
+    - Title: If not found in the JSON-LD data, fill from response.options.title or fall back to OG title from the page.
+    - Merge data into a single info dict using merge_dicts:
+      - id: video_id
+      - formats: collected formats
+      - subtitles: collected subtitles (or None)
+      - uploader, timestamp (converted from ago to epoch-ish using current time), duration (float)
+        - timestamp: converts “ago” field (minutes) into an epoch-like value based on now.
+    - Thumbnail: if not provided in info, set a thumbnail by combining the found thumbnail URL (or OG thumbnail) with a secure base via _proto_relative_url.
+    - Return the final info dictionary.
+
+Implementation details and design choices
+- Robust handling of multiple formats:
+  - If the media endpoint returns mpd (DASH), it tries to parse MPD formats; if parsing fails, it proceeds with an empty formats list but logs a warning.
+  - If the endpoint returns m3u8 (HLS), it extracts HLS formats; it always attempts to gather HLS formats when a src_url exists.
+  - A fallback set of MP4 formats is generated from a list of common resolutions (1080, 720, 480, 240, 144) using the base name pattern src_base_res.mp4 (derived from fmt_base).
+- Geo restriction logic:
+  - VBox7 sometimes restricts to specific regions. The extractor checks format base names and triggers geo restriction to Bulgaria (BG) when needed.
+- JSON-LD handling:
+  - Some VBox7 responses include ld+json with invalid/newline characters inside strings. The code overrides _parse_json to optionally sanitize such content by escaping newlines inside quoted strings, ensuring valid JSON for parsing.
+- Metadata extraction:
+  - Title is sourced from JSON options when available or falls back to OpenGraph title from the page.
+  - Uploader, timestamp, and duration are extracted from the options and transformed as needed (timestamp computed from now minus ago, duration as float).
+  - Thumbnails: uses available info or derives from OG data; ensures a valid thumbnail URL.
+- Resilience:
+  - Uses fatal=False when parsing MPD/HLS to avoid hard failures if those manifests are unavailable or malformed.
+  - Safely handles cases where src_url or certain fields may be missing, using defaults or fallbacks.
+
+Notes on tests
+- _TESTS include two real video pages with expected metadata (title, description, timestamp, duration, thumbnail, etc.) and expected warnings such as “Unable to download webpage” or “Failed to download m3u8 information,” illustrating partial recoveries when certain formats aren’t retrievable.
+- Two “only_matching” tests cover embed-related URLs to ensure proper extraction of embedded sources.
+
+In short
+- This extractor fetches VBox7 video options, derives a media URL, pulls available formats (DASH, HLS, and MP4 fallbacks), handles geo restrictions, parses metadata (including JSON-LD with a robust fallback), and returns a complete video information dictionary suitable for downloads.

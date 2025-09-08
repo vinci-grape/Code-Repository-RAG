@@ -1,0 +1,47 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/streamcloud.py
+
+- Purpose
+  - Implement a YouTube-dl extractor (StreamcloudIE) for the streaming site streamcloud.eu to retrieve a direct video URL and metadata.
+
+- Key class
+  - StreamcloudIE(InfoExtractor)
+    - IE_NAME: 'streamcloud.eu'
+    - _VALID_URL: Matches URLs like http(s)://streamcloud.eu/<id> or http(s)://streamcloud.eu/<id>/<fname>.html
+    - _TESTS: Includes tests demonstrating extraction behavior and an EU-only access note (first test is skipped unless EU access is available).
+
+- Main functionality (_real_extract)
+  - Extract video_id from the URL using _match_id.
+  - Reconstruct a canonical page URL: http://streamcloud.eu/<video_id>.
+  - Download the initial page (orig_webpage) to check if the video exists (looks for '>File Not Found<' and raises ExtractorError if missing).
+  - Parse form fields from the page:
+    - Collect all input elements with type="hidden" or type="submit" and capture name and value attributes.
+    - This yields a list of (name, value) pairs to be submitted in a POST request.
+  - Sleep for 6 seconds (_sleep(6, video_id)) to bypass basic anti-bot protections.
+  - Submit a POST request to the same URL with the encoded form data (urlencode_postdata(fields)) and Content-Type: application/x-www-form-urlencoded.
+  - Parse the response (webpage) to extract:
+    - title: via an HTML regex looking for the content inside an <h1> tag.
+    - video_url: via a regex searching for file: "URL" (the direct video URL).
+  - If extraction fails, attempt to provide a friendlier error:
+    - Look for a message inside a div with class that includes msgboxinfo.
+    - If found, raise ExtractorError with "<IE_NAME> said: <message>".
+    - Otherwise re-raise the original error.
+  - thumbnail (optional): extract image URL from image: "URL" if present (non-fatal).
+  - Return a dict with:
+    - id: video_id
+    - title: extracted title
+    - url: direct video URL
+    - thumbnail: optional thumbnail URL
+    - http_headers: includes Referer set to the page URL (to satisfy hotlink protection on some streams)
+
+- Important implementation details
+  - The extractor relies on a two-step page interaction:
+    1) fetch initial page to collect hidden/form fields.
+    2) POST those fields to obtain the actual page containing the video URL.
+  - Uses a deliberate delay (_sleep) to mimic human interaction and bypass simple anti-bot measures.
+  - Robust error handling: if the expected fields/title/video URL aren’t found, it attempts to surface any embedded error message from the page.
+  - The returned video request includes a Referer header, which some servers require to authorize the video request.
+
+- Dependencies and helpers
+  - Inherits from InfoExtractor.
+  - Uses utils ExtractorError and urlencode_postdata for error handling and form submission.
+  - Uses helper methods _download_webpage, _html_search_regex, _search_regex, _sleep, and _match_id provided by the base class.

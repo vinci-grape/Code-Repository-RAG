@@ -1,0 +1,42 @@
+- Purpose: A YouTube-DL extractor for Mojvideo that retrieves video metadata and the actual video URL from Mojvideo’s player API.
+
+- Class and inheritance:
+  - MojvideoIE(InfoExtractor): Implemented as a specific extractor for mojvideo.com.
+
+- URL matching:
+  - _VALID_URL = r'https?://(?:www\.)?mojvideo\.com/video-(?P<display_id>[^/]+)/(?P<id>[a-f0-9]+)'
+  - Supports http/https and optional www. Captures:
+    - display_id: human-readable part of the URL
+    - id: video hash (lowercase hex)
+
+- Test data:
+  - _TEST contains a sample URL, expected MD5 for the video, and an info_dict with id, display_id, ext (mp4), title, thumbnail pattern, and duration.
+
+- Core logic (_real_extract):
+  1) Parse URL to obtain video_id (id) and display_id.
+  2) Fetch the player API: http://www.mojvideo.com/playerapi.php?v=<video_id>&t=1
+     - Note: The site’s XML is malformed; the code handles this gracefully.
+  3) Error handling:
+     - If the response contains <error>true</error>, extract error description from <errordesc>...</errordesc> and raise ExtractorError with a readable message, marking it as expected.
+  4) Extract metadata from the API response:
+     - title: from <title>...</title>
+     - video_url: from <file>...</file> (the actual media URL)
+     - thumbnail: from <preview>...</preview> (optional)
+     - duration: from <duration>...</duration> (optional; converted via parse_duration)
+  5) Return a dict with:
+     - id: video_id
+     - display_id: display_id
+     - url: video_url
+     - title: title
+     - thumbnail: thumbnail (may be None)
+     - duration: duration (may be None)
+
+- Implementation details:
+  - Uses _download_webpage to fetch the API data.
+  - Uses _html_search_regex for extracting fields with appropriate fatal flags (fatal=False for optional fields like thumbnail/duration).
+  - Uses parse_duration to convert duration strings to seconds.
+  - Uses self.IE_NAME in error messaging to identify the extractor.
+  - Handles malformed XML by parsing plain text tags rather than robust XML parsing.
+
+- Summary of main functionality:
+  - Given a Mojvideo video URL, this extractor pulls the video’s internal ID, queries Mojvideo’s player API, handles potential errors, and returns essential metadata and the direct video URL (with optional thumbnail and duration).

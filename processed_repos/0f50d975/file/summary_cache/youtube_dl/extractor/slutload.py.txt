@@ -1,0 +1,45 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/slutload.py
+
+What it does
+- Implements a YouTube-dl extractor for slutload.com videos (SlutloadIE).
+- Supports extracting video information from two page formats:
+  - The embed_player page (embedded player) that may contain direct video URLs.
+  - The regular video page (video/_/{id}/) that provides HTML5 video entries.
+
+Key class and methods
+- SlutloadIE(InfoExtractor)
+  - _VALID_URL: Regular expression matching slutload video pages, embed pages, and watch pages. Captures the video id as 'id'.
+  - _TESTS: A set of example URLs with expected results to validate extraction, including:
+    - A standard video page returning id, mp4 ext, title, 18+ age_limit, and a thumbnail URL pattern.
+    - Some “only_matching” tests for other variants (mobile site, embed, watch) to ensure URL matching works without full extraction.
+  - _real_extract(self, url):
+    - Derives video_id from the URL using _match_id.
+    - Attempts to fetch the embed page: http://www.slutload.com/embed_player/{video_id} with fatal=False (so it won’t crash if unavailable).
+    - If embed_page exists:
+      - Defines helper extract(what) to pull data-video-<what> attributes from the embed page using a regex that handles quoted values robustly.
+      - video_url = extract('url')
+      - If video_url found:
+        - title extracted from the embed page’s <title> tag (fallback to video_id if missing).
+        - Return a dict: id, url (video_url), title, thumbnail (extract('preview')), age_limit: 18.
+    - If embed approach fails or no video_url:
+      - Fetch the standard video page: http://www.slutload.com/video/_/{video_id}/
+      - Extract title from <h1><strong>Title</strong></h1> and strip whitespace.
+      - Use _parse_html5_media_entries(url, webpage, video_id) to obtain HTML5 video entries; take the first one [0].
+      - Update that info dict with id, title, and age_limit: 18.
+      - Return the info dict.
+
+Important implementation details
+- Robust URL handling: _VALID_URL covers three page types (video, embed_player, watch) and subdomains (including mobile.slutload.com) via (?:\w+\.)?.
+- Embed page extraction path:
+  - The inner extract function reads attributes data-video-url and data-video-preview from the embed page using a careful regex pattern to correctly capture quoted URLs.
+  - If a video URL is found on the embed page, the extractor returns a compact metadata dict with id, url, title, thumbnail, and age_limit.
+- Fallback path:
+  - If the embed page isn’t usable, the extractor falls back to parsing the standard video page.
+  - It pulls the main title from the page and delegates to _parse_html5_media_entries to get actual video URLs and formats, then augments the result with id and title.
+- Age restriction: Both paths set age_limit to 18, indicating explicit content.
+- Resilience: The embed fetch uses fatal=False to avoid errors if the embed page is unavailable, allowing a graceful fallback to the regular video page.
+- Metadata returned:
+  - Primary path returns: id, url, title, thumbnail (optional), age_limit.
+  - Fallback path returns the first HTML5 media entry augmented with id, title, age_limit.
+
+Overall, this extractor provides two strategies to obtain a direct video URL from slutload: first try the embed-based URL extraction, then fall back to parsing the standard video page’s HTML5 media entries, with appropriate title and metadata extraction.

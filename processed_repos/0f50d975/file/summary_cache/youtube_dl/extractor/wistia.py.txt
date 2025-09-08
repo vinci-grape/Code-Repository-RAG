@@ -1,0 +1,84 @@
+Concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/wistia.py
+
+Overview
+- Implementations of YouTube-DL extractors for Wistia videos and playlists.
+- Core flow: locate a Wistia video/playlist URL, fetch the embed/config JSON, parse media assets to build formats, thumbnails, subtitles, and metadata.
+
+Key classes
+- WistiaBaseIE (InfoExtractor)
+  - Shared logic for fetching and parsing Wistia embed configurations.
+  - Important methods:
+    - _download_embed_config(config_type, config_id, referer)
+      - Builds the embed config URL using the type (e.g., 'media', 'playlist') and ID.
+      - Fetches JSON via _download_json with a Referer header (uses base_url if the referer isn’t a URL).
+      - If the response is a dict with an 'error' key, raises ExtractorError.
+      - Returns the embed configuration data.
+    - _extract_media(embed_config)
+      - Parses embed_config['media'] to extract:
+        - video_id (hashedId), title, and description.
+        - formats: iterates data['assets'], filters out non-video/preview assets, processes stills as thumbnails, and builds video formats from other assets.
+        - handling for HLS (m3u8) assets vs direct container/extension assets.
+        - special handling for audio assets (vcodec set to 'none') and video assets (width/height, vcodec from asset data).
+        - for m3u8, creates a TS variant (ext 'ts') and a separate mp4 variant with protocol 'm3u8_native'.
+        - thumbnails built from assets of type 'still' or 'still_image'.
+        - subtitles built from data.get('captions'), pointing to .vtt caption URLs.
+        - duration, timestamp, and description derived from data.
+      - Returns a dictionary with id, title, description, formats, thumbnails, duration, timestamp, subtitles.
+- WistiaIE (WistiaBaseIE)
+  - _VALID_URL: Accepts URLs like wistia:<id> or embed/iframe/medias URLs with the base Wistia embed path.
+  - _TESTS: Includes a test for a video with an HLS video, plus several “only_matching” tests to verify URL patterns are detected.
+  - Static methods for URL extraction from webpages:
+    - _extract_url(webpage): returns the first URL found by _extract_urls(webpage).
+    - _extract_urls(webpage): finds possible Wistia IDs in:
+      - meta/iframe/script src patterns pointing to embed URLs (iframe/medias variants).
+      - div class containing wistia_async_<id>.
+      - data-wistia-id, Wistia.embed(...), or id="wistia_<id>" patterns.
+      Returns a list of URLs (or wistia:<id> for internal references).
+  - _real_extract(self, url)
+    - Extracts video_id using _match_id(url).
+    - Downloads embed config for type 'media' with that ID.
+    - Delegates to _extract_media to produce the final info dict.
+- WistiaPlaylistIE (WistiaBaseIE)
+  - _VALID_URL: Matches playlists under the Wistia embed base (https://.../embed/playlists/<id>).
+  - _TEST: Basic playlist test asserting id and playlist_count.
+  - _real_extract(self, url)
+    - Extracts playlist_id via _match_id(url).
+    - Downloads embed config for type 'playlist'.
+    - Iterates over playlist['medias'], pulling each media’s embed_config and extracting media data via _extract_media.
+    - Returns a playlist_result(entries, playlist_id).
+
+Important implementation details
+- URL patterns and ID handling
+  - IDs are 10-character lowercase alphanumeric strings: _VALID_ID_REGEX = (?P<id>[a-z0-9]{10}).
+  - _VALID_URLs cover both wistia: style references and embedded iframe/medias URLs.
+- Embed config retrieval
+  - _download_embed_config builds URLs like http://fast.wistia.com/embed/medias/{id}.json or http://fast.wistia.com/embed/playlists/{id}.json.
+  - Referer header handling ensures servers that check Referer accept requests; if referer isn’t a URL, falls back to base URL.
+  - Basic error handling: if the returned embed_config is a dict with an 'error' key, it raises ExtractorError.
+- Media asset processing
+  - Assets are filtered by status and type:
+    - Skip if status is not None and not equal to 2 (likely not ready) or if type is 'preview' or 'storyboard'.
+    - Still images ('still', 'still_image') go to thumbnails.
+    - Other assets become formats with:
+      - format_id: based on type; if type ends with '_video' and display_name is present, format_id becomes "<base>-<display_name>".
+      - For audio (display_name == 'Audio'), vcodec is set to 'none'.
+      - For video: width, height, vcodec derived from asset ('codec').
+      - tbr (bitrate) is set if available.
+      - If container is 'm3u8' or ext is 'm3u8', special handling:
+        - Create a TS variant (ext 'ts', adjust format_id and URL) and add to formats.
+        - Original asset is updated to ext 'mp4' with protocol 'm3u8_native' (enables native HLS handling).
+      - Otherwise, include container, ext, and filesize.
+- Thumbnails and captions
+  - Thumbnails collected from still assets with width, height, and filesize when available.
+  - Subtitles built from data['captions'] with keys as language codes and URLs pointing to VTT captions via the embed base.
+- Playlist extraction
+  - For playlists, fetches the playlist embed config and iterates media entries to collect individual media embed_config objects for extraction.
+  - Returns a playlist with all extracted entries and the playlist_id.
+- Testing and reliability
+  - Includes tests for HLS video extraction and various URL formats to ensure correct recognition and extraction.
+  - Covers both single videos and playlists.
+
+What this extractor achieves
+- Enables downloading Wistia videos (including HLS/m3u8) and thumbnails, with metadata such as title, description, duration, and upload date.
+- Supports Wistia playlists by aggregating individual video entries.
+- Robust URL extraction from webpages to identify embedded Wistia video IDs.

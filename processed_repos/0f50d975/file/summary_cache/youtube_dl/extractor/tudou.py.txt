@@ -1,0 +1,41 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/tudou.py
+
+- Purpose: Implements two extractors for Tudou content in youtube-dl: a playlist extractor and an album extractor.
+
+- TudouPlaylistIE
+  - IE_NAME: 'tudou:playlist'
+  - _VALID_URL: URLs matching http(s)://(www.)?tudou.com/listplay/<11-char-id>.html
+  - _TESTS: Includes a sample Tudou playlist URL and expected id, with a minimum playlist count.
+  - _real_extract(url):
+    - Extracts playlist_id from the URL.
+    - Downloads JSON from http://www.tudou.com/tvp/plist.action?lcode=<playlist_id>.
+    - Builds a list of entries by converting each item in the JSON's items array into a Tudou program page URL: http://www.tudou.com/programs/view/<icode>.
+    - Each entry uses:
+      - URL: the program page
+      - Extractor: 'Tudou'
+      - ID: item['icode']
+      - Title: item['kw']
+    - Returns a playlist_result containing all entries with the playlist_id as the playlist identifier.
+
+- TudouAlbumIE
+  - IE_NAME: 'tudou:album'
+  - _VALID_URL: URLs matching http(s)://(www.)?tudou.com/album(cover|play)/<11-char-id>
+  - _TESTS: Includes a sample Tudou album URL and expected id, with a minimum item count.
+  - _real_extract(url):
+    - Extracts album_id from the URL.
+    - Downloads JSON from http://www.tudou.com/tvp/alist.action?acode=<album_id>.
+    - Builds a list of entries similarly to the playlist extractor, converting each item in the JSON's items array into a Tudou program page URL: http://www.tudou.com/programs/view/<icode>.
+    - Each entry uses:
+      - URL: the program page
+      - Extractor: 'Tudou'
+      - ID: item['icode']
+      - Title: item['kw']
+    - Returns a playlist_result containing all entries with the album_id as the playlist identifier.
+
+Implementation details:
+- Both extractors rely on icode as the unique video identifier and kw as the video title.
+- The program page URL pattern is consistently http://www.tudou.com/programs/view/<icode>.
+- JSON endpoints used:
+  - Playlist: plist.action?lcode=<id>
+  - Album: alist.action?acode=<id>
+- Uses base class InfoExtractor utilities: _match_id, _download_json, url_result, and playlist_result.

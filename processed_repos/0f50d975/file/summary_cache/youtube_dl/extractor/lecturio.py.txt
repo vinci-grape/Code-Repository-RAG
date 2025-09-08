@@ -1,0 +1,106 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/lecturio.py.
+
+Purpose
+- Implement youtube-dl extractors for Lecturio (online medical/education platform) to fetch lectures and courses, including video formats, subtitles, and course playlists.
+- Supports multiple site variants (app.lecturio.com, lecturio.de) and German/de-localized content.
+
+Main classes
+1) LecturioBaseIE (InfoExtractor)
+- Provides shared login handling to access Lecturio API resources.
+- Constants:
+  - _API_BASE_URL: API endpoint for HTML5 content data.
+  - _LOGIN_URL: Lecturio login page.
+  - _NETRC_MACHINE: Credential lookup key.
+- _real_initialize: triggers login automatically when an extractor subclass is used.
+- _login:
+  - Retrieves credentials via _get_login_info (netrc or config). If none, skip.
+  - Opens login URL to set initial cookies, detects if already logged in.
+  - Submits login form with email, password, and remember-me option.
+  - Checks if login succeeded; on failure, extracts error messages from the HTML and raises ExtractorError.
+
+2) LecturioIE (Lecture extractor)
+- _VALID_URL: Handles URLs for individual lectures/videos from app.lecturio.com and lecturio.de, with multiple capture groups (nt, id) to support different URL shapes.
+- _real_extract(url):
+  - Parses URL to get either nt (slug) or id (lecture numeric id).
+  - Constructs API path:
+    - If lecture_id present: 'lectures/<lecture_id>.json' (via 'lectures/' + lecture_id).
+    - Else: 'lecture/<nt>.json' (via 'lecture/' + nt + '.json').
+  - Downloads video metadata JSON from API_BASE_URL + api_path.
+  - Title extraction: video['title'].
+  - If lecture_id missing, tries to infer it from video['productId'] or video['uid'] (e.g., split 'course_lecture' style identifiers).
+  - Formats extraction:
+    - Iterates video['content']['media'] entries; expects dicts with 'file'.
+    - Skips non-dict entries and items without 'file'; skips 'smil' formats.
+    - Determines file URL and extension; builds format dict with:
+      - 'url', 'format_id' (derived from label), 'filesize' (converted with invscale=1000 for KB/units).
+    - If label matches r'(\d+)p\s*\(([^)]+)\)', uses height from first group and swallows second group as new format_id.
+  - Subtitles and automatic captions:
+    - Reads video.get('captions').
+    - Each caption entry supplies a 'url' and language information (languageCode or parsed from URL).
+    - Determines lang and original_lang; selects subtitles or automatic_captions based on 'auto-translated' in label or presence of original_lang.
+    - Uses _CC_LANGS mapping to normalize language codes; stores entries under appropriate language keys.
+  - Returns:
+    - id: lecture_id or nt
+    - title
+    - formats
+    - subtitles
+    - automatic_captions
+- Notes:
+  - Leverages Lecturio login to access restricted data.
+  - Supports multiple format labeling schemes and caption types.
+
+3) LecturioCourseIE (Course extractor)
+- _VALID_URL: Handles Lecturio course URLs on app.lecturio.com (slug.course) and course content paths via #/course/c/<id>.
+- _TESTS: Includes example with a course playlist and metadata expectations; marked as requiring login credentials.
+- _real_extract(url):
+  - Extracts nt (slug) and course_id from URL.
+  - display_id is nt or course_id.
+  - API path:
+    - If course_id present: 'courses/' + course_id
+    - Else: 'course/content/' + nt + '.json'
+  - Downloads course JSON from API_BASE_URL + api_path.
+  - For each lecture in course['lectures']:
+    - lecture_id = str(lecture.get('id'))
+    - lecture_url: Use lecture['url'] joined with base URL if present; otherwise construct fallback URL "https://app.lecturio.com/#/lecture/c/<course_id>/<lecture_id>"
+    - Entry: self.url_result(lecture_url, ie=LecturioIE.ie_key(), video_id=lecture_id)
+  - Returns a playlist_result with:
+    - entries (lecture results)
+    - display_id
+    - course title
+    - cleaned course description (clean_html)
+
+4) LecturioDeCourseIE (Lecturio.de course extractor)
+- _VALID_URL: Matches lecturio.de course path with .kurs.
+- _TEST: Simple only_matching test example.
+- _real_extract(url):
+  - display_id from URL.
+  - Downloads the page HTML.
+  - Extracts lecture entries using a regex that captures data-lecture-id and the lecture URL (.vortrag).
+  - For each match:
+    - lecture_url = absolute URL joined from page
+    - lecture_id
+    - Append self.url_result(lecture_url, ie=LecturioIE.ie_key(), video_id=lecture_id)
+  - Attempts to extract a course title from the page.
+  - Returns a playlist_result with the collected entries, display_id, and title.
+
+Key implementation details
+- Login handling is centralized in LecturioBaseIE to ensure API calls can access restricted content.
+- API data model:
+  - Lectures JSON: video['title'], video['content']['media'] array for formats, video['captions'] array for subtitles.
+  - Formats are filtered and normalized; smil entries are ignored.
+  - Subtitles support both manual and automatic translations; language normalization via _CC_LANGS.
+- URL handling:
+  - Multiple URL formats supported per site (app.lecturio.com, lecturio.de).
+  - Falls back to constructing lecture URLs when not provided in JSON.
+- Output structure:
+  - Each lecture yields a list of video formats with URLs and optional height/filesize hints.
+  - Subtitles dictionaries keyed by language code, plus automatic_captions dictionary for auto-translated subtitles.
+  - Courses yield playlist entries pointing to individual lectures, enabling nested playlists.
+- Utilities used:
+  - URL joining, POST-encoded data, HTML sanitization, regex helpers, and safe type conversion helpers (int_or_none, float_or_none, str_or_none, url_or_none, determine_ext, urlencode_postdata, etc.).
+- Testing and behavior notes:
+  - Several tests require Lecturio account credentials; many tests are marked to skip without credentials.
+  - The code handles missing IDs gracefully by resolving IDs from API responses when possible.
+
+Overall
+- The file provides a comprehensive set of extractors to fetch Lecturio lectures and courses, with robust handling for different site variants and data formats, including video formats, captions, and recursive playlists. It requires login for most functionality and leverages a common API to obtain structured media data.

@@ -1,0 +1,30 @@
+- Purpose: MinotoIE is a youtube-dl extractor for Minoto Video content. It parses Minoto video pages or minoto: URIs, fetches metadata and available formats, and returns structured video information.
+
+- URL pattern and identification:
+  - _VALID_URL recognizes either a minoto: URL or an HTTP(S) URL pointing to play/iframe/embed.minoto-video.com with a numeric player_id and an alphanumeric video id.
+  - Captures two groups: player_id (defaulting to '1' if missing) and id (video_id).
+
+- Data source and parsing flow:
+  - _real_extract downloads a JSON-like data file from http://play.minoto-video.com/{player_id}/{video_id}.js using _download_json.
+  - Extracts video_metadata (title, description, thumbnail info) and video-files array describing available formats.
+
+- Formats handling:
+  - Iterates over video-files entries; skips entries without a 'url'.
+  - If container is 'hls':
+    - Uses formats.extend to add HLS formats with m3u8_id='hls' and fatal=False, enabling multiple streams from the HLS playlist.
+  - Otherwise (progressive or other containers):
+    - Builds a format dict with:
+      - format_id from profile.name-short and format_note from profile.name
+      - url and container
+      - tbr (bitrate), filesize, width, height (all processed with int_or_none)
+      - codecs parsed via parse_codecs(fmt.get('codecs'))
+  - After collecting all formats, sorts them with _sort_formats.
+
+- Metadata and return structure:
+  - Returns a dict with id (video_id), title (video_metadata['title']), description (video_metadata.get('description')), thumbnail (video_metadata.get('video-poster', {}).get('url')), and the list of formats.
+
+- Important implementation details:
+  - Uses int_or_none to safely convert numeric fields and avoid crashes when fields are missing or non-numeric.
+  - Uses parse_codecs to convert codec strings into a standard format.
+  - Uses a fallback for player_id ('1') if not present in the URL.
+  - Relies on a separate JS/JSON endpoint to supply both metadata and format information.

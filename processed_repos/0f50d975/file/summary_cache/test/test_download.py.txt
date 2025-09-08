@@ -1,0 +1,77 @@
+Concise but comprehensive summary of youtube-dl/test/test_download.py
+
+Purpose
+- Dynamically generate and run a battery of tests for youtube-dl extractors based on test case definitions provided by test.helper.gettestcases().
+- Validate both the information extracted (info_dict) and the resulting downloaded files (and associated .info.json) for correctness, including in playlist scenarios.
+
+Key components
+- Test class and helpers
+  - TestDownload (subclass of unittest.TestCase)
+    - Sets up multiprocessing support and a descriptive __str__ for test identification.
+    - setUp stores test definitions into self.defs.
+  - YoutubeDL (subclass of youtube_dl.YoutubeDL)
+    - __init__: aliases to_stderr to to_screen and initializes processed_info_dicts.
+    - report_warning: overridden to raise ExtractorError (fail tests on warnings).
+    - process_info: records processed info dictionaries and delegates to parent.
+  - _file_md5(fn): utility to compute MD5 of a file.
+  - _encode_str: ensures proper str type for test environment compatibility.
+
+- Test data and helpers
+  - defs = gettestcases(): loads test case definitions from test.helper.
+  - Various utilities imported from test.helper: expect_warnings, get_params, gettestcases, expect_info_dict, try_rm, report_warning.
+
+- Dynamic test generation
+  - generator(test_case, tname): factory that creates a test method for each test case.
+  - For each test_case:
+    - Resolves extractor(s) to test (name + optional add_ie dependencies).
+    - Determines if the case is a playlist test and prepares test_cases accordingly (playlist vs single video).
+    - Validates that each defined info_dict has required keys 'id' and 'ext'.
+    - Handles optional 'skip' messages and skips dependent IEs that are not WORKING.
+    - Builds parameters via get_params, modifies output template (outtmpl) to be unique per test.
+    - For playlists, sets extract_flat, playlistend, and skip_download by default.
+    - Creates a YoutubeDL instance (auto_init=False) and registers a progress hook to track finished filenames.
+    - Uses expect_warnings to enforce expected warnings for the test_case.
+    - Defines get_tc_filename(tc) to compute the expected file path for a test_case.
+    - Defines try_rm_tcs_files() to clean up generated files, including .part and .info.json.
+    - Attempts extraction with retry logic:
+      - Calls ydl.extract_info(test_case['url'], force_generic_extractor=...) and handles certain network-related exceptions (URLError, timeout, UnavailableVideoError, BadStatusLine, or 503 HTTPError with code 503).
+      - Retries up to RETRIES times; on final failure, issues a warning and aborts the test.
+      - On success, validates results.
+    - Playlist validation:
+      - Ensures res_dict['_type'] is 'playlist' or 'multi_video' and 'entries' exist.
+      - Validates overall info_dict against test_case['info_dict'].
+      - Validates playlist min/max/count/duration constraints if provided.
+    - Result normalization and per-entry validation:
+      - Normalizes to res_dict['entries'] for both single videos and playlists.
+      - For each tc in test_cases:
+        - Validates per-entry info_dict against tc['info_dict'].
+        - Handles dynamic IDs via 're:' placeholders by substituting the actual extracted id and restoring later if needed.
+        - Verifies the downloaded file exists and has been recorded in finished_hook_called.
+        - Optional size check (min size) and md5 validation if provided.
+        - Validates the corresponding .info.json content against tc['info_dict'].
+    - Cleanup in finally:
+        - Removes generated test files and .info.jsons for all test_cases.
+        - If a playlist test returns multiple entries, also removes extra files created by extractors that return full results when extract_flat is used.
+
+- Dynamic test attachment
+  - The bottom section iterates over all test_case in defs, creates a unique test method name (test_<name> or test_<name>_<n>), and attaches the generated test method to TestDownload.
+  - Each test_method stores its dependencies via add_ie and is added to the TestDownload class.
+
+Important implementation details
+- Network resilience: Tests retry up to RETRIES times on common network errors before giving up, to avoid false negatives due to transient issues.
+- Warnings handling: test suite converts warnings into ExtractorError (by overriding report_warning), ensuring tests fail if a warning would have been emitted during normal execution.
+- Info file verification: For each tested entry, the test compares the in-memory info_dict and also reads the produced .info.json to ensure consistency.
+- Playlist handling: Supports both single-video and playlist tests, with specific handling for extract_flat and playlist boundaries (min/max/count/duration).
+- Dynamic IDs: Supports tests that use a placeholder 're:' for IDs, validating that IDs can be mapped correctly post-extraction.
+- File integrity checks: Optional MD5 checksums and minimum file size checks are supported for downloaded outputs.
+- Clean-up: Ensures no test artifacts linger after tests, including for playlist tests which may produce multiple files.
+
+Workflow overview
+- Load test cases via gettestcases().
+- For each test case, dynamically create a unittest method that:
+  - Configures a YoutubeDL instance with test-specific parameters.
+  - Executes extraction (with retries) and validates both logical (info dicts) and physical outputs (files and .info.json).
+  - Cleans up after itself, including files created during testing.
+- Attach all generated tests to TestDownload and run via unittest.main() when executed as a script.
+
+Overall, this file implements a robust, data-driven test suite for youtube-dl extractors, validating both data extraction and file-level outcomes across single videos and playlists, with careful handling of dependencies, warnings, network issues, and cleanup.

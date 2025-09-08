@@ -1,0 +1,79 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/globalplayer.py
+
+Overview
+- This module provides multiple extractors for the Global Player site. It covers live radio streams, live playlists, podcasts and radio catch-ups (audio), individual podcast episodes, and a video page. All extractors inherit from a shared base that encapsulates Common Next.js data extraction and extension-detection logic.
+
+Key components
+
+1) GlobalPlayerBaseIE
+- Core utilities used by all extractors:
+  - _get_page_props(url, video_id): downloads the page and returns the Next.js props.pageProps data, which contains station/playlist/podcast data.
+  - _request_ext(url, video_id): fetches the media URL to determine the file extension (avoids HEAD requests the server rejects) via urlhandle_detect_ext.
+  - _clean_desc(x): sanitizes descriptions by removing HTML and normalizing spaces.
+  - _extract_audio(episode, series): builds a unified audio item by merging:
+    - series-level fields: title (series), id (series_id), imageUrl (thumbnail), iTunes author (uploader) for podcasts.
+    - episode-level fields: id, description (cleaned), duration (parsed), imageUrl (thumbnail), streamUrl (url), pubDate/startDate (unix timestamp), title.
+    - enforces vcodec: 'none' and includes is a live-friendly structure. Uses rev=True to control merge order.
+
+2) GlobalPlayerLiveIE
+- Purpose: extract a single live station from /live/<station-id>/<slug>.
+- _VALID_URL: matches live pages.
+- _real_extract(url):
+  - Gets video_id, fetches station data via _get_page_props, reads station.streamUrl.
+  - Returns a merged dict with:
+    - id (station.id), display_id (brandSlug/slug or legacy prefix), url (streamUrl), ext (detected extension via _request_ext), vcodec: 'none', is_live: True.
+    - title (live name derived from station name/brandName), description (tagline), thumbnail (brandLogo).
+  - Uses _live_title to present a suitable live title.
+
+3) GlobalPlayerLivePlaylistIE
+- Purpose: extract a live playlist from /playlists/<id>.
+- _VALID_URL: matches playlists path.
+- _real_extract(url):
+  - video_id, fetches playlistData via _get_page_props, reads streamUrl.
+  - Returns a merged dict with:
+    - id, url, ext (via _request_ext), vcodec: 'none', is_live: True.
+    - title, description (cleaned), thumbnail from playlistData.
+  - rev merging with other fields for final dictionary.
+
+4) GlobalPlayerAudioIE
+- Purpose: extract podcasts and radio catch-up as a playlist.
+- _VALID_URL: matches either podcasts/{id} or catchup/{category}/{country}/{id} forms.
+- _TESTS: includes a podcast example (playlist with mincount) and a catch-up example (playlist with at least 2 entries).
+- _real_extract(url):
+  - Determines video_id and whether the URL is a podcast or catchup.
+  - Fetches page props, selects series data from podcastInfo or catchupInfo.
+  - Returns a playlist dict:
+    - _type: 'playlist', id, entries: list of episodes built via _extract_audio(ep, series).
+    - categories from series (names) if present.
+    - Also merges series fields: description, thumbnail, title, uploader.
+  - Uses traverse_obj to assemble a robust list of episode objects and optional category data.
+
+5) GlobalPlayerAudioEpisodeIE
+- Purpose: extract a single podcast episode (or catch-up episode).
+- _VALID_URL: matches /episodes/{id} under podcasts or catchup paths.
+- _TESTS: includes a podcast episode (with metadata like ext mp3, duration, timestamp, series, series_id, etc.) and a catch-up episode (sample with ext m4a and timestamps).
+- _real_extract(url):
+  - Extracts video_id and podcast flag, fetches page props.
+  - Chooses episode data (podcastEpisode or catchupEpisode).
+  - Delegates to _extract_audio(episode, series) where series is episode['podcast'] or episode['show'] (as dict) or {} if missing.
+
+6) GlobalPlayerVideoIE
+- Purpose: extract a standard video page from /videos/{id}.
+- _VALID_URL: matches /videos/<id>.
+- _TESTS: one example with mp4 video, including description, thumbnail, upload_date, and title.
+- _real_extract(url):
+  - Reads video_id, fetches videoData from page props.
+  - Returns a merged dict with id and mapped fields:
+    - url, thumbnail (image.url), title, upload_date (publish_date parsed to YYYYMMDD), description.
+  - rev=True to ensure object fields reflect videoData properly.
+
+Important implementation details
+- Data extraction relies on Next.js hydration data via _get_page_props and _search_nextjs_data, enabling extraction of station/playlist/podcast metadata from pageProps.
+- Extension detection is performed by a non-HEAD request through _request_ext to accommodate servers that reject HEAD requests.
+- Robust field mapping is achieved with traverse_obj, allowing nested sources (e.g., station, episode, series) to be cleanly aligned to the target keys (id, title, description, thumbnail, url, etc.). T is used for transforming fields (e.g., parsing durations, timestamps, cleaning descriptions).
+- Descriptions are sanitized with _clean_desc to ensure clean, human-readable text.
+- Audio extraction uses a single helper (_extract_audio) to compose episode data from both series-level (series) and episode-level fields, ensuring consistency across podcasts and catch-ups.
+- Live extractions mark is_live: True and set vcodec to 'none' to reflect stream types that are audio-only (aac) or live streams.
+- The module includes comprehensive test cases in _TESTS for different URL formats (live, playlist, podcast, catch-up, and video) to validate extraction logic and data structure.
+
+In short, the file implements a cohesive set of extractors for Global Player's live streams, live playlists, podcasts, catch-up audio, and videos, all powered by a shared base that fetches Next.js props and detects media extensions, with careful merging and transformation of nested data into the standard YouTube-DL info dictionary format.

@@ -1,0 +1,50 @@
+- Purpose
+  - A youtube-dl extractor for onionstudios.com. It resolves onionstudios video pages to a Kinja embed (KinjaEmbed) using a mapping found in a remote JavaScript file.
+
+- Class and hierarchy
+  - OnionStudiosIE(InfoExtractor): main extractor class handling onionstudios URLs.
+
+- URL matching
+  - _VALID_URL: RegEx that matches:
+    - http(s)://www.onionstudios.com/video... or /videos/.../ (various path forms)
+    - or embed URLs in the onionstudios domain
+    - Ensures the id group captures the numeric video ID
+  - _extract_url(webpage): static helper that scans a webpage for embedded onionstudios content. It looks for iframe or bulbs-video tags with a src pointing to either:
+    - onionstudios.com/embed... 
+    - onionstudios.com/video/<digits>.json
+    - Returns the embedded URL if found
+
+- Tests
+  - _TESTS: includes:
+    - A real video page URL with expected final metadata (id, ext, title, description, thumbnail, uploader, upload_date, timestamp) and an md5 for the fetched content.
+    - An embed URL and a JSON URL as only_matching entries (to validate matching without full extraction).
+
+- Main extraction logic
+  - _real_extract(self, url):
+    - video_id = self._match_id(url): extracts the numeric ID from the URL using the _VALID_URL pattern.
+    - Downloads a specific hardcoded JavaScript resource:
+      - http://onionstudios.com/embed/dc94dc2899fe644c0e7241fa04c1b732.js
+      - Uses the video_id for context in error reporting.
+    - Extracts the MCP mapping with a regex:
+      - Looks for window.mcpMapping = ({...});
+      - Converts the JavaScript object to JSON with js_to_json and parses it via _parse_json.
+      - Retrieves mcp_id = mapping[video_id]['mcp_id'] and coerces it to a string with compat_str.
+    - Returns a URL result pointing to:
+      - http://kinja.com/ajax/inset/iframe?id=mcp-<mcp_id>
+      - Name: 'KinjaEmbed'
+      - id: mcp_id
+    - Effectively delegates the actual video display/content to a Kinja embed, using the MCP ID derived from the JS mapping.
+
+- Implementation details
+  - Uses:
+    - compat_str to normalize the MCP ID to a string.
+    - js_to_json to convert a JS object literal to JSON for parsing.
+    - _download_webpage, _search_regex, _parse_json, and _url_result inherited from InfoExtractor.
+  - The mapping lookup is dependent on the presence of window.mcpMapping in the downloaded JS; if absent or malformed, extraction would fail.
+  - The approach decouples onionstudios video retrieval from direct video file extraction by routing through a KinjaEmbed iframe identified via the MCP ID.
+
+- Summary of behavior
+  - Given an onionstudios video URL, the extractor does not fetch the video directly. Instead, it:
+    - Obtains an MCP ID from a remote JavaScript mapping.
+    - Constructs a KinjaEmbed iframe URL using that MCP ID.
+    - Delegates media extraction to the KinjaEmbed extractor, which yields the final video metadata (title, description, etc.) as seen in tests.

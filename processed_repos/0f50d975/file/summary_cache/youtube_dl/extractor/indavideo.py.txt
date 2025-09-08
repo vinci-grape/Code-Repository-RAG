@@ -1,0 +1,73 @@
+- Overview
+  - This file implements the Indavideo extractor for youtube-dl (yt-dl). It focuses on extracting video metadata and available formats from Indavideo video data, including handling of embedded/player URLs and token-protected video streams.
+
+- Main class
+  - IndavideoEmbedIE(InfoExtractor)
+    - _VALID_URL: Regex to recognize Indavideo embed URLs and SWF asset URLs with vID/vID parameters. Also matches embed.indavideo.hu/player/video/... and assets.indavideo.hu/swf/player.swf with a video id.
+    - _TESTS: Examples for unit tests, including:
+      - A real video page returning id, title, description, thumbnail, uploader, timestamp, duration, age_limit, and tags.
+      - Matching checks for embed URLs and SWF asset URLs.
+    - _extract_urls(webpage): Static method that finds embedded Indavideo video URLs inside a webpage (via iframes), returning a list of URLs to process.
+    - _real_extract(url): Core extraction logic:
+      - video_id = self._match_id(url)
+      - Fetches video data as JSON from:
+        https://amfphp.indavideo.hu/SYm0json.php/player.playerHandler.getVideoData/{video_id}
+        and uses the 'data' key of the response.
+      - title = video['title']
+      - Gathers video URLs:
+        - video_files can be a list or a dict; all URLs are added to a list.
+        - video_file is also added if present.
+        - Deduplicates the URL list.
+        - video_prefix is the base URL (everything before the last '/').
+        - flv_files (if present) are appended as video_prefix + '/' + flv_file, ensuring no duplicates.
+        - filesh is a mapping (likely height-based tokens) used to authorize certain formats.
+      - Builds formats:
+        - For every video_url, extracts height from the filename using regex \.(\d{3,4})\.mp4.
+        - If filesh exists, only keep formats with a corresponding token in filesh for that height; attach token as a query parameter to the URL using update_url_query.
+        - Each format entry: {'url': video_url, 'height': height}
+        - Sort formats with self._sort_formats(formats)
+      - timestamp:
+        - If video['date'] is present, parse as ISO8601 with a +0200 offset (CEST) using parse_iso8601.
+      - thumbnails:
+        - Builds a list of dicts with URLs converted to proto-relative form via self._proto_relative_url(thumbnail).
+      - tags:
+        - Extracts tags as a list of titles from video['tags'] (or [] if missing).
+      - Returns a dict with:
+        - 'id': video['id'] or video_id
+        - 'title': title
+        - 'description': video.get('description')
+        - 'thumbnails': thumbnails
+        - 'uploader': video.get('user_name')
+        - 'uploader_id': video.get('user_id')
+        - 'timestamp': timestamp
+        - 'duration': int_or_none(video.get('length'))
+        - 'age_limit': parse_age_limit(video.get('age_limit'))
+        - 'tags': tags
+        - 'formats': formats
+
+- Key implementation details
+  - URL handling:
+    - Accepts both embed URLs and SWF asset URLs; extracts a common video_id.
+    - Uses token-based access for some formats via filesh mapping, appended as query parameters.
+  - Data extraction:
+    - Video data is retrieved from a JSON endpoint and parsed from the 'data' field.
+    - Supports multiple sources for video files: video_files (list or dict) and video_file; also augments with flv_files if provided.
+  - Formats:
+    - Derives height from the file name pattern .<height>.mp4; height is optional (None if not detectable).
+    - When a filesh mapping exists, it requires a matching token for the detected height; tokens are added to the URL as a query parameter.
+    - Ensures no duplicate formats and sorts them by quality/height using _sort_formats.
+  - Metadata:
+    - Upload timestamp is converted from the given date string to a Unix timestamp, with timezone adjustment (CEST +0200).
+    - Thumbnails are normalized to proto-relative URLs for consistent access.
+    - Tags are extracted as a plain list of titles.
+  - Robustness:
+    - Handles video_files as either list or dict.
+    - Aggregates multiple sources into a single formats list, deduplicated and normalized.
+
+- Notable edge cases
+  - If video_files is a dict, uses its values as URLs.
+  - If video_files is missing, video_file may still be used to form at least one format.
+  - If filesh exists but lacks a token for a detected height, that format is skipped.
+  - Height extraction from filenames is best-effort (may yield None for some URLs).
+
+Overall, the extractor focuses on obtaining all available video formats (potentially token-protected), along with comprehensive metadata (title, description, uploader, timestamp, duration, age limit, tags, and thumbnails) from Indavideo’s data endpoint, while supporting multiple input URL forms (embed, SWF assets, and iframe-embedded pages).

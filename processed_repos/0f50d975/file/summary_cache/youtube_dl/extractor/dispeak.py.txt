@@ -1,0 +1,73 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/dispeak.py
+
+- Purpose
+  - Implement an InfoExtractor for Digitally Speaking / Dispeak XML event pages. It downloads an XML description and extracts available video formats (MP4 and FLV/RTMP) along with basic metadata (title, duration, creator).
+
+- Key class
+  - DigitallySpeakingIE(InfoExtractor)
+    - _VALID_URL: Regex for XML endpoints under evt.dispeak or events.digitallyspeaking with an id captured from the XML filename.
+    - _TESTS: Several test cases covering normal MP4/FLV extraction and edge cases like empty speakerVideo or slideVideo; some URLs are checked for matching only.
+
+- Main workflow
+  - _real_extract(url)
+    - video_id = self._match_id(url)
+    - xml_description = self._download_xml(url, video_id)
+    - metadata = xpath_element(xml_description, 'metadata')
+    - Try MP4 extraction via _parse_mp4(metadata); if it returns None, fall back to _parse_flv(metadata)
+    - Return dict with:
+      - id: video_id
+      - formats: list of extracted formats
+      - title: from metadata (fatal if missing)
+      - duration: parsed from endTime
+      - creator: speaker field
+
+- MP4 parsing details (_parse_mp4)
+  - Determines video_root (base URL) from:
+    - mp4video element (extract root from its URL)
+    - httpHost element
+    - Fallback default: http://s3-2u.digitallyspeaking.com/
+  - Formats extraction:
+    - Iterates over metadata/MBRVideos/MBRVideo entries
+    - For each, reads streamName (must exist) in the form mp4:<path>, extracts <path> and constructs full URL as video_root + path
+    - bitrate: tbr (as int if available)
+    - vbr: parsed from path using regex -<digits>.mp4
+    - abr: tbr - vbr if both present
+    - Each format dict contains: format_id (bitrate), url, tbr, vbr, abr
+  - If no MP4 formats found, returns None to signal FLV fallback
+
+- FLV parsing details (_parse_flv)
+  - Akamai FLV base:
+    - akamaiHost from metadata
+    - Builds RTMP base: rtmp://<akamaiHost>/ondemand?ovpfv=1.1
+  - Audio formats:
+    - metadata/audios/audio entries
+    - Each yields an FLV format with:
+      - url: rtmp base
+      - play_path: audio URL with trailing .flv removed
+      - ext: flv
+      - vcodec: none
+      - format_id: audio's code
+  - Video formats (slides and speaker):
+    - For video_key in ('slide', 'speaker') with corresponding format_id ('slides', 'speaker') and quality weights (-2, -1)
+    - Reads <SlideVideo> or <SpeakerVideo> paths
+    - If present, adds an FLV format similarly using the same RTMP base and play_path derived from the video path
+    - Adds metadata: format_note like "slide video" or "speaker video", quality/preference, and format_id
+  - Returns the list of FLV/RTMP formats
+
+- Important implementation details
+  - Uses helper utilities: int_or_none, parse_duration, remove_end, xpath_element, xpath_text
+  - _parse_mp4 expects a certain XML structure (MBRVideos/MBRVideo entries with streamName like 'mp4:...') and robustly derives a base URL
+  - Fallback logic ensures a default video root if XML does not provide one
+  - vbr calculation relies on parsing the video_path for a pattern -<digits>.mp4
+  - FLV parsing uses RTMP scheme with proper play_path extraction and marks vcodec as none for audio-only or unencoded video
+  - Returns a standardized dictionary with id, formats, title, duration, and creator
+
+- Output
+  - A parsed video entry containing:
+    - id: extracted id from the URL/xml
+    - formats: list of dictionaries with fields like url, format_id, tbr, vbr, abr or play_path, ext, vcodec, format_note, quality, etc.
+    - title: from metadata
+    - duration: parsed duration
+    - creator: speaker
+
+This extractor effectively supports both MP4-based and FLV/RTMP-based streams from Digitally Speaking/Dispeak XML feeds and provides a consistent output structure for downstream processing by youtube-dl.

@@ -1,0 +1,51 @@
+Here is a concise, comprehensive summary of the code in youtube-dl/youtube_dl/extractor/tv2hu.py:
+
+- Purpose
+  - Defines a YouTube-DL extractor for TV2 Hungary video pages. It parses the page, fetches a JSON descriptor, and builds a list of available video formats (HLS/MP4) along with basic metadata (title, thumbnail, upload date).
+
+- Key class
+  - TV2HuIE(InfoExtractor)
+    - Inherits common extraction utilities from YouTube-DL.
+
+- URL matching
+  - _VALID_URL: Regex that matches TV2 Hungary episode pages with a numeric id in the filename, e.g. http(s)://www.tv2.hu/.../217679_something.html
+  - _TESTS: Includes a working example with expected output (id, ext, title, upload_date, thumbnail) and two additional test URLs marked as only_matching to validate URL pattern recognition.
+
+- Core extraction (_real_extract)
+  - video_id = self._match_id(url): extracts the numeric id from the URL.
+  - webpage = self._download_webpage(url, video_id): fetches the page HTML.
+  - json_url = self._search_regex(r'jsonUrl\s*=\s*"([^"]+)"', webpage, 'json url'): locates a JSON descriptor URL embedded in the page.
+  - json_data = self._download_json(json_url, video_id): downloads the JSON metadata for the video.
+
+- Formats construction
+  - Initializes an empty formats list.
+  - Iterates over two bitrate groups: 'bitrates' and 'backupBitrates'.
+    - For each group:
+      - m3u8_url = bitrates.get('hls')
+        - If present, adds formats via self._extract_wowza_formats(m3u8_url, video_id, skip_protocols=['rtmp', 'rtsp']): handles Wowza-based HLS streams, skipping RTMP/RTSP protocols.
+      - mp4 URLs: for mp4_url in bitrates.get('mp4', []):
+        - height extraction: height = int_or_none(self._search_regex(r'\.(\d+)p\.mp4', mp4_url, 'height', default=None))
+        - Adds a format dict:
+          - 'format_id': 'http' + ('-' + height if height else '')
+          - 'url': mp4_url
+          - 'height': height
+          - 'width': int_or_none(height / 9.0 * 16.0 if height else None)  // assumes 16:9 aspect ratio
+  - self._sort_formats(formats): sorts formats by quality/height for consistent selection.
+
+- Metadata extraction
+  - 'id': video_id
+  - 'title': self._og_search_title(webpage).strip(): uses OpenGraph title from the page
+  - 'thumbnail': self._og_search_thumbnail(webpage): uses OpenGraph image if available
+  - 'upload_date': self._search_regex(r'/vod/(\d{8})/', json_url, 'upload_date', default=None): extracts an 8-digit date (YYYYMMDD) from the json_url path; default None if not found
+  - 'formats': the compiled list of formats
+
+- Implementation details and behavior
+  - Handles two potential bitrate maps ('bitrates' and 'backupBitrates') to improve robustness against missing data.
+  - Supports both:
+    - HLS streams via Wowza (using _extract_wowza_formats) with protocol skipping to avoid RTMP/RTSP.
+    - Direct MP4 downloads, inferring height from the file name (e.g., something like ".1080p.mp4") and deriving width from a 16:9 aspect ratio when possible.
+  - Height extraction uses a regex on the MP4 URL; width is derived if height is known.
+  - Upload date is sourced from the JSON URL path rather than the JSON payload itself.
+  - Uses standard InfoExtractor helpers for title/thumbnail extraction and consistent format sorting.
+
+In short, TV2HuIE fetches a page, discovers a JSON metadata URL, parses two possible bitrate maps to collect HLS and MP4 formats, derives video dimensions, and outputs a structured information dictionary with id, title, thumbnail, upload_date, and a sorted list of formats.

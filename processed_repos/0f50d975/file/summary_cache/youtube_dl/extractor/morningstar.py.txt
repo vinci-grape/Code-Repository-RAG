@@ -1,0 +1,42 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/morningstar.py
+
+- Purpose
+  - Implements a YouTube-DL extractor for Morningstar’s cover/video-center pages to retrieve video metadata and the actual video URL.
+
+- Main class
+  - MorningstarIE (subclasses InfoExtractor)
+    - IE_DESC: 'morningstar.com'
+    - _VALID_URL: Regex matching Morningstar cover video center pages with an id parameter, allowing www or news subdomains and both http/https. Example: http://www.morningstar.com/cover/videocenter.aspx?id=615869
+    - _TESTS: Two tests
+      - Test 1: Valid Morningstar URL with expected MD5 for the mp4, and an info_dict including id, ext, title, description, and thumbnail pattern.
+      - Test 2: A similar Morningstar URL used with only_matching to ensure URL is recognized by the extractor.
+
+- Core functionality
+  - _real_extract(self, url)
+    - Extracts video_id from the URL using the _VALID_URL regex group 'id'.
+    - Downloads the page content via _download_webpage.
+    - Extracts:
+      - title: from the HTML element <h1 id="titleLink">...</h1> using _html_search_regex.
+      - video_url: from a hidden input field <input type="hidden" id="hidVideoUrl" value="...">.
+      - thumbnail: from a hidden input field <input type="hidden" id="hidSnapshot" value="..."> (optional, fatal=False).
+      - description: from the content inside <div id="mstarDeck">...</div> (optional, fatal=False).
+    - Returns a dict with:
+      - id: video_id
+      - title: extracted title
+      - url: video_url
+      - thumbnail: optional thumbnail URL
+      - description: optional description
+
+- Implementation details
+  - Uses standard InfoExtractor helpers:
+    - _download_webpage to fetch the page
+    - _html_search_regex to extract data with regexes
+  - Optional fields (thumbnail and description) are retrieved with fatal=False to avoid extraction failures if missing.
+  - The returned dictionary includes basic fields; it does not explicitly set extension, duration, or other metadata beyond id/title/description/thumbnail and the actual video URL.
+
+- Key implementation notes
+  - The code relies on specific page structure: title within h1#titleLink, video URL in hidVideoUrl, thumbnail in hidSnapshot, and description within div#mstarDeck.
+  - The _TESTS section helps validate both matching URL recognition and proper extraction (including an md5 check for the downloaded video).
+  - The extractor targets only the video page’s data; it does not handle playlists or multiple video entries.
+
+In short, MorningstarIE extracts essential video metadata and the direct video URL from Morningstar’s cover/videocenter.aspx pages, with optional thumbnail and description supports and a straightforward, regex-based HTML parsing approach.

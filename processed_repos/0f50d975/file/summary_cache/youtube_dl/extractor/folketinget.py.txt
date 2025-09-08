@@ -1,0 +1,44 @@
+- Purpose
+  - Implements a YouTube-DL extractor for Folketinget (ft.dk) web TV videos. It fetches page metadata and media formats from the Danish Parliament site and returns a structured video object.
+
+- Class and main API
+  - Class: FolketingetIE(InfoExtractor)
+  - _VALID_URL: matches ft.dk webtv video pages and captures the numeric video id from a URL ending with .<id>.aspx
+  - _TEST: provides a sample URL and expected output (including id, title, description, formats, timestamp, dimensions, duration, and view_count)
+
+- How _real_extract(url) works
+  1. Extract video_id from the URL using _match_id.
+  2. Download the page HTML.
+  3. Derive title via OpenGraph data (_og_search_title).
+  4. Try to extract a description from the page using a regex that targets a div with class "video-item-agenda". This is optional (fatal=False).
+  5. Locate the embedded Flash player URL and parse its query string to obtain an XML config URL:
+     - Looks for an embed tag with src matching http://ft.arkena.tv/flash/ftplayer.swf?...
+     - Uses compat_parse_qs to parse the query string and gets the value of xml (xml_url).
+  6. Download the XML configuration from xml_url.
+  7. Parse metadata from the XML:
+     - timestamp: parse_iso8601 from the <date> element.
+     - duration: parse_duration from the <duration> element.
+     - width/height: int_from_text from <width>/<height> elements (using int_or_none).
+     - view_count: int_or_none from <views>.
+  8. Build formats by iterating all <streams><stream> elements in the XML:
+     - format_id: the bitrate attribute of the stream
+     - url: text content of the <url> child
+     - tbr: integer bitrate (from the bitrate attribute)
+     - Each format is added as a dict with keys: format_id, url, and tbr
+  9. Sort the formats with _sort_formats.
+  10. Return a video info dict containing:
+     - id, title, formats, description (if found), timestamp, width, height, duration, view_count
+
+- Key implementation details
+  - Uses a robust approach to locate the XML config via the embedded Flash player (ftplayer.swf) and its xml parameter.
+  - XML-driven format extraction: formats are read from <streams><stream> entries with per-stream bitrate and URL.
+  - Utility helpers used:
+    - compat_parse_qs to parse the embedded player’s query string
+    - xpath_text to extract XML element values
+    - int_or_none to safely parse integers
+    - parse_iso8601 and parse_duration for timestamp and duration
+  - The description extraction uses a tolerant regex (fatal=False) to avoid failing if the description is not present.
+
+- Notes
+  - The test data indicates an RTMP download path possibility (hence the test parameter skip_download: True in _TEST).
+  - The extractor aims to populate a comprehensive set of metadata (title, description, timestamp/upload_date implied by timestamp, duration, dimensions, view count) in addition to the available video formats.

@@ -1,0 +1,80 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/gaskrank.py
+
+Overview
+- Implements a YouTube-dl extractor (GaskrankIE) for videos on gaskrank.tv.
+- Follows the InfoExtractor pattern: defines URL pattern, tests, and a _real_extract method to build a single video entry with metadata and formats.
+
+Key components
+- Class: GaskrankIE(InfoExtractor)
+  - _VALID_URL: Regex to match gaskrank.tv TV pages and capture:
+    - categories: category segment in the URL path
+    - id: the video slug (used as display_id)
+  - _TESTS: Two example tests with expected metadata, including:
+    - id, ext, title, thumbnail, categories, display_id, uploader_id, upload_date, uploader_url
+    - md5 hashes for the MP4 payloads
+- _real_extract(self, url)
+  - display_id: extracted via _match_id(url) from the _VALID_URL (the slug part).
+  - webpage: page HTML fetched via _download_webpage(url, display_id).
+
+Metadata extraction
+- title:
+  - Primary: _og_search_title(webpage)
+  - Fallback: _html_search_meta('title', webpage, fatal=True)
+- categories:
+  - A single-item list containing the category parsed from the URL via the _VALID_URL match
+- uploader_id and upload_date:
+  - Attempt to parse a line like “Video von: <uploader> | vom: <dd.mm.yyyy>”
+  - If found, uploader_id is captured, upload_date is converted with unified_strdate
+  - These variables are used later when building the entry
+- uploader_url:
+  - Extracted with a regex matching a “Homepage:” anchor tag
+  - Defaulted to None if not found
+- tags:
+  - Extracted with a regex scanning for patterns like /tv/tags/.../ "tag"
+- view_count:
+  - Extracted by a regex targeting a gkRight block with an eye icon
+  - Converted to int after removing thousands separators (dots)
+  - Optional (default=None) if not found
+- average_rating:
+  - Extracted from a meta-like element with itemprop="ratingValue"
+  - Converted to float (commas replaced by dots)
+  - Optional (default not provided if not found)
+
+Video URL and formats
+- video_id:
+  - Extracted from the page using a regex matching the internal MP4 URL:
+    https://movies.gaskrank.tv/<name>[-<optional>].mp4
+  - If not found, defaults to display_id
+- Formats extraction:
+  - entry = self._parse_html5_media_entries(url, webpage, video_id)[0]
+    - Uses the standard HTML5 media parsing helper to build a dict with 'formats'
+  - entry is then enriched with:
+    - id: video_id
+    - title
+    - categories
+    - display_id
+    - uploader_id
+    - upload_date
+    - uploader_url
+    - tags
+    - view_count
+    - average_rating
+- Finalization:
+  - self._sort_formats(entry['formats']) to order available formats
+  - Return the completed entry
+
+Implementation details and notes
+- Uses standard helpers:
+  - _og_search_title, _html_search_meta for title
+  - _search_regex for various metadata extractions
+  - unified_strdate to normalize upload_date
+  - _parse_html5_media_entries to obtain media formats
+- Data shape aligns with tests:
+  - upload_date in YYYYMMDD format
+  - categories as a list (single element based on URL)
+  - uploader_id, uploader_url, tags, view_count, average_rating populated when present
+- Potential caveat:
+  - uploader_id and upload_date extraction is conditional on the presence of the “Video von: … | vom: …” block. If absent, the variables may be undefined and could raise an error when updating entry. In practice, the source page pattern suggests this block exists for valid entries.
+
+Purpose
+- Enables youtube-dl to download gaskrank.tv videos and populate metadata (title, authorship, dates, tags, view counts, ratings) and available video formats for each video page.

@@ -1,0 +1,40 @@
+Concise summary of movingimage.py (youtube-dl extractor)
+
+- Purpose
+  - Implement an InfoExtractor for Moving Image (movingimage.nls.uk), to fetch video metadata and formats from film pages.
+
+- Key class
+  - MovingImageIE(InfoExtractor)
+
+- URL pattern
+  - _VALID_URL = r'https?://movingimage\.nls\.uk/film/(?P<id>\d+)'
+  - Captures numeric film ID from URLs like http://movingimage.nls.uk/film/3561
+
+- Test data
+  - _TEST provides a sample URL, expected MD5 of the video, and the info_dict including id, ext (mp4), title, description (MD5 hash), duration, and thumbnail URL pattern.
+
+- Main extraction flow (_real_extract)
+  - Extract video_id using _match_id(url)
+  - Download the page HTML via _download_webpage(url, video_id)
+  - Build formats:
+    - Extract an HLS/MP4 manifest URL from the page using _html_search_regex on: file : "..." 
+    - Call _extract_m3u8_formats with that URL, video_id, ext='mp4', and entry_protocol='m3u8_native' to obtain the list of available video formats
+  - Helper function search_field(field_name, fatal=False)
+    - Uses a regex to locate content inside: <span class="field_title">FIELD:</span> … <span class="field_content">VALUE</span>
+    - Returns the inner VALUE for the given FIELD, optionally raising if not found (fatal)
+  - Metadata extraction:
+    - title: required; obtained via search_field('Title', fatal=True), HTML-unescaped with unescapeHTML, then stripped of surrounding () and [] via strip('()[]')
+    - description: obtained via search_field('Description') and unescaped
+    - duration: parsed via parse_duration(search_field('Running time'))
+    - thumbnail: optional; extracted with regex image\s*:\s*'([^']+)' from the page
+  - Return value:
+    - A dict with keys: id, formats, title, description, duration, thumbnail
+
+- Important implementation details
+  - Uses _extract_m3u8_formats to process an m3u8 manifest URL found in the page, with ext set to 'mp4' and entry_protocol 'm3u8_native'
+  - HTML structure-dependent: relies on specific span class patterns for title/description/running time
+  - Unescapes HTML entities in title/description
+  - Safely handles missing fields (fatal controls required fields like Title) and optional fields like thumbnail
+
+- Overall functionality
+  - Fetches a film page, resolves its HLS/MP4 formats, and extracts structured metadata (title, description, duration, thumbnail) for use by youtube-dl.

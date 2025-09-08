@@ -1,0 +1,68 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/bravotv.py
+
+Purpose:
+- Implement an extractor for BravoTV (and Oxygen) episodes that supports both TV Everywhere (MVPD-authenticated) streams and non-authenticated shared playlists, using ThePlatform as the underlying video source. It extends AdobePassIE to handle MVPD authentication when needed.
+
+Key class:
+- BravoTVIE(AdobePassIE)
+
+Main components:
+- _VALID_URL: Regular expression matching BravoTV and Oxygen URLs, capturing the site (bravotv or oxygen) and an episode/clip id.
+- _TESTS: Several test cases demonstrating a typical MVPD-protected BravoTV video, plus two “only_matching” examples.
+
+Core method:
+- _real_extract(self, url)
+  - Determines site and display_id from the URL using _VALID_URL.
+  - Downloads the episode page and extracts Drupal settings JSON from a script tag (data-drupal-selector="drupal-settings-json") using _search_regex and _parse_json.
+  - Initializes a query dict with mbr=True for ThePlatform requests.
+  - Distinguishes two content paths based on the presence of ls_tve in settings:
+    1) TV Everywhere (ls_tve present)
+       - Attempts to locate ThePlatform path data in the page via a pdk-player data-url attribute to extract:
+         - account_pid
+         - tp_path (ThePlatform path)
+         - release_pid (last segment of tp_path)
+       - If the pdk-player data-url pattern isn’t found, falls back to:
+         - account_pid = 'HNK2IC'
+         - tp_path = release_pid = tve['release_pid']
+       - If entitlement == 'auth', builds MVPD authentication:
+         - Normalizes site to 'bravo' when site == 'bravotv'
+         - Creates an MVPD resource id using _get_mvpd_resource(adobe_pass_resourceId or site, tve['title'], release_pid, tve.get('rating'))
+         - Obtains an authentication token via _extract_mvpd_auth(url, release_pid, adobe_pass_requestorId or site, resource)
+    2) Non-MVPD/shared playlist (ls_tve not present)
+       - Uses settings['ls_playlist'] to obtain:
+         - account_pid
+         - metadata for the default clip
+       - Determines tp_path and release_pid from metadata (falling back to metadata['guid'] for release_pid and building a tp_path accordingly)
+       - Populates info with:
+         - title, description, season_number, episode_number (converted to int where available)
+       - Sets query['switch'] = 'progressive' to force progressive streaming
+
+  - Finalizes the result as a url_transparent entry pointing to ThePlatform:
+    - id: release_pid
+    - url: a ThePlatform URL built as http://link.theplatform.com/s/{account_pid}/{tp_path} with query parameters added via update_url_query.
+      - The URL is blessingly wrapped with smuggle_url(..., {'force_smil_url': True}) to ensure SMIL URL usage if applicable.
+    - _type: 'url_transparent'
+    - ie_key: 'ThePlatform'
+  - Returns the info dict.
+
+Important implementation details:
+- The code uses AdobePassIE to handle authentication when needed, including:
+  - _get_mvpd_resource to build a resource descriptor
+  - _extract_mvpd_auth to obtain an MVPD authorization token
+- ThePlatform integration:
+  - The final video URL is constructed as: http://link.theplatform.com/s/{account_pid}/{tp_path}
+  - Query parameters may include:
+    - manifest='m3u' (when tve path is used)
+    - auth (if MVPD authentication is required)
+    - switch='progressive' (for non-TVE/playlist path)
+  - The smuggle_url with force_smil_url ensures compatibility with ThePlatform’s SMIL-based streams.
+- Data extraction details:
+  - Drupal settings JSON is parsed from a script tag using a regex search for data-drupal-selector="drupal-settings-json".
+  - Depending on the presence of ls_tve, the extractor either builds the ThePlatform URL from a direct pdk-player data URL (MVPD) or from a shared_playlist path (non-MVPD).
+  - When tve is present but the page lacks the pdk-player data URL, it uses tve['release_pid'] as a fallback and a default account_pid ('HNK2IC').
+  - When using shared playlists, it populates title/description and season/episode numbers directly from metadata.
+
+High-level behavior:
+- Supports both BravoTV and Oxygen URLs via a single extractor.
+- Automatically chooses MVPD-authenticated streaming or non-authenticated progressive streaming based on the Drupal settings.
+- Returns a ThePlatform-based URL with necessary authentication or progressive streaming parameters, enabling downstream extractors to fetch the actual video segments.

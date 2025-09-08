@@ -1,0 +1,107 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/abc.py
+
+Overview
+- Provides two ABC-related extractors for ABC-backed media:
+  1) ABCIE: Extractor for ABC News video/audio pages on abc.net.au
+  2) ABCIViewIE: Extractor for ABC iview program video pages (iview.abc.net.au)
+- Both extend InfoExtractor and follow youtube-dl conventions (URL matching, _real_extract, formats extraction, etc.)
+
+ABCIE (ABC News extraction)
+- Class: ABCIE
+- URL pattern: _VALID_URL matches ABC News article pages with a numeric ID at the end of the URL path.
+- Key responsibilities:
+  - Download the article page and locate embedded media URLs inside a JavaScript push payload
+  - Handle YouTube embeds as playlists; otherwise extract direct formats
+  - Return metadata and formats for the media
+- How it finds media:
+  - Searches page for a JavaScript snippet matching:
+    inline<type>Data.push(<json_data>);
+    where <type> is Video, Audio, or YouTube
+  - If not found, checks for expired media indicators in HTML (class="expired-video"/"expired-audio") and raises ExtractorError with expected=True if found
+  - If found, parses the JSON data with _parse_json(..., transform_source=js_to_json)
+  - Normalizes to a list of url_info entries
+- YouTube handling:
+  - If type is YouTube, returns a playlist_result containing url_result for each entry in urls_info
+- Direct media formats:
+  - Builds a list of formats with fields:
+    - url: media URL
+    - vcodec: codec for Video type, otherwise 'none'
+    - width / height: integers when available
+    - tbr: bitrate
+    - filesize: size if provided
+  - Uses _sort_formats(formats) to order
+- Metadata returned:
+  - id: video_id from URL
+  - title: from og:title on page
+  - description: from og:description on page
+  - thumbnail: from og:image on page
+- Important implementation notes:
+  - Robust against missing JSON by checking for expired markers
+  - Accepts both single URL or list of URLs (normalizes to list)
+  - Transform_source=js_to_json ensures embedded JSON via JavaScript is parsed correctly
+  - Handles both audio/video direct URLs and YouTube embeds
+
+ABCIViewIE (ABC iview extraction)
+- Class: ABCIViewIE
+- URL pattern: _VALID_URL matches iview.abc.net.au/.../video/<id>
+- GEO: Countries allowed: AU
+- Key responsibilities:
+  - Retrieve program metadata from ABC iview API
+  - Select the appropriate HLS stream, sign the request, and fetch a token for secure streaming
+  - Extract m3u8 formats, subtitles, and additional metadata
+- API/data flow:
+  - video_id = extracted ID from URL
+  - Fetch JSON: https://iview.abc.net.au/api/programs/{video_id}
+  - Title: use video_params['title'] or fall back to video_params['seriesTitle'], with HTML unescaping
+  - Stream selection: choose the first playlist item with type in ('program', 'livestream')
+  - House number: video_params['episodeHouseNumber'] or the video_id
+- Secure HLS URL signing:
+  - Construct a sign path: /auth/hls/sign?ts={timestamp}&hn={house_number}&d=android-tablet
+  - Compute signature (sig) using HMAC-SHA256 with key b'android.content.res.Resources' over the path
+  - Fetch token from http://iview.abc.net.au{path}&sig={sig}
+  - Tokenizes streaming URLs by adding hdnea=<token> to the URL via update_url_query
+- Format extraction:
+  - Tries to obtain HLS URLs for different qualities in order: '720', 'sd', 'sd-low'
+  - For the first available sd URL, calls _extract_m3u8_formats with:
+    - base URL modified to include hdnea token
+    - file extension 'mp4'
+    - entry_protocol 'm3u8_native'
+    - m3u8_id 'hls'
+    - fatal=False (continue if formats not found)
+  - Sorts formats with _sort_formats
+- Subtitles:
+  - If captions.src-vtt present in stream, adds English subtitles with ext 'vtt'
+- Live streams:
+  - is_live is True if video_params.get('livestream') == '1'
+  - If live, title is adjusted via _live_title
+- Additional metadata returned:
+  - id, title, description (video_params.get('description')), thumbnail (video_params.get('thumbnail'))
+  - duration (int_or_none(video_params.get('eventDuration')))
+  - timestamp parsed from pubDate via parse_iso8601
+  - series / series_id derived from seriesTitle and seriesHouseNumber
+  - season_number and episode_number parsed from title using regex searches
+  - episode_id: house_number
+  - uploader_id: video_params.get('channel')
+  - formats, subtitles, is_live
+- Important implementation notes:
+  - Uses a cryptographic signing step to access secure HLS URLs (HMAC-SHA256 with a fixed key)
+  - Robust to missing qualities by falling back through 720/sd/sd-low
+  - Includes subtitles if available and live-episode title adjustments
+  - Returns a rich metadata set including series/season/episode fields when present
+
+Common implementation details
+- Both extractors rely on:
+  - _match_id(url) to extract an identifier
+  - _download_webpage or _download_json to fetch data
+  - _og_search_title/_og_search_description/_og_search_thumbnail for metadata when available
+  - int_or_none, parse_iso8601, and try_get for robust type handling
+  - _extract_m3u8_formats to parse HLS streams
+  - _sort_formats to order formats by quality and other criteria
+- Tests included (_TESTS) cover typical article/video pages and iview example with expected payloads and constraints
+- The file demonstrates handling of:
+  - Embedded JSON data in page scripts (for ABC News)
+  - YouTube playlist routing within the ABC News extractor
+  - Signed, authenticated HLS streaming for ABC iview with token-based access control
+  - Optional subtitles (VTT) and live-stream adjustments
+
+In short, this file implements two ABC media extractors: one for ABC News pages that may deliver direct media URLs or YouTube embeds, and one for ABC iview programs that require a signed HLS URL to access secure streams, with rich metadata extraction and format handling.

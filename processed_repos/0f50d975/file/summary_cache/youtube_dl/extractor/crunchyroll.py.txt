@@ -1,0 +1,96 @@
+Below is a concise but comprehensive summary of the Crunchyroll extractor code.
+
+Overview
+- Purpose: Implement YouTube-DL extractors for Crunchyroll videos and show playlists, supporting VRV-backed formats, multiple video encodings, subtitles (including encrypted ones), and metadata extraction.
+- Main classes:
+  - CrunchyrollBaseIE: Shared base with login, RPC calls, subtitle decryption, and utility helpers.
+  - CrunchyrollIE: Extracts a single Crunchyroll video (also handles VRV formats via VRVIE).
+  - CrunchyrollShowPlaylistIE: Extracts a show/season playlist as a list of episodes.
+
+Key functionality and workflow
+- Login and session management
+  - _LOGIN_URL, _LOGIN_FORM, _NETRC_MACHINE define login behavior.
+  - _login(): Handles login flow:
+    - Fetch login page, locate login form by id, prepare and submit credentials.
+    - Detects and reports login errors; uses the site’s error messages when possible.
+  - _real_initialize(): Calls _login() to ensure authenticated session for restricted content.
+- RPC API interaction
+  - _call_rpc_api(method, video_id, note=None, data=None):
+    - Builds a POST request to https://www.crunchyroll.com/xml/ with req='RpcApi' + method.
+    - Encodes data as application/x-www-form-urlencoded.
+    - Uses _download_xml to fetch response (non-fatal on errors).
+- Maturity wall bypass
+  - _add_skip_wall(url): Forces skip_wall=1 in the URL query to bypass 18+ walls where applicable.
+- Subtitles handling
+  - Subtitles on Crunchyroll can be encrypted.
+  - _decrypt_subtitles(data, iv, id):
+    - Decodes base64 data and IV, derives a decryption key from the subtitle id using a custom obfuscation pipeline (involving SHA1, arithmetic transforms, and a crypto-graph repair step).
+    - AES-CBC decrypts the data with the derived key and then zlib.decompresses it.
+  - _convert_subtitles_to_srt(sub_root) and _convert_subtitles_to_ass(sub_root):
+    - Convert internal subtitle XML to SRT and ASS formats respectively.
+  - _extract_subtitles(subtitle): Parses the decrypted XML and returns both SRT and ASS variants.
+  - _get_subtitles(video_id, webpage):
+    - Finds subtitle entries from the page (bssid + title pairs).
+    - Uses _call_rpc_api('Subtitle_GetXml', ...) to fetch encrypted XML for each subtitle.
+    - Decrypts, extracts language code, and yields per-language subtitle tracks by _extract_subtitles.
+- Subtitles fallback
+  - If no subtitles found via RPC, uses extract_subtitles (inherited path) as fallback.
+- Webpage fetching and headers
+  - _download_webpage: Overrides to insert Accept-Language: * (to avoid locale/IP mismatches when Crunchyroll georestricts content). Uses geo_verification_headers for geo checks elsewhere.
+- Formats collection and ranking
+  - _FORMAT_IDS: Mapping of format label (360/480/720/1080) to two values: a simple video_format id and a video_format code used in RPC calls. Example: '720' -> ('62','106'), '1080' -> ('80','108').
+  - VRV formats: For each stream in media['streams'], call _extract_vrv_formats(...) to obtain VRV/VRV-like formats (inherited via VRVIE).
+  - Language and subtitle preferences:
+    - If a stream has audio_lang or hardsub_lang matching the current language, set format metadata (language_preference and possibly a higher priority).
+  - Fallbacks if VRV formats are not found:
+    - Search page for showmedia tokens to determine available formats; fetch media/stream info via RPC:
+      - VideoPlayer_GetStandardConfig (gets preload/stream_info)
+      - VideoEncode_GetStreamInfo (gets more stream_info)
+    - Build formats list from:
+      - Direct video URLs (via video_file or host fields) including m3u8 (HLS) via _extract_m3u8_formats when video_file is a URL.
+      - RTMP payloads (play_path and ext='flv') when direct URLs aren’t available.
+    - Special handling for fplive/netx style URLs to construct a direct HTTP URL, when possible.
+  - Sorting formats:
+    - _sort_formats(formats, ('preference','language_preference','height','width','tbr','fps')) to prioritize preferred languages and higher qualities.
+- Metadata extraction
+  - video_id: extracted from URL using _VALID_URL regex.
+  - video_title: extracted from HTML, with fallbacks to og:description and cleanup.
+  - video_description: pulled from media metadata or description block, with lowercase escaping and newline normalization.
+  - video_uploader: attempts to extract an uploader name (either linked publisher or plain text).
+  - series/season/episode info:
+    - series: from page (prefer later HTML blocks that mention episode).
+    - season, episode, episode_number, season_number: pulled from the metadata XML or page regexes; duration from media metadata duration (divided by 1000 to seconds).
+  - thumbnail: from metadata or media metadata if present.
+  - duration: from media metadata, converted to seconds if needed.
+  - info dict: Merges extracted fields with JSON-LD data from the page via self._search_json_ld.
+- Subtitles as part of video info
+  - The resulting info dict includes 'subtitles' (if any decrypted via _get_subtitles and/or fallback).
+- API data and metadata sources
+  - media = self._parse_json(self._search_regex(r'vilos\.config\.media\s*=\s*({.+?});', webpage, default='{}'), video_id)
+  - media_metadata = media.get('metadata') or {}
+  - Language from dals in the page: vilos.config.player.language or LOCALE.
+  - Video metadata for season/episode/title extraction uses both media and page content.
+- Robustness and edge cases
+  - Handles 18+ walls, login-required content, and georestricted pages by raising ExtractorError with appropriate messaging or prompting login.
+  - Some pages may have missing fields; code uses multiple fallbacks to extract titles, descriptions, and IDs.
+  - If subtitles are not available from RPC, falls back to extract_subtitles path.
+
+Key methods and their roles (highlights)
+- _call_rpc_api: Core RPC wrapper for Crunchyroll’s XML RPC API.
+- _login / _real_initialize: Login flow and ensuring an authenticated session.
+- _add_skip_wall: Utility to bypass maturity walls programmatically.
+- _decrypt_subtitles: Complex decryption path for encrypted subtitle data; derives a key via obfuscated calculation and uses AES-CBC + zlib.
+- _convert_subtitles_to_srt / _convert_subtitles_to_ass: Subtitle format converters.
+- _extract_subtitles / _get_subtitles: Subtitle extraction flow, including decryption and language-aware assembly.
+- _download_webpage: Adds Accept-Language header to HTTP requests to improve reliability across locales.
+- _real_extract: Main extraction logic for a video:
+  - Parses page, collects formats (VRV and/or RPC-derived), builds metadata, and returns a merged dict.
+- CrunchyrollShowPlaylistIE._real_extract: Playlist extraction for Crunchyroll show pages by enumerating episode links and returning a playlist structure.
+
+Output structure
+- For CrunchyrollIE:
+  - A dict containing id, title, description, duration, thumbnail, uploader, series, season, season_number, episode, episode_number, subtitles, formats, and metadata from JSON-LD merged into it.
+- For CrunchyrollShowPlaylistIE:
+  - A playlist dict with _type='playlist', id, title, and a list of entries (each an episode URL pointing to Crunchyroll extractor).
+
+This file provides a thorough Crunchyroll integration: login handling, wall bypass, multiple format extraction paths (VRV-based and RPC-based), robust subtitle decryption/conversion, and metadata assembly, plus a playlist extractor for show pages.

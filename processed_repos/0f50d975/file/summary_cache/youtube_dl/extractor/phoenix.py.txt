@@ -1,0 +1,74 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/phoenix.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for Phoenix (phoenix.de) media pages. It handles both direct Phoenix video entries and embedded YouTube videos, and returns standardized information for download.
+
+- Main class
+  - PhoenixIE(ZDFBaseIE)
+  - Key attributes:
+    - IE_NAME = 'phoenix.de'
+    - _VALID_URL: matches Phoenix article URLs with an id captured as 'id' via the pattern -a-(\d+).html
+    - _TESTS: multiple test cases covering Phoenix article with direct media, YouTube embed, non-media pages, and non-matching pages
+
+- Core method
+  - _real_extract(self, url)
+    - Extracts article_id from URL using _match_id.
+    - Downloads article JSON from https://www.phoenix.de/response/id/{article_id}.
+    - Picks the first item from article['absaetze'] as the video and determines the title from video['titel'] or article['subtitel'].
+
+- Handling YouTube embeds
+  - If video['typ'] == 'video-youtube':
+    - Uses the embedded YouTube video ID (video['id']).
+    - Returns a direct result via self.url_result(video_id, ie=YoutubeIE.ie_key(), video_id=video_id, video_title=title).
+    - This delegates to the standard YouTube extractor.
+
+- Handling non-YouTube media
+  - Determines video_id from video.get('basename') or video.get('content'), cast to string.
+  - Fetches detailed media data from:
+    - https://www.phoenix.de/php/mediaplayer/data/beitrags_details.php
+    - with query parameters: ak=web, ptmd=true, id=video_id, profile=player2
+  - Title fallback: use details['title'] if needed.
+
+- PTMD extraction (main media data)
+  - content_id = details['tracking']['nielsen']['content']['assetid']
+  - Calls self._extract_ptmd(...) to obtain core media information (formats, etc.) using:
+    - URL: https://tmd.phoenix.de/tmd/2/ngplayer_2_3/vod/ptmd/phoenix/{content_id}
+    - content_id, None, url as params
+  - The returned info dict is merged later with additional metadata.
+
+- Additional metadata extraction
+  - duration: int_or_none(try_get(details, lambda x: x['tracking']['nielsen']['content']['length']))
+  - timestamp: unified_timestamp(details.get('editorialDate'))
+  - series: try_get(details, lambda x: x['tracking']['nielsen']['content']['program'], compat_str)
+  - episode: title if details.get('contentType') == 'episode' else None
+
+- Thumbnails (dynamic)
+  - teaser_images = try_get(details, lambda x: x['teaserImageRef']['layouts'], dict) or {}
+  - Iterates over teaser_images.items():
+    - Converts thumbnail URL to absolute with urljoin(url, thumbnail_url)
+    - Builds a thumbnail dict {'url': thumbnail_url}
+    - If the layout key matches digits x digits (e.g., "1280x720"), also sets 'width' and 'height'
+  - Resulting list assigned to 'thumbnails'
+
+- Final result
+  - Returns merge_dicts(info, {
+      'id': content_id,
+      'title': title,
+      'description': details.get('leadParagraph'),
+      'duration': duration,
+      'thumbnails': thumbnails,
+      'timestamp': timestamp,
+      'uploader': details.get('tvService'),
+      'series': series,
+      'episode': episode,
+    })
+
+- Key implementation details
+  - Uses a two-step data approach: Phoenix article JSON provides basic info and type; a separate details JSON provides Nielsen metadata and assets, which are then fed into a PTMD extraction helper to obtain actual media formats.
+  - Handles both direct Phoenix media and YouTube embeds transparently.
+  - Builds high-quality thumbnails from teaserImageRef layouts, converting relative URLs to absolute URLs and parsing width/height when available.
+  - Safe access patterns via try_get to guard against missing fields.
+  - Reuses parent class ZDFBaseIE’s _extract_ptmd for PTMD data extraction.
+
+- Practical outcomes
+  - The extractor can parse Phoenix pages, retrieve embedded YouTube videos directly, or fetch NTSC/PTMD video data from Phoenix servers, and present a unified set of metadata (id, title, description, duration, timestamp, uploader, series, episode) along with video formats and thumbnails suitable for downloading.

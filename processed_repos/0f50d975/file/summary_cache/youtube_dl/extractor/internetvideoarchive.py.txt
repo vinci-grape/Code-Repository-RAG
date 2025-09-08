@@ -1,0 +1,52 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/internetvideoarchive.py
+
+Purpose:
+- Implement an InfoExtractor for Internet Video Archive (IVA) hosted videos. It fetches video settings from IVA, derives available streaming formats (primarily via HLS, with fallbacks from additional manifests if available), and returns a standard youtube-dl info dictionary.
+
+Key components:
+- Class InternetVideoArchiveIE(InfoExtractor)
+  - _VALID_URL: RegEx matching IVA URLs that contain either /player or /flash/players and a query string with publishedid.
+  - _TEST: Example test case with a sample IVA URL and expected info_dict (id, ext, title, description) and skip_download for m3u8.
+
+- _build_json_url(query) [static]
+  - Utility that constructs a configuration URL: 'http://video.internetvideoarchive.net/player/6/configuration.ashx?' + query
+  - Note: This function is defined but not used in the current implementation.
+
+- _real_extract(self, url)
+  - Core extraction logic:
+    - Parse URL query string to extract publishedid (video_id) and customerid using compat parsing utilities.
+    - Fetch video settings JSON from IVA endpoint:
+      - Endpoint: https://video.internetvideoarchive.net/videojs7/videojs7.ivasettings.ashx
+      - POST payload (encoded as JSON): {'customerid': customerid, 'publishedid': video_id}
+    - Extract metadata from the JSON response:
+      - Title = data['Title']
+      - PosterUrl for thumbnail
+      - Description for description field
+      - VideoUrl used to derive formats (typically an m3u8 URL)
+    - Build formats:
+      - Use _extract_m3u8_formats on data['VideoUrl'], with video_id and 'mp4' as the extension, using 'm3u8_native' and m3u8_id='hls'. fatal=False to avoid failing if the m3u8 is unavailable.
+      - Select file_url = formats[0]['url'] (first format’s URL) to determine if additional formats are available.
+      - If the file_url contains '.ism/':
+        - Define replace_url to substitute the portion after '.ism/' with a given suffix.
+        - Extend formats with:
+          - _extract_f4m_formats for replace_url('.f4m') with f4m_id='hds', fatal=False
+          - _extract_mpd_formats for replace_url('.mpd') with mpd_id='dash', fatal=False
+          - _extract_ism_formats for replace_url('Manifest') with ism_id='mss', fatal=False
+        - These provide additional streaming protocol options (HDS, DASH, MSS) when available.
+    - Sort formats with _sort_formats(formats).
+    - Return info dictionary:
+      - 'id': video_id
+      - 'title': title
+      - 'formats': formats
+      - 'thumbnail': data.get('PosterUrl')
+      - 'description': data.get('Description')
+
+Key implementation details:
+- Uses YouTube-DL compatibility helpers (compat_parse_qs, compat_urlparse) to robustly parse query parameters.
+- Fetches a JSON settings object from IVA’s ivasettings endpoint using the publishedid and customerid from the original URL.
+- The primary format source is an m3u8 playlist (HLS). If the first extracted URL suggests ISM-based streaming (.ism/), the code attempts to fetch additional formats across multiple protocols (HDS, DASH, MSS) by constructing variant manifest URLs via replace_url.
+- Most of the secondary format fetches use fatal=False to gracefully degrade if those manifests are not available.
+- The _BUILD_JSON_URL method is present but not used in the extraction flow, indicating a potential leftover from a previous implementation.
+- The _TEST case demonstrates expected extraction output, including the md5-hashed description, and indicates that the m3u8 (HLS) download should be skipped in tests.
+
+In short, this extractor targets IVA video pages, fetches a settings JSON using the publishedid and customerid, derives an HLS format (and optionally other formats via additional manifests), and returns a standard info dict with id, title, formats, thumbnail, and description.

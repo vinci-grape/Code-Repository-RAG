@@ -1,0 +1,77 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/vier.py
+
+Purpose
+- Implements two extractors for Belgian sites vier.be and vijf.be:
+  - VierIE: extracts a single video page (with metadata and streaming formats).
+  - VierVideosIE: extracts a playlist of videos for a program (paginated listing) and delegates actual video extraction to VierIE.
+
+Main classes
+- VierIE (InfoExtractor)
+  - Handles both vier.be and vijf.be single-video pages.
+  - Login support (_login) using credentials from netrc (machine name 'vier').
+  - _real_initialize initializes login state.
+
+Key functionality and flow
+- URL matching and routing
+  - _VALID_URL uses a robust regex to capture:
+    - site: vier or vijf
+    - display_id and/or id
+    - embed_id for embed/embed-like URLs
+  - Determines video_id, display_id, and site from the URL.
+- Login handling
+  - _login(site) posts credentials to the site’s login form.
+  - Parses login errors from the page; if present, warns but may proceed if possible.
+  - Tracks login state via self._logged_in.
+  - _real_extract triggers login if not already logged in.
+- Metadata and video extraction
+  - Downloads the page; if the page requires login (presence of user-login), falls back to an embed page to obtain metadata.
+  - video_id extraction: looks for data-nid or "nid" fields in JSON-like contexts.
+  - playlist_url (video manifest) discovery:
+    - Primary: data-file attribute containing an m3u8 URL (HLS).
+    - Fallback: data-application and data-filename attributes, used to construct a Wowza-based HLS URL: http://vod.streamcloud.be/{application}/_definst_/mp4:{filename}.mp4/playlist.m3u8
+  - Formats
+    - Uses _extract_wowza_formats on the playlist URL, skipping dash formats.
+    - _sort_formats to order formats sensibly.
+- Metadata extraction
+  - Title: via og:title with a fallback to display_id.
+  - Description: extracts a summary paragraph inside a field with class field-type-text-with-summary.
+  - Thumbnail: og:image via _og_search_thumbnail.
+  - Upload date: parsed with unified_strdate from a date pattern in the HTML.
+  - Series: parsed from data-program attribute.
+  - Episode number: parsed from the title using a case-insensitive "aflevering N" pattern; converted with int_or_none.
+  - Tags: extracted from anchor tags linking to /tags/ pages.
+- Return value
+  - A dict with id, display_id, title, description, thumbnail, upload_date, series, episode_number, tags, formats.
+
+Notable implementation details
+- Uses multiple fallbacks to locate a playable HLS stream (m3u8):
+  - Primary data-file URL
+  - Fallback Wowza-based URL constructed from application/filename data
+- Handles gated content by attempting a login, then retrying on the embed page if needed.
+- Uses robust regex and HTML parsing helpers from Youtube-DL (e.g., _og_search_title, _html_search_regex, _search_regex, unified_strdate, int_or_none).
+- Skips DASH formats on Wowza extraction to avoid unsupported dash streams for this site.
+- _NETRC_MACHINE = 'vier' enables credentials retrieval via netrc if configured.
+
+Key class and function overview
+- VierIE
+  - Core video extractor for vier.be / vijf.be
+  - _real_initialize, _login, _real_extract
+  - Metadata extraction: title, description, thumbnail, upload_date, series, episode_number, tags
+  - Formats extraction via Wowza m3u8 playlist
+- VierVideosIE
+  - Playlist/program extractor for vier.be / vijf.be
+  - _real_extract paginates through video listing pages
+  - Builds a list of video entries using url_result pointing to Vier (the single-video extractor)
+  - Returns a playlist_result with an id like program or program-pageN
+
+Tests
+- _TESTS include several sample URLs with expected info_dict contents, including:
+  - Metadata like id, display_id, title, description, upload_date, series, tags
+  - Indications for skipping downloads or requiring login
+  - Some entries anticipate a login warning/outcome
+
+Summary
+- The module provides a robust extraction mechanism for two Belgian sites:
+  - VierIE fetches and parses a single video page, handling login, obtaining the video id, locating an HLS stream, and extracting rich metadata.
+  - VierVideosIE aggregates video links from program pages into a playlist, delegating actual video extraction to VierIE, with support for pagination and site variants (vier/vijf).
+- Implementation emphasizes flexible URL parsing, login workflows, multiple ways to locate the streaming playlist, and comprehensive metadata collection.

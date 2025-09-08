@@ -1,0 +1,48 @@
+- Purpose:
+  - Implement an extractor for RBMA Radio (RBMARadio) episodes for youtube-dl, pulling audio episode details and multiple bitrate formats from the page’s embedded JSON.
+
+- Key class:
+  - RBMARadioIE (subclass of InfoExtractor)
+
+- URL matching:
+  - _VALID_URL matches URLs like:
+    - http(s)://www.rbmaradio.com/shows/{show_id}/episodes/{id}
+    - http(s)://www.redbullradio.com/shows/{show_id}/episodes/{id}
+  - Captures show_id and id (episode_id)
+
+- Tests:
+  - _TEST provides an example URL, expected md5 for description placeholder, and an info_dict with id, ext, title, description, thumbnail, duration, timestamp, and upload_date.
+
+- Main extraction flow (_real_extract):
+  - Parse show_id and episode_id from the URL.
+  - Download the webpage for the episode.
+  - Locate a JSON blob in the page initialized in a script tag as:
+    __INITIAL_STATE__ = { ... }
+    (via _search_regex and then _parse_json).
+  - Access the episode data at: episodes[show_id][episode_id].
+
+- Title construction:
+  - Base title taken from episode['title'].
+  - If episode['showTitle'] exists, prepend it as "Show Title - Title".
+
+- Formats extraction:
+  - Build formats for available bitrates [96, 128, 192, 256] kbps.
+  - For each bitrate:
+    - Build URL by adding query parameter cbr=<abr> to episode['audioURL'] (using update_url_query).
+    - Set format_id to the string version of abr, abr to the integer, and vcodec to 'none' (audio-only).
+  - Validate all formats with _check_formats(formats, episode_id).
+
+- Metadata extraction:
+  - description: clean_html(episode.get('longTeaser')).
+  - thumbnail: convert episode['imageURL']['landscape'] to an absolute URL via _proto_relative_url.
+  - duration: int_or_none(episode.get('duration')).
+  - timestamp: unified_timestamp(episode.get('publishedAt')).
+
+- Returned data:
+  - A dict with keys: id, title, description, thumbnail, duration, timestamp, formats.
+
+- Important implementation details:
+  - Uses embedded JSON (__INITIAL_STATE__) in the page rather than an API call.
+  - Formats are audio-only (vcodec = 'none') with multiple abr options provided by appending cbr query param to the base audioURL.
+  - _proto_relative_url ensures proper absolute URL for the thumbnail.
+  - _check_formats ensures all expected formats are present/valid.

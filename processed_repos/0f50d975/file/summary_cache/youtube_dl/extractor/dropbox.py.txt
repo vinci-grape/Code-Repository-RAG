@@ -1,0 +1,30 @@
+- Purpose: A lightweight extractor for Dropbox share/download URLs used by youtube-dl. It derives a direct download URL and basic metadata (id and title) from the Dropbox share link.
+
+- Key class:
+  - DropboxIE(InfoExtractor): Subclass implementing the Dropbox share URL extractor.
+
+- Important attributes:
+  - _VALID_URL: Regex matching Dropbox share links of the form https://dropbox.com/sh/<15-char-id>/... (also supports www. prefix and /s or /sh path variants).
+  - _TESTS: Includes two tests:
+    - Test 1: Validates id extraction, extension (mp4), and title derived from the file name (with URL-decoded characters).
+    - Test 2: Checks URL pattern matching (only_matching).
+
+- Core functionality (_real_extract):
+  - Extracts the 15-character id from the URL using the _VALID_URL regex group 'id'.
+  - Determines the file name from the URL basename, then decodes percent-escapes (via compat_urllib_parse_unquote).
+  - Derives the title by stripping the file extension from the decoded basename using os.path.splitext.
+  - Builds a direct download URL by removing any dl=0 query parameter and appending dl=1 (ensuring proper delimiter ? or & based on existing query string).
+  - Returns a dict with:
+    - id: the 15-char Dropbox share id
+    - title: decoded filename without extension
+    - url: the direct download URL (with dl=1)
+
+- Implementation details:
+  - Uses url_basename(url) to obtain the last path component, then percent-decodes it.
+  - Uses a regex-based replacement to ensure the final URL forces Dropbox to serve a direct file download (dl=1).
+  - Title extraction relies on os.path.splitext on the decoded basename, which effectively trims the extension even if there’s a query string like ?dl=0 attached to the basename (the extension captured includes the query, so removing it yields a clean title).
+  - Minimal metadata: no explicit duration, uploader, or description; only id, title, and direct file URL are provided.
+
+- Limitations:
+  - Assumes the Dropbox link follows the simple share URL pattern and that removing dl=0 and adding dl=1 suffices for direct downloads.
+  - Title is derived purely from the URL/file name, not from Dropbox metadata.

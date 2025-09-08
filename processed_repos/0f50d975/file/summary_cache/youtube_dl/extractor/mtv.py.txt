@@ -1,0 +1,98 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/mtv.py
+
+Purpose
+- Implement multiple MT V (MTV/MTVN) related extractors for youtube-dl.
+- Retrieve video metadata, formats, and subtitles from MTV/MTVN services using MRSS feeds, mediagen endpoints, and page scraping.
+- Support geoblocking fallbacks (mobile versions), HLS and RTMP/FMS formats, and embedded MTV services.
+
+Key classes
+1) MTVServicesInfoExtractor (base)
+- Core helper and extraction logic used by all MTV-related IEs.
+- URL/id helpers
+  - _id_from_uri(uri): extract video id from a colon-separated URI.
+  - _remove_template_parameter(url): strip template parameters like &device={...}.
+- Feed/thumbnail helpers
+  - _get_feed_url(self, uri): to be overridden by subclasses; returns feed URL used to fetch video lists.
+  - _get_thumbnail_url(self, uri, itemdoc): extract thumbnail URL from MRSS group/thumbnail tag.
+- Format extraction
+  - _extract_mobile_video_formats(self, mtvn_id): derive best mobile video URL for geoblocked or mobile fallback; loads a mobile page, resolves a metrics URL, and returns one MP4 format.
+  - _extract_video_formats(self, mdoc, mtvn_id, video_id): parse renditions from mediagen XML.
+    - Supports HLS (mpeg-dash/HLS) via _extract_m3u8_formats.
+    - Supports FMS/RTMP-like formats, building format dicts with ext, url, format_id, width, height.
+    - Handles geoblocking: if the mediagen URL indicates country block, may fallback to mobile formats if available, else raise ExtractorError (expected).
+    - Skips unavailable or placeholder formats (siteunavail.png).
+    - Sorts formats before returning.
+- Subtitles
+  - _extract_subtitles(self, mdoc, mtvn_id): parse transcript blocks of kind 'captions'; convert cea-608 to scc; return dict of languages to list of {url, ext}.
+- Video item extraction
+  - _get_video_info(self, itemdoc, use_hls=True): given an item element from the MRSS feed, fetch mediagen data, extract:
+    - video_id, mtvn_id
+    - title (multiple fallbacks), description, timestamp
+    - mediagen_url with template params cleaned
+    - formats (via _extract_video_formats)
+    - subtitles (via _extract_subtitles)
+    - thumbnail, duration
+  - Handles inline errors returned by mediagen (text-type item with code/message).
+- Feed/title/description extraction
+  - _get_feed_query(self, uri): build query for feed access; can include language.
+  - _get_videos_info(self, uri, use_hls=True): orchestrates feed URL building and retrieval of video list.
+  - _get_videos_info_from_url(self, url, video_id, use_hls=True): fetches MRSS-like XML, extracts channel title/description, iterates items, collects video info dicts, returns a playlist_result.
+- MGID extraction (to locate video feed)
+  - _extract_triforce_mgid(self, webpage, data_zone=None, video_id=None): tries triforceManifestFeed to obtain mgid from a zones feed.
+  - _extract_child_with_type(parent, t): helper to fetch a child with a given type from a dict-like structure.
+  - _extract_mgid(self, webpage): robust MGID extraction from page via:
+    - og:url basename, data-mgid attributes, swfobject smf embeds, sm4 embed metadata, triforce MGID, __DATA__ JSON blob parsing to locate VideoPlayer config, etc.
+- Real extraction flow
+  - _real_extract(self, url): fetches page, resolves mgid with _extract_mgid, then uses _get_videos_info(mgid) to get the playlist of videos.
+
+2) MTVServicesEmbeddedIE (embedded videos)
+- Subclass of MTVServicesInfoExtractor for embedded MTV Services.
+- IE_NAME = 'mtvservices:embedded'
+- _VALID_URL matches embedded mtv n services URLs.
+- _extract_url(webpage): extracts the embedded page URL from an iframe.
+- _get_feed_url(self, uri): fetches a feed URL via a config endpoint:
+  - Calls http://media.mtvnservices.com/pmt/e1/access/index.html?uri=...&configtype=edge
+  - Picks feedWithQueryParams from the JSON config and strips extra template parameters.
+- _real_extract(self, url): extracts mgid from the embedded URL and delegates to _get_videos_info(mgid).
+
+3) MTVIE (MTV main site)
+- IE_NAME = 'mtv'
+- _VALID_URL matches MTV video pages.
+- _FEED_URL = 'http://www.mtv.com/feeds/mrss/'
+- Tests provided for a sample MTV video page.
+
+4) MTVJapanIE
+- IE_NAME = 'mtvjapan'
+- _VALID_URL for mtvjapan.com videos.
+- _GEO_COUNTRIES = ['JP']
+- _FEED_URL for international MRSS feed.
+- _get_feed_query(self, uri): overrides to pass arcEp and mgid to feed.
+
+5) MTVVideoIE
+- IE_NAME = 'mtv:video'
+- _VALID_URL covers two MTV video URL shapes (MTV site and Vevo-embedded cases).
+- _FEED_URL = 'http://www.mtv.com/player/embed/AS3/rss/'
+- _get_thumbnail_url(self, uri, itemdoc): returns 'http://mtv.mtvnimages.com/uri/' + uri (custom thumbnail lookup).
+- _real_extract(self, url): resolves mgid/videouri:
+  - If mgid not in URL, fetches page, checks Vevo embeds; if Vevo is detected, delegates to Vevo IE.
+  - Otherwise extracts uri from /uri/... path and calls _get_videos_info(uri).
+
+6) MTVDEIE
+- IE_NAME = 'mtv.de'
+- _VALID_URL for mtv.de content (videos, shows, news)
+- _FEED_URL = 'http://feeds.mtvnservices.com/od/feed/intl-mrss-player-feed'
+- _GEO_COUNTRIES = ['DE']
+- _get_feed_query(self, uri): returns {'arcEp': 'mtv.de', 'mgid': uri}
+- Tests include various block/unblock scenarios; some blocks may be skipped in CI.
+
+Main implementation details and behavior
+- Video formats: supports HLS (via m3u8) and RTMP/FMS-like formats, with proper metadata like width, height, bitrate, and a canonical format_id.
+- Geoblocking: if the standard mediagen URL indicates geo-restriction, tries mobile formats if available; otherwise raises an ExtractorError marked as expected.
+- Subtitles: extracted from MRSS transcript blocks; supports multiple languages; maps cea-608 to scc.
+- Title/description: multiple fallbacks to derive a robust video title; description and publication timestamp are parsed from MRSS and mediagen endpoints.
+- MGID extraction: robust multi-strategy approach to locate the video ID across different MTV service pages (OG tags, data attributes, embedded flash, triforce feed, and __DATA__ blobs).
+- Embedding vs direct feeds: separate paths for embedded MTV services (via a config endpoint) and standard MTV/MTVN feeds; both funnel into the same internal _get_videos_info flow when MGID is found.
+- XML/HTML parsing: relies on helper utilities like xpath_text, find_xpath_attr, compat_xpath, and fix_xml_ampersands to robustly parse various XML/HTML structures.
+- Output: playlist_result with entries consisting of per-video dictionaries containing id, title, ext, formats, subtitles, duration, timestamp, description, and thumbnail.
+
+Overall, the file provides a comprehensive set of extractors to cover MTV’s various services (MTV, MTV Japan, MTV DE, embedded MTV services, and video endpoints), with careful handling of multiple formats, geoblocking fallbacks, and robust MGID extraction.

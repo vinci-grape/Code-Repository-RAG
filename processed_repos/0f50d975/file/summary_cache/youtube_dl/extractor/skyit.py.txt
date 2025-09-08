@@ -1,0 +1,87 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/skyit.py
+
+Overview
+- A set of Youtube-DL extractors for Sky.it video content, covering both on-demand and live video delivery across Sky-branded domains (Sky.it, Sky Academy, Sky Arte, Cielo TV, MTV8, etc.).
+- Core logic centers on querying Sky’s vdp API with a domain-specific token and constructing downloadable formats (primarily HLS and Akamai-based) for Sky video assets.
+- Includes special handling for live streams (HLS) and geoblocking, plus multiple URL patterns and domain-specific wrappers.
+
+Key classes and responsibilities
+- SkyItPlayerIE (InfoExtractor)
+  - Core extractor for Sky’s player endpoint and API, used by several other IEs.
+  - Builds final video formats and metadata from Sky’s video data JSON.
+  - Handles live vs on-demand differentiation, geoblocking, and thumbnail/description/timestamps.
+  - Uses a token map (_TOKEN_MAP) to authenticate with Sky’s API based on the domain parameter in the URL.
+  - Helper:
+    - _player_url_result(video_id): returns a URL result pointing to the Sky player template with id and domain.
+    - _parse_video(video, video_id): parses Sky’s video data JSON to produce a standard info dict (id, title, formats, thumbnail, description, timestamp, duration, is_live).
+  - _real_extract(url): determines video_id, selects the correct token from _TOKEN_MAP using the URL domain, fetches video data from https://apid.sky.it/vdp/v1/getVideoData, and delegates to _parse_video.
+- SkyItVideoIE (SkyItPlayerIE)
+  - On-demand video pages under masterchef/ video / xfactor domains.
+  - _VALID_URL matches video.sky.it URLs and similar, extracting video id from the page URL structure.
+  - _real_extract(url): resolves video_id and returns _player_url_result(video_id).
+- SkyItVideoLiveIE (SkyItPlayerIE)
+  - Live video extractor for Sky.it diretta pages.
+  - _VALID_URL matches video.sky.it/diretta/<id>.
+  - _real_extract(url): loads the page, extracts asset_id from Next.js data embedded in the page, fetches live stream data via https://apid.sky.it/vdp/v1/getLivestream, and feeds it to _parse_video.
+- SkyItIE (SkyItPlayerIE)
+  - General Sky.it video pages (sport, tg24, etc.) that embed videos.
+  - _VALID_URL matches sport.tg24.sky.it style URLs with a date-based path.
+  - _VIDEO_ID_REGEX: finds the actual video_id in the page (data-videoid="...").
+  - _real_extract(url): downloads page, extracts video_id via regex, then returns _player_url_result(video_id).
+- SkyItAcademyIE (SkyItIE)
+  - Specialization for Sky Academy content.
+  - _DOMAIN overridden to 'skyacademy'.
+  - _VIDEO_ID_REGEX for extracting video ids from Sky Academy pages.
+- SkyItArteIE (SkyItIE)
+  - Specialization for arte.sky.it content.
+  - _DOMAIN overridden to 'skyarte'.
+  - _VIDEO_ID_REGEX tailored to arte sky iframe pattern.
+- CieloTVItIE (SkyItIE)
+  - Specialization for cielotv.it.
+  - _DOMAIN overridden to 'cielo'.
+  - _VIDEO_ID_REGEX for extracting video IDs from CieloTV pages.
+- TV8ItIE (SkyItVideoIE)
+  - Specialization for tv8.it video pages.
+  - _DOMAIN overridden to 'mtv8'.
+  - Uses parent SkyItVideoIE behavior to resolve via the Sky player URL result.
+
+Important implementation details
+- Token handling and API access
+  - _TOKEN_MAP provides domain-specific tokens (e.g., cielo, sky, skyacademy, etc.).
+  - _real_extract uses the domain parameter from the URL query to pick a token with dict_get(self._TOKEN_MAP, (domain, 'sky')), defaulting to 'sky' if not found.
+  - Calls to Sky’s API: https://apid.sky.it/vdp/v1/getVideoData with caller=sky, id=video_id, token=token, and geo_verification_headers() for geolocation checks.
+  - Live stream fetching uses https://apid.sky.it/vdp/v1/getLivestream with asset_id.
+- Video formats and delivery
+  - On-demand: formats derived via Akamai from the hls_url using _extract_akamai_formats with host mapping {'http': 'videoplatform.sky.it'}.
+  - Live: formats derived from HLS via _extract_m3u8_formats.
+  - Sorting of formats with _sort_formats for stable preference ordering.
+- Geographical restrictions
+  - If no hls_url and a geoblock flag is present (geoblock for live, geob for non-live), raises geo_restricted for IT.
+- Metadata extraction
+  - Titles: live titles processed through _live_title; others taken as-is.
+  - Thumbnails pulled from video_still / video_still_medium / thumb fields, if available.
+  - Description from short_desc.
+  - Timestamps via unified_timestamp(video.get('create_date')).
+  - Duration from duration_sec (int) or parse_duration(video.get('duration')).
+- Page parsing for live data
+  - Live data extraction requires parsing Next.js data embedded in HTML: looks for a script tag with id "__NEXT_DATA__" and extracts asset_id from initialState.livePage.content.asset_id.
+- URL patterns and domain coverage
+  - Provides a suite of IEs to cover a wide range of Sky.it properties:
+    - SkyItVideoIE for video.sky.it URLs
+    - SkyItVideoLiveIE for live video pages
+    - SkyItIE for Sky.it sport and tg24 pages
+    - SkyItAcademyIE for Sky Academy
+    - SkyItArteIE for arte.sky.it
+    - CieloTVItIE for cielotv.it
+    - TV8ItIE for tv8.it (inherits from SkyItVideoIE)
+- Testing
+  - Several _TESTS blocks verify on-demand and live extraction, including URL matching, expected IDs, titles, timestamps, and MD5 checks for downloaded content.
+  - Some tests indicate expected warnings (e.g., inability to download an f4m manifest) which is typical for legacy or alternative manifest paths.
+
+Notable nuances
+- The code is designed to centralize core video data handling in SkyItPlayerIE and reuse it across many domain-specific IEs, reducing duplication.
+- The domain-based token mechanism allows Sky’s API to be accessed securely for a variety of Sky properties, with a fallback to a generic token when a domain-specific one isn’t available.
+- Live extraction relies on both page data parsing and API calls, illustrating handling of Sky’s dynamic live content differently from static on-demand videos.
+- Geo-restriction handling is integrated to respect country limitations (Italy), with specific checks for missing HLS URLs and geolocation blocks.
+
+In short, this file provides a robust set of extractors to retrieve Sky.it videos (live and on-demand) across multiple Sky properties by querying Sky’s vdp API with domain-specific tokens, constructing downloadable formats, and handling geolocation and metadata consistently.

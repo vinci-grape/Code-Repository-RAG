@@ -1,0 +1,80 @@
+Here is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/myspace.py.
+
+What the code does
+- Implements two extractors for MySpace content in youtube-dl:
+  - MySpaceIE: extracts individual media items (videos and songs) from MySpace pages.
+  - MySpaceAlbumIE: extracts albums (playlists) of songs from MySpace pages.
+
+Key classes and main functionality
+- MySpaceIE (InfoExtractor)
+  - URL matching (_VALID_URL): recognizes two media types:
+    - video/… with a video_id
+    - music/song/…-<song_id>-… with a song_id
+  - _real_extract(url):
+    - Determines whether the media is a song or a video (is_song).
+    - Downloads the page, optionally fetches a player URL from the page (videoSwf).
+    - Builds a formats list from provided stream URLs via a helper:
+      - formats_from_stream_urls(stream_url, hls_stream_url, http_stream_url, width, height)
+        - Adds HLS (m3u8_native) format if hls_stream_url exists. Ext is mp4 for video, m4a for songs. Includes vcodec: 'none' for songs.
+        - Adds RTMP format if stream_url and player_url exist, splitting stream_url into RTMP URL and play_path. Ext is flv; includes width, height, vcodec.
+        - Adds HTTP format if http_stream_url exists.
+        - Returns a list of formats.
+    - Song-specific flow:
+      - Tries to locate song metadata in the page (data-song-id) and extracts data-... attributes (stream-url, hls-stream-url, http-stream-url, duration, artist, etc.).
+      - Builds formats with formats_from_stream_urls.
+      - If no formats found, attempts cross-host fallbacks:
+        - vevo-id → returns a Vevo video URL (vevo:ID)
+        - youtube-id → returns a YouTube URL
+        - Otherwise raises ExtractorError
+      - Returns a dict with:
+        - id (song_id), title (og title), uploader, uploader_id, thumbnail (og image), duration, formats.
+    - Video-specific flow:
+      - Extracts a JSON-like context block from the page, gets video = video data.
+      - Builds formats from video.get('streamUrl'), video.get('hlsStreamUrl'), video.get('mp4StreamUrl') with width/height.
+      - Returns a dict with:
+        - id (video_id), title, description, thumbnail, uploader, uploader_id, duration, timestamp (parsed from dateAdded), formats.
+  - Metadata helpers used: _og_search_title, _og_search_thumbnail, int_or_none, parse_iso8601, _parse_json.
+
+- MySpaceAlbumIE (InfoExtractor)
+  - IE_NAME = 'MySpace:album'
+  - _VALID_URL matches albums: https://myspace.com/<user>/music/album/<title>-<id>
+  - _real_extract(url):
+    - Extracts playlist_id and display_id from the URL.
+    - Downloads the page and finds all track paths via the pattern '"music:song" content="<path>"'.
+    - If none found, raises ExtractorError (with a hint about country availability).
+    - Creates entries as a list of youtube-dl style URL results using MySpaceIE for each track path.
+    - Returns a playlist object with:
+      - id, display_id, title (og), and entries (playlist items).
+
+Important implementation details
+- Regular expressions:
+  - _VALID_URL for MySpaceIE carefully distinguishes between video and music song formats and captures IDs.
+  - Song data extraction uses data-song-id and data-... attributes to fetch streaming URLs.
+  - Album extraction uses a simple pattern to gather track entries from the page.
+- Handling of songs vs videos:
+  - Songs are treated as audio with vcodec set to 'none' and potential different extensions (m4a for HLS).
+  - Videos use standard video formats (mp4) and include dimensions if available.
+- Fallback logic for songs without direct formats:
+  - If no downloadable formats are found, the code checks for vevo-id or youtube-id in the song metadata and delegates to Vevo or Youtube extractors accordingly.
+- Format handling:
+  - Supports multiple formats per media: HLS (native), RTMP, and HTTP.
+  - Each format includes contextual metadata like width/height and vcodec when applicable.
+- Metadata extraction:
+  - Uses OpenGraph helpers for title and thumbnail.
+  - Uses parse_iso8601 for timestamps, and int_or_none for numeric fields like duration.
+- Error handling:
+  - If a downloadable song cannot be found, it warns and returns gracefully.
+  - Album extraction raises a helpful ExtractorError if no tracks are found.
+
+Test coverage notes (as seen in _TESTS)
+- MySpaceIE tests cover:
+  - A video with expected metadata (id, title, uploader, timestamps, etc.).
+  - A song with expected metadata.
+  - A cross-site fallback scenario (Vevo/YouTube) if direct formats aren’t available.
+  - Some entries are marked only_matching to indicate they’re validated by URL pattern rather than extraction in tests.
+- MySpaceAlbumIE tests validate:
+  - Album title, id, and that it yields a playlist with multiple song entries.
+  - Behavior for country-restricted albums.
+
+In short
+- The file provides robust extraction for MySpace media, handling both videos and songs with multiple streaming formats, cross-platform fallbacks, and album playlists by parsing page content and embedded JSON. It includes careful metadata extraction and error handling to cover various edge cases.

@@ -1,0 +1,40 @@
+Single-purpose extractor for sxyprn.com post pages (YourPorn)
+
+Overview
+- Purpose: Extract direct MP4 video URL and metadata from a YourPorn-style post on sxyprn.com.
+- Class: YourPornIE(InfoExtractor)
+- URL pattern (_VALID_URL): matches https://sxyprn.com/post/{id} (with or without www).
+
+Main flow (_real_extract)
+- Get video_id from URL.
+- Download the page HTML.
+- Locate a JSON blob inside a data-vnfo attribute using a regex and parse it with _parse_json.
+- Access the top-level entry for video_id in that JSON and split the resulting path on '/' to obtain a list of path components (parts).
+- Reconstruct the final video URL:
+  - Compute num as the sum of all numeric digits found in parts[6] and parts[7].
+  - Adjust parts[5] by subtracting that numeric sum (store back as string).
+  - Append '8' to parts[1].
+  - Join the parts with '/' and resolve to an absolute URL via urljoin.
+- Metadata extraction:
+  - Title: try a regex targeting an element with class PostEditTA; if not found, fall back to Open Graph description. Trim whitespace.
+  - Thumbnail: from Open Graph image, via _og_search_thumbnail.
+  - Duration: extract a duration string from the page (pattern duration: <tag>HH:MM:SS or MM:SS) and convert with parse_duration.
+  - Age limit: hard-coded to 18.
+  - Ext: 'mp4'
+- Return a dict with: id, url, title, thumbnail, duration, age_limit, ext.
+
+Key implementation details
+- Dependency usage:
+  - InfoExtractor base class, compat_str for cross-version string handling.
+  - parse_duration to convert duration strings to seconds.
+  - urljoin to build the absolute video URL from a relative path.
+- Data extraction strategy:
+  - Instead of parsing a straightforward video URL, the code reads an obfuscated path from a JSON blob in data-vnfo, then applies arithmetic and string modifications to reconstruct the real video URL.
+  - This involves summing digits from two path components and adjusting a numeric component, plus appending a digit to another component before forming the final URL.
+- Robustness considerations:
+  - Title extraction includes a fallback to og:description if the primary regex fails.
+  - Duration parsing is defensive (default=None) and passed through parse_duration.
+  - Tests (_TESTS) include a real URL with an expected MD5 for the retrieved MP4 and a second test ensuring the extractor only matches the URL (only_matching).
+
+Notes
+- This extractor is tailored to sxyprn.com’s post pages and relies on specific HTML/JSON structures present on those pages; changes to the page format could require adjustments.

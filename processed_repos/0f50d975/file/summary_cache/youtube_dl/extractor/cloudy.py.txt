@@ -1,0 +1,41 @@
+Concise summary of CloudyIE extractor (youtube-dl/youtube_dl/extractor/cloudy.py)
+
+- Purpose
+  - Implement a video extractor for cloudy.ec, returning standard InfoExtractor metadata for a Cloudy video.
+
+- Main class
+  - CloudyIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL matches cloudy.ec/v/<id> or cloudy.ec/embed.php?...id=<id>, capturing the video id (alphanumeric).
+
+- Tests
+  - _TESTS includes:
+    - A v/ page test with expected id, extension, title, upload_date, and view_count.
+    - An embed.php page test with only_matching to ensure URL pattern matches.
+
+- Core extraction flow (_real_extract)
+  - Extract video_id using _match_id(url).
+  - Fetch embed page: https://www.cloudy.ec/embed.php with query params id=video_id, playerPage=1, autoplay=1.
+  - Parse HTML5 video entries from the embed page using _parse_html5_media_entries and take the first entry as the initial info dictionary.
+  - Optionally fetch the v page: https://www.cloudy.ec/v/<video_id> (fatal=False so it won’t error if unavailable).
+  - If the v page is available, enhance metadata by:
+    - Title: extract from a header tag using a regex on the v page.
+    - Upload date: extract a Published at YYYY-MM-DD date string and convert to YYYYMMDD using unified_strdate.
+    - View count: extract a numeric value followed by "views<" and convert to int using str_to_int.
+  - Fallbacks and defaults:
+    - If title is missing after augmentation, use the video_id as the title.
+    - Ensure info['id'] is set to video_id.
+  - Return the final info dictionary (includes id, title, and the metadata from the HTML5 entry such as ext and video formats).
+
+- Key implementation details
+  - Uses two-page approach: embed page to get initial HTML5 media entries, then an additional v page to enrich metadata when available.
+  - Uses _parse_html5_media_entries to obtain media formats from the embed page.
+  - Uses fatal=False for the secondary page fetch to gracefully handle missing data.
+  - Metadata extraction relies on simple regexes and utility functions:
+    - unified_strdate to normalize dates to the standard YYYYMMDD format.
+    - str_to_int to convert view counts with thousand separators to integers.
+  - Ensures consistency by setting info['id'] to the extracted video_id.
+
+- Output
+  - Returns a dict with at least id, title, and details from the HTML5 media entries (e.g., ext, and formats). If available, includes upload_date and view_count parsed from the v page.

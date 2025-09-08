@@ -1,0 +1,57 @@
+Here is a concise but comprehensive summary of the AOL extractor code.
+
+- Purpose
+  - Implement a YouTube-dl extractor for AOL video content. It can handle AOL-hosted videos and as a special case, Yahoo-hosted videos embedded in AOL URLs.
+
+- Class and inheritance
+  - Class: AolIE
+  - Inherits from YahooIE to reuse Yahoo video handling for certain IDs.
+
+- Key metadata
+  - IE_NAME: "aol.com"
+  - _VALID_URL: Regex that matches AOL video URLs (including aol-video: scheme) and captures the video id. Accepts:
+    - 9-digit numeric IDs
+    - 24-hex-character IDs
+    - UUID-like IDs
+  - _TESTS: Includes several test cases (valid AOL URLs with expected metadata, and some only_matching cases). Some tests expect m3u8 download support and mp4 extensions.
+
+- Main extraction flow (_real_extract)
+  - Extract video_id using _match_id(url).
+  - Special case: if video_id contains a dash ('-'), delegate to Yahoo extraction via _extract_yahoo_video(video_id, 'us').
+  - Otherwise, fetch details from AOL’s feed API:
+    - Endpoint: https://feedapi.b2c.on.aol.com/v1.0/app/videos/aolon/{video_id}/details
+    - Expect response structure: { 'response': { 'statusText': 'Ok', 'data': { ... } } }
+    - If statusText != 'Ok', raise ExtractorError.
+  - Build formats:
+    - Start with videoMasterPlaylist (if present) via _extract_m3u8_formats with m3u8_id='hls', fatal=False.
+    - Iterate over video_data['renditions']:
+      - If rendition['url'] is present:
+        - If rendition['format'] == 'm3u8', add formats via _extract_m3u8_formats(video_url, video_id, 'mp4', m3u8_id='hls', fatal=False).
+        - Else (non-m3u8):
+          - Create a format dict f with 'url' and 'format_id' (from rendition['quality']).
+          - Try to determine width/height:
+            - First attempt: extract from URL with regex (\d+)x(\d+).
+            - If not found, parse width/height from query string parameters w and h using compat_parse_qs and compat_urllib_parse_urlparse.
+          - Append f to formats.
+    - Sort formats with _sort_formats(formats, ('width', 'height', 'tbr', 'format_id')) for sensible ordering.
+  - Return metadata dictionary:
+    - id: video_id
+    - title: video_data['title']
+    - duration: int_or_none(video_data.get('duration'))
+    - timestamp: int_or_none(video_data.get('publishDate'))
+    - view_count: int_or_none(video_data.get('views'))
+    - description: video_data.get('description')
+    - uploader: video_data.get('videoOwner')
+    - formats: the collected and sorted formats list
+
+- Important implementation details
+  - Uses aol-specific API endpoint to fetch video details and available formats.
+  - Robust handling of missing fields: uses int_or_none for numeric fields, url_or_none for URLs, and skips renditions without a URL.
+  - Supports both m3u8 master playlists and individual renditions (including non-m3u8 formats).
+  - Width/height extraction logic:
+    - Prefer width/height from the URL pattern if present (e.g., "1234x720").
+    - If not present, fall back to parsing w and h query parameters from the URL.
+  - Sorting prioritizes video resolution, then tbr (bitrate), then format_id for consistent playback options.
+  - Special-case delegation to Yahoo extractor for IDs containing a dash, enabling seamless handling of Yahoo-hosted content hosted through AOL paths.
+
+In short, AolIE fetches AOL video details, aggregates multiple formats (including m3u8 and direct URLs), derives resolution metadata when possible, and returns a structured information dictionary compatible with youtube-dl’s standard output.

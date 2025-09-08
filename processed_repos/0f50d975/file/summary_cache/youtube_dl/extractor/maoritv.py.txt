@@ -1,0 +1,35 @@
+Here's a concise summary of the code in youtube-dl/youtube_dl/extractor/maoritv.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor for Maori TV video pages. It discovers the underlying Brightcove video ID on the Maori TV site and delegates the actual video extraction to the Brightcove extractor.
+
+- Key class
+  - MaoriTVIE (subclasses InfoExtractor)
+
+- Main attributes
+  - _VALID_URL: Regular expression that matches Maori TV show pages. It captures the final path segment as the video display id.
+  - _TEST: Example test case with a sample Maori TV URL, expected md5, and an info_dict containing id, extension, title, upload_date, timestamp, description, and uploader_id.
+  - BRIGHTCOVE_URL_TEMPLATE: Template URL for the Brightcove player that will be used to load the actual video. It includes a specific account id (1614493167001) and expects a videoId parameter.
+
+- Core method
+  - _real_extract(self, url)
+    - display_id = self._match_id(url): extracts the display id from the URL using the _VALID_URL pattern.
+    - webpage = self._download_webpage(url, display_id): fetches the page HTML.
+    - brightcove_id = self._search_regex(r'data-main-video-id=["\'](\d+)', webpage, 'brightcove id'): finds the Brightcove video ID embedded in the page (from a data-main-video-id attribute).
+    - Returns a URL result pointing to the BrightcoveNew extractor with:
+      - URL: BRIGHTCOVE_URL_TEMPLATE % brightcove_id
+      - extractor name: 'BrightcoveNew'
+      - id: brightcove_id
+
+- How it works
+  - The extractor does not parse and return video formats directly. Instead, it locates the underlying Brightcove video ID present in the Maori TV page and constructs a Brightcove player URL. It then delegates extraction to the BrightcoveNew extractor, which handles actual retrieval of video formats.
+
+- Important implementation details
+  - Uses unicode_literals for Python 2/3 compatibility.
+  - The _VALID_URL pattern accommodates multiple segments in the shows path (e.g., /shows/korero-mai/S01E054/...).
+  - The _TEST data indicates expected metadata (title, id, timestamp, etc.) for the sample URL, including an mp4 extension.
+  - The approach assumes the Maori TV page embeds a data-main-video-id attribute containing the Brightcove video ID.
+
+- Potential edge cases
+  - If data-main-video-id is missing or changed, _search_regex would fail, raising an extraction error.
+  - If Brightcove URL structure changes, the BRIGHTCOVE_URL_TEMPLATE may need updating.

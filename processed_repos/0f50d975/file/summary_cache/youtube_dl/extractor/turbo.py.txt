@@ -1,0 +1,64 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/turbo.py
+
+Purpose
+- Implement a YouTube-DL extractor for Turbo (turbo.fr) video pages. It fetches page metadata and available video formats from an XML API and returns a standard info dictionary.
+
+Key components
+- TurboIE class (subclass of InfoExtractor)
+  - _VALID_URL: Regular expression to identify Turbo video pages. Matches URLs like http(s)://www.turbo.fr/videos-voiture/<id>-...
+  - _API_URL: Template URL to fetch XML metadata for a given video id.
+  - _TEST: Sample test case with URL, expected md5, and expected info_dict (id, ext, duration, title, description, thumbnail).
+
+Main functionality (_real_extract)
+- URL parsing
+  - Extracts video_id from the URL using _VALID_URL.
+  - Downloads the webpage HTML for description/meta extraction.
+
+- Metadata retrieval
+  - Fetches XML metadata via _API_URL.format(video_id).
+  - Locates the item under channel/item in the XML.
+  - If no item is found, raises ExtractorError with expected=True.
+  - Extracts:
+    - title from ./title (XML path relative to item) using xpath_text.
+    - duration from ./durate (note: likely a bug; should probably be ./duration). Uses int_or_none to convert to int.
+    - thumbnail from ./visuel_clip.
+    - description from the HTML page’s meta description via _html_search_meta.
+
+- Formats extraction
+  - Initializes formats list and a quality selector using qualities(['3g', 'sd', 'hq']).
+  - Iterates over child elements of item and matches tags named url_video_<quality> via regex.
+  - For each matching tag:
+    - quality label is extracted from the tag name.
+    - Adds a format dict with:
+      - format_id: quality string
+      - url: text content of the tag (video URL)
+      - quality: numeric ranking from get_quality(quality)
+  - Sorts formats with _sort_formats(formats).
+
+- Return value
+  - A dict with:
+    - id: video_id
+    - title: extracted title
+    - duration: extracted (or None due to potential bug)
+    - thumbnail: extracted thumbnail URL
+    - description: page meta description
+    - formats: list of video formats
+
+Implementation details and considerations
+- Data sources:
+  - Web page HTML for description/meta.
+  - XML API at http://www.turbo.fr/api/tv/xml.php?player_generique=player_generique&id=<video_id> for metadata and video URLs.
+- XML parsing:
+  - Uses ElementTree-like interface (playlist.find('./channel/item')) to locate the main item.
+  - Extracts fields with xpath_text for simple XPath-based text retrieval.
+- Formats:
+  - Discovers video URLs by inspecting child elements of the item for tags following the pattern url_video_<quality>, enabling dynamic support for multiple qualities.
+  - Uses qualities(['3g', 'sd', 'hq']) to assign a comparable ranking for sorting.
+- Error handling:
+  - If the XML does not contain a channel/item, it raises ExtractorError with expected=True.
+- Potential issue:
+  - The code uses './durate' as the XML tag for duration. If the actual tag is './duration', duration will be None, causing mismatch with expected test data. This looks like a bug/typo (durate vs duration) that could affect correct extraction of duration.
+- Compatibility:
+  - Uses compat_str for string handling and int_or_none for safe integer parsing, ensuring compatibility across Python versions used by youtube-dl.
+- Testing:
+  - The _TEST entry provides an example URL and expected metadata, including ext 'mp4', duration, title, description, and thumbnail pattern.

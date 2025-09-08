@@ -1,0 +1,27 @@
+Concise summary:
+
+- Purpose
+  - ThisOldHouseIE is a youtube-dl extractor for This Old House site pages. It does not download the video directly; instead it locates a Zype video embed on the page and delegates to the Zype extractor to obtain the actual media.
+
+- Main class
+  - ThisOldHouseIE(InfoExtractor)
+    - _VALID_URL: Regex that matches This Old House URLs, including /watch, /how-to, /tv-episode, or other slug paths with a numeric segment.
+    - _ZYPE_TMPL: Template URL for the Zype embed: https://player.zype.com/embed/<id>.html?api_key=...
+    - _TESTS: Unit tests describing a real page (with download skipped, expecting specific id, title, description, timestamp, and upload_date) and several other URLs that should match the extractor’s URL pattern but are marked only_matching.
+
+- Key method
+  - _real_extract(self, url)
+    - Extracts display_id from the URL using _match_id.
+    - Downloads the page HTML with _download_webpage.
+    - Searches for a Zype video id within an iframe src using _search_regex:
+      - Pattern targets an iframe whose src is //...thisoldhouse.(chorus.build|com)/videos/zype/<24-hex-chars>
+      - Captures the 24-character hexadecimal video id.
+    - Returns a URL result pointing to the Zype embed using the extracted video_id via self.url_result(self._ZYPE_TMPL % video_id, 'Zype', video_id). This delegates actual video extraction to the Zype extractor.
+
+- Important implementation details
+  - The code relies on the presence of an iframe embed whose src contains /videos/zype/<24-hex-id> on This Old House pages.
+  - The extracted id is a 24-character hex string, which is passed to the Zype embed template.
+  - The final extraction delegates to the Zype extractor, meaning the actual download/format information is provided by Zype.
+  - The unit tests include a successful extraction example with metadata (title, description, timestamp, upload_date) and several other URL patterns marked as only_matching to ensure correct URL matching behavior.
+
+Overall, this extractor serves as a bridge: it parses This Old House pages to find a Zype video reference and then leverages the existing Zype extractor to retrieve the video.

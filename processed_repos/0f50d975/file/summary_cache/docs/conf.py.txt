@@ -1,0 +1,23 @@
+This is a Sphinx documentation configuration file (docs/conf.py) for the youtube-dl project.
+
+Key points and implementation details:
+- Purpose: Configure Sphinx to build the project documentation, primarily using autodoc to generate docs from source code docstrings.
+- Python path setup: Prepends the project root to sys.path so autodoc can import the youtube_dl package during doc generation.
+- Extensions: Uses only sphinx.ext.autodoc, enabling automatic documentation from Python docstrings.
+- Templates and sources: 
+  - templates_path set to ['_templates']
+  - source_suffix set to '.rst'
+  - master_doc set to 'index' (the root toctree document)
+- Project metadata:
+  - project = 'youtube-dl'
+  - copyright = '2014, Ricardo Garcia Gonzalez'
+  - version and release are derived from youtube_dl.version.__version__ (version = __version__; release = version)
+- Build behavior:
+  - exclude_patterns = ['_build'] to ignore built files during documentation generation
+- Output formatting:
+  - pygments_style = 'sphinx' for code highlighting
+  - html_theme = 'default' for HTML output
+  - html_static_path = ['_static'] for custom static assets
+  - htmlhelp_basename = 'youtube-dldoc' as the base name for HTML help files
+
+Overall, it’s a minimal Sphinx config focused on autodoc integration and basic HTML output settings, with dynamic versioning sourced from the package itself.

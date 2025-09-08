@@ -1,0 +1,59 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/msn.py
+
+- Purpose
+  - Implement an info extractor MSNIE for youtube-dl (yt-dl) to extract video(s) from MSN pages. It handles both single videos and playlists, and may delegate to other extractors for embedded players (AOL Vidible, Dailymotion, YouTube, NBCSports).
+
+- Key class
+  - MSNIE(InfoExtractor)
+    - _VALID_URL: Regexp to identify MSN video/listing pages. Captures display_id and an id-like segment from URLs such as msn.com/.../vi-<id>.
+    - _TESTS: Several tests:
+      - A direct video page with metadata (mp4 format) and expected info (title, duration, uploader, etc.).
+      - A page that is a playlist containing multiple embedded providers (Dailymotion).
+      - Various “only_matching” cases for non-video pages (different locales/sections).
+
+- Main function
+  - _real_extract(self, url)
+    - Parse URL to obtain display_id and page_id using _VALID_URL.
+    - Download the webpage with _download_webpage.
+    - Iterate over data-metadata blocks in the page:
+      - For each block, parse JSON from data-metadata (unescape HTML first).
+      - If video has providerId and playerName:
+        - Depending on playerName, build a delegating entry (external video) via:
+          - AOL: If provider_id starts with http, extract Vidible id from the URL, and create an entry pointing to AOL with that id.
+          - Dailymotion: Create an entry targeting Dailymotion with the provider_id.
+          - YouTube: Create an entry targeting YouTube with the provider_id.
+          - NBCSports: Create an entry pointing to NBCSportsVPlayer with a constructed URL.
+        - Append the delegating entry to the results and continue to next metadata block.
+      - Otherwise, treat the block as a normal MSN video:
+        - video_id = video['uuid']; title = video['title'].
+        - Build formats from video.get('videoFiles', []):
+          - For each file:
+            - If URL includes format=m3u8-aapl: use _extract_m3u8_formats (m3u8_id 'hls', fatal=False).
+            - If URL includes format=mpd-time-csf: use _extract_mpd_formats (dash, fatal=False).
+            - If '.ism' in URL: if ends with '.ism', append '/manifest', then use _extract_ism_formats (mss, fatal=False).
+            - Else: treat as direct mp4:
+              - Collect format_id from file_.get('formatCode'), URL, width/height, and vbr (extracted from URL with regex _(\d+)\.mp4). Set 'preference' to 1 if formatCode is '1001'.
+        - Sort formats with _sort_formats.
+        - Subtitles from video.get('files', []):
+          - For each file_ with a formatCode:
+            - If formatCode is '3100', set subtitles language to file_.get('culture', 'en') and add an entry with:
+              - ext: determined by determine_ext(format_url, default 'ttml')
+              - url: format_url
+        - Append a video entry to entries containing:
+          - id (video_id), display_id, title, description, thumbnail, duration, uploader, uploader_id, creator, subtitles, formats.
+    - After processing all metadata blocks:
+      - If no entries were found, try to extract a data-error message from the page (data-error attribute) and raise ExtractorError with that message.
+    - Return a playlist_result(entries, page_id) representing the list of videos (or embedded entries) for the page.
+
+- Important implementation details
+  - The extractor parses multiple data-metadata blocks on a page, allowing both standalone videos and playlists containing multiple embedded players.
+  - It supports dynamic delegation to external providers (AOL Vidible, Dailymotion, YouTube, NBCSports) when appropriate, by emitting url_result entries that route to the corresponding extractors.
+  - Formats handling is robust:
+    - HLS (m3u8-aapl), DASH (mpd-time-csf), and MSS (ISM) are extracted with dedicated helpers.
+    - Direct mp4 formats are built with metadata such as width, height, and vbr (parsed from the URL pattern) and a special preference for a specific formatCode ('1001').
+  - Subtitles extraction is based on entries in video.get('files') with a specific formatCode ('3100'), mapping to language and proper file extension via determine_ext.
+  - Error handling: if no video entries are discovered, the code tries to read a data-error value from the page and raises a descriptive ExtractorError.
+  - The code uses helpers from youtube-dl framework:
+    - _download_webpage, _parse_json, _search_regex, _extract_m3u8_formats, _extract_mpd_formats, _extract_ism_formats, _sort_formats, determine_ext, int_or_none, unescapeHTML, and playlist_result.
+
+Overall, MSNIE is a multi-purpose extractor that reads MSN pages, detects either native MSN videos or embedded external players, and exposes a unified playlist of video entries with proper formats and subtitles ready for downstream processing by youtube-dl.

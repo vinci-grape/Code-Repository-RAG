@@ -1,0 +1,74 @@
+Concise but comprehensive summary of the file
+
+Purpose
+- Implement a YouTube-DL extractor for Turner/TT (TBS and TNT Drama) video pages. It fetches page data, resolves streaming information via Turner’s NGTV service, and returns a structured video metadata dictionary including thumbnails.
+
+Key class
+- TBSIE(TurnerBaseIE)
+  - Inherits common Turner NGTV handling from TurnerBaseIE.
+
+Main URL pattern
+- _VALID_URL matches:
+  - Sites: tbs.com or tntdrama.com
+  - Paths like: /movies/NAME/… or /shows/NAME/(clips|season-<n>/episode-<m>)/<id>
+  - The path component after shows/movies identifies the specific video entry.
+
+Tests
+- _TESTS contains three test cases:
+  - A real example URL pulling metadata (ensures id, title, description, timestamp, etc.).
+  - Some other URLs marked as only_matching to ensure regex matching without extraction.
+
+Primary workflow in _real_extract
+1. Parse URL components
+   - Extract site, path, display_id from the _VALID_URL match.
+2. Download the page
+   - Retrieve the HTML content of the page.
+3. Parse Drupal settings JSON
+   - Locate a script tag with data-drupal-selector="drupal-settings-json" and extract its JSON content.
+   - Parse the JSON to get drupal_settings.
+4. Locate the video entry
+   - From drupal_settings['turner_playlist'], pick the first entry where v['url'] == path.
+   - Extract media_id and title from that entry.
+5. Prepare token/authorization data
+   - Parse the ngtv_token_url from drupal_settings and convert its query string into a dict (tokenizer_query).
+6. Fetch NGTV info
+   - Call _extract_ngtv_info(media_id, tokenizer_query, extra_args), where extra_args includes:
+     - 'url': original URL
+     - 'site_name': first three letters of site, uppercased (e.g., 'TBS', 'TNT')
+     - 'auth_required': whether video_data['authRequired'] == '1'
+   - This leverages TurnerBaseIE’s NGTV handling to get streaming URLs, formats, etc.
+7. Build thumbnails
+   - Iterate video_data.get('images', {}) and collect entries with:
+     - image_url present and image['type'] == 'video'
+     - Optionally parse width/height from the URL if it contains a dimension pattern like "123x456" using a regex.
+8. Populate metadata
+   - Update the info dict with:
+     - id: media_id
+     - title: title
+     - description: video_data['descriptionNoTags'] or video_data['shortDescriptionNoTags'], stripped of HTML/tags
+     - duration: float_or_none(video_data['duration']) or existing info duration
+     - timestamp: int_or_none(video_data['created'])
+     - season_number: int_or_none(video_data['season'])
+     - episode_number: int_or_none(video_data['episode'])
+     - thumbnails: the assembled list
+9. Return the info dict
+   - The final dictionary conforms to youtube-dl’s standard video info structure, including streaming formats discovered via NGTV.
+
+Implementation details and nuances
+- Integration with TurnerBaseIE
+  - Relies on _extract_ngtv_info provided by TurnerBaseIE to obtain NGTV streaming information using a token service, with the extra_args dict guiding site name and auth behavior.
+- Metadata extraction
+  - Descriptions are chosen from descriptionNoTags or shortDescriptionNoTags and stripped of HTML tags.
+- Thumbnails
+  - Only include image entries of type 'video' with valid URLs.
+  - Width/height extraction from the URL is attempted using a pattern matching digits x digits.
+- Site naming
+  - 'site_name' passed to NGTV is derived from the first three letters of the site (uppercased), e.g., 'TBS' or 'TNT'.
+- Robustness
+  - The code safely iterates to find the matching video in the turner_playlist; if the expected structures are missing, it would raise an error as the dataset is assumed well-formed for valid pages.
+- Compatibility
+  - Uses compatibility helpers (compat_urllib_parse_urlparse, compat_parse_qs) to handle URL parsing across Python versions.
+  - Uses utility helpers (float_or_none, int_or_none, strip_or_none) to sanitize metadata values.
+
+Main takeaway
+- This extractor fetches a page from TBS or TNT Drama, reads embedded Drupal settings to locate the specific video entry, uses Turner’s NGTV token-based API to fetch streaming information, collects metadata and thumbnails, and returns a structured info dictionary suitable for youtube-dl.

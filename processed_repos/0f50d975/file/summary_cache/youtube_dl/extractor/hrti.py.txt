@@ -1,0 +1,71 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/hrti.py
+
+Overview
+- This module implements YouTube-DL extractors for Croatian Radiotelevision (HRTi) content from the site hrti.hrt.hr.
+- It provides a base extractor that handles API bootstrap and login, plus two concrete extractors:
+  - HRTiIE: extracts individual videos
+  - HRTiPlaylistIE: extracts playlists (categories) of videos
+
+Key classes and functionality
+- HRTiBaseIE (InfoExtractor)
+  - Purpose: Bootstrap API session and authentication, expose common URLs/tokens to subclasses.
+  - Constants:
+    - _NETRC_MACHINE = 'hrti' (credentials lookup)
+    - _APP_LANGUAGE = 'hr', _APP_VERSION = '1.1', _APP_PUBLICATION_ID = 'all_in_one'
+    - _API_URL = 'http://clientapi.hrt.hr/client_api.php/config/identify/format/json'
+  - _initialize_api():
+    - POSTs to _API_URL with application_publication_id to obtain a uuid.
+    - PUTs with uuid, publication_id, and app_version to obtain session info.
+    - Extracts session_id, and modules describing how to reach search/login/logout endpoints.
+    - Builds:
+      - self._search_url: search endpoint for VOD/catalog (formatted with language and app id)
+      - self._login_url: login endpoint (with session_id)
+      - self._logout_url: logout endpoint
+  - _login():
+    - Retrieves username/password via _get_login_info().
+    - If not provided, raises login_required.
+    - Posts credentials to _login_url to obtain auth info.
+    - Handles possible 406 error by parsing error payload from the HTTP error.
+    - On error in response, raises ExtractorError with the server-provided message.
+    - Stores self._token = secure_streaming_token for subsequent media requests.
+  - _real_initialize():
+    - Calls _initialize_api() and then _login().
+
+- HRTiIE (video extractor, subclass of HRTiBaseIE)
+  - _VALID_URL: accepts either hrti:<digits> or https://hrti.hrt.hr/#/video/show/<id>/<optional-display-id>, extracting groups short_id/id and display_id.
+  - _TESTS: includes several test cases (some requiring credentials). Validates id, display_id, title, description, duration, view_count, average_rating, episode/season numbers, and age_limit.
+  - _real_extract(url):
+    - Determines video_id from group 'short_id' or 'id'; display_id from 'display_id' or video_id.
+    - Downloads video metadata JSON from '%s/video_id/%s/format/json' % (self._search_url, video_id).
+    - Selects the first video entry: video = response['video'][0].
+    - Title: video['title']['title_long'].
+    - Movie asset: video['video_assets']['movie'][0]; m3u8_url = movie['url'].format(TOKEN=self._token).
+    - Formats: self._extract_m3u8_formats(m3u8_url, display_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls'); then self._sort_formats(formats).
+    - Description: clean_html(title_info.get('summary_long')).
+    - age_limit: parse_age_limit(video.get('parental_control', {}).get('rating')).
+    - view_count: int_or_none(video.get('views')).
+    - average_rating: int_or_none(video.get('user_rating')).
+    - duration: int_or_none(movie.get('duration')).
+    - Returns a dict with:
+      - id, display_id, title, description, duration, view_count, average_rating, age_limit, formats.
+
+- HRTiPlaylistIE (playlist extractor, subclass of HRTiBaseIE)
+  - _VALID_URL: matches https://hrti.hrt.hr/(#/)?video/list/category/<id>/<display_id>?
+  - _TESTS: checks playlist for category 212 with expected title and a minimum count; skip if credentials are required.
+  - _real_extract(url):
+    - Extracts category_id and display_id (default to category_id).
+    - Downloads JSON from '%s/category_id/%s/format/json' % (self._search_url, category_id).
+    - Derives video_ids from:
+      - response['video_listings'][0]['alternatives'][0]['list'] if present
+      - or falls back to [video['id'] for video in response.get('videos', []) if video.get('id')]
+    - Builds video entries as self.url_result('hrti:%s' % video_id) for each id.
+    - Returns a playlist_result with the entries, category_id, and display_id.
+
+Important implementation details
+- Authentication flow is needed to obtain a _token used to fetch the HLS MP4 stream URL.
+- Video URLs are accessed via a two-step API: bootstrap/login to obtain a session and token, then per-video metadata fetch to get the m3u8 manifest URL containing the token.
+- Video formats are extracted using the HLS (m3u8) path, with formats sorted for best quality first.
+- Metadata extraction includes robust handling of missing fields with int_or_none, parse_age_limit, and clean_html.
+- Playlists are built by aggregating video IDs from category listings and generating hrti:<video_id> URLs for each.
+
+That's the core functionality: initialize and authenticate with HRTi, fetch and parse video metadata and streams, and support both individual videos and category-based playlists.

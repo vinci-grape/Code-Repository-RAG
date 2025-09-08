@@ -1,0 +1,26 @@
+- Purpose: Defines two extractors for UFC-related streaming sites that plug into youtube-dl, extending a shared ImgGamingBaseIE.
+
+- Main classes:
+  - UFCTVIE (inherits ImgGamingBaseIE)
+    - _VALID_URL: Built from ImgGamingBaseIE._VALID_URL_TEMPL with a regex matching UFC TV/fightpass domains (app/www.ufc.tv, fightpass.com variants, or ufcfightpass.imgdge/gaming.com variants).
+    - _NETRC_MACHINE: 'ufctv'
+    - _REALM: 'ufc'
+  - UFCArabiaIE (inherits ImgGamingBaseIE)
+    - _VALID_URL: Built from ImgGamingBaseIE._VALID_URL_TEMPL with a regex matching ufcarabia.ae or ufcarabia.com
+    - _NETRC_MACHINE: 'ufcarabia'
+    - _REALM: 'admufc'
+
+- Implementation details:
+  - Both classes rely on the base class ImgGamingBaseIE for the extraction logic; they do not implement separate extract methods here.
+  - The _VALID_URL patterns are composed using ImgGamingBaseIE._VALID_URL_TEMPL, enabling a consistent URL structure across these sites.
+  - Credentials are handled via netrc:
+    - _NETRC_MACHINE specifies the entry name in the netrc file.
+    - _REALM specifies the HTTP authentication realm used during requests.
+
+- Misc:
+  - The file uses Python 2/3 unicode handling boilerplate.
+  - The end contains a stray "Summary:" line, likely a placeholder or formatting artifact.
+
+- File path: ./youtube-dl/youtube_dl/extractor/ufctv.py
+
+In short: this file registers two UFC-related extractors that configure URL patterns and authentication details for content extraction via the ImgGamingBaseIE framework.

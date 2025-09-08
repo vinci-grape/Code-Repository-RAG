@@ -1,0 +1,91 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/tv2.py.
+
+Overall purpose
+- Provides several extractors to fetch video metadata and playable formats from TV2-related sites (TV2 Norge, Katsomo/ MTV Uutiset integrations, and MTVUutiset articles).
+- Primary focus is on extracting video formats from multiple protocols (HDS, HLS, MPD) and assembling a consistent InfoExtractor output (id, title, description, thumbnails, timestamps, duration, view counts, categories, and formats).
+
+Key classes and main functionality
+
+1) TV2IE (main TV2 video extractor)
+- URL pattern: matches https://www.tv2.no/v/<id> (id is digits).
+- Metadata and formats workflow:
+  - video_id is parsed from URL; API base is http://sumo.tv2.no/api/web/asset/<id>.
+  - Downloads metadata JSON (asset). Title is asset.subtitle or asset.title. is_live is asset.live is True.
+  - Iterates over supported protocols: HDS, HLS, DASH.
+    - For each protocol, requests play.json?protocol=<protocol>&videoFormat=SMIL+ISMUSP.
+    - Handles HTTP 401 errors with special error decoding:
+      - ASSET_PLAYBACK_INVALID_GEO_LOCATION → raise geo restriction for NO.
+      - SESSION_NOT_AUTHENTICATED → raise login required.
+      - Other errors → raise ExtractorError with description from the error JSON.
+    - Extracts items = data['items']['item']; normalizes to a list.
+    - For each item, builds a format entry if a video URL is present and not already seen:
+      - format_id = "<protocol lowercased>-<mediaFormat>"
+      - Validates URL with _is_valid_url.
+      - Depending on URL extension:
+        - f4m: use _extract_f4m_formats.
+        - m3u8: if not drmProtected, use _extract_m3u8_formats (mp4 as the format, 'm3u8' or 'm3u8_native' depending on live).
+        - mpd: use _extract_mpd_formats.
+        - ism/.ism: skipped (not used).
+        - Other: add a simple format dict with url, format_id, tbr (bitrate), filesize.
+  - If no formats found and DRM is enabled (drmProtected), raise an ExtractorError indicating DRM protection (expected=True).
+  - Sorts formats with _sort_formats.
+  - Thumbnails are built from asset.imageVersions (id from @type, url from url).
+  - Returns an info dict with:
+    - id, url (last video_url found), title (live vs non-live), description, thumbnails, timestamp (parse_iso8601(asset.createTime)),
+      duration (float from accurateDuration or duration), view_count, categories (split asset.keywords on comma),
+      formats, is_live.
+
+2) TV2ArticleIE
+- URL pattern: matches TV2 article pages and embedded variants: https://www.tv2.no/(a|YYYY/MM/DD/...)/<id> and similar.
+- Purpose: produce a playlist of TV2 video entries embedded in an article page.
+- Workflow:
+  - Fetchs article page HTML; extracts assets from:
+    - Old pattern: data-assetid="123"
+    - New pattern: TV2ContentboxVideo(({...})) JSON blob; converts with js_to_json and extracts assetId.
+  - Builds entries as a list of TV2 video page URLs: http://www.tv2.no/v/<asset_id>.
+  - Title/Description derived from OpenGraph tags (remove trailing " - TV2.no" as needed).
+  - Returns a playlist_result with the collected entries, playlist_id, title, and description.
+
+3) KatsomoIE (subclass of TV2IE)
+- URL pattern: matches Katsomo.fi or MTV Uutiset variants that point to Katsomo content.
+- Inherits TV2IE behavior for extracting formats from multiple protocols.
+- Customization via class attributes:
+  - _API_DOMAIN = 'api.katsomo.fi'
+  - _PROTOCOLS = ('HLS', 'MPD')
+  - _GEO_COUNTRIES = ['FI']
+- Because it inherits TV2IE’s _real_extract, it uses Katsomo’s API domain and protocols when fetching playback JSON and formats, enabling similar multi-protocol format extraction and DRM handling tailored to Katsomo content.
+
+4) MTVUutisetArticleIE
+- URL pattern: https://www.mtvuutiset.fi/artikkeli/.../<id>
+- Purpose: extract a playlist of embedded videos from an MTUuutiset article (e.g., Katsomo or YouTube embeds).
+- Workflow:
+  - Downloads article JSON from http://api.mtvuutiset.fi/mtvuutiset/api/json/<article_id>.
+  - Iterates article['videos'] (if present); for each video with videotype in ('katsomo', 'youtube'):
+    - Yields a URL result to the corresponding extractor with video URL, type (capitalized), and video_id.
+  - Returns a playlist_result with entries, article_id as playlist_id, and article's title/description.
+
+Key implementation details and utilities
+- Uses several helpers from youtube_dl.utils: determine_ext, int_or_none, float_or_none, parse_iso8601, remove_end, strip_or_none, try_get, js_to_json, etc.
+- Robust error handling in TV2IE play JSON fetch:
+  - Detects geo-restriction and login requirements from the API’s 401 responses and error payloads.
+  - Provides DRM-related early exit if DRM is detected and formats are not retrievable.
+- Multi-protocol format extraction:
+  - For TV2IE, supports HDS, HLS, and DASH, translating each item into appropriate format handlers (f4m, m3u8, mpd) when available.
+  - Special handling for live streams vs on-demand (affects m3u8 type selection and live handling).
+- Metadata extraction:
+  - Title prioritizes subtitle over title; live titles use a different display via _live_title(self, title).
+  - Description from asset description; thumbnails built from imageVersions data.
+  - Timestamps, durations, and category extraction (keywords split by comma).
+- DRM awareness:
+  - If no non-DRM formats but drmProtected is true, raises a user-visible error indicating DRM protection.
+- Playlist construction:
+  - TV2ArticleIE builds a playlist of individual TV2 video pages based on discovered asset IDs.
+  - MTVUutisetArticleIE and KatsomoIE focus on embedding video entries and delegating to the correct child extractors for final format resolution.
+
+In short
+- TV2IE: core extraction for TV2 video assets with multi-protocol playback support, robust error handling, DRM checks, and rich metadata assembly.
+- TV2ArticleIE: builds playlists from TV2 article pages by locating embedded assets.
+- KatsomoIE: TV2IE-based extractor specialized for Katsomo content (FI geo, HLS/MPD).
+- MTVUutisetArticleIE: extracts embedded Katsomo/YouTube videos from MTUuutiset articles and delegates to the appropriate extractors.
+
+If you need, I can provide a quick mapping of how a given URL would be processed through these extractors.

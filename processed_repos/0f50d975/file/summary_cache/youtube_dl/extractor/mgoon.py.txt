@@ -1,0 +1,56 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/mgoon.py
+
+- Purpose
+  - Implement an InfoExtractor for the Mgoon video service to fetch video metadata and available streaming formats from Mgoon.
+
+- Main class
+  - MgoonIE(InfoExtractor)
+
+- URL matching and API
+  - _VALID_URL: Regex that matches Mgoon video URLs (handles subdomain and paths like /ch/.../v or /play/view or video.mgoon.com) and captures the numeric video id.
+  - _API_URL: http://mpos.mgoon.com/player/video?id={video_id} – JSON API endpoint used to retrieve video data.
+
+- Tests
+  - _TESTS includes:
+    - A real example URL with expected metadata (id, uploader_id, duration, upload_date, ext, title, thumbnail) and an md5 of the downloaded video content.
+    - Two alternate URLs with only_matching to ensure regex coverage.
+
+- Core extraction flow (_real_extract)
+  - Extract video_id from the URL using _VALID_URL.
+  - Fetch JSON data from the API via _download_json(_API_URL.format(video_id), video_id).
+  - Error handling: if data['errorInfo']['code'] is not 'NONE', raise ExtractorError with a message including the extractor name and API-provided error message.
+  - Metadata extraction:
+    - v_info = data['videoInfo']
+    - title = v_info.get('v_title')
+    - thumbnail = v_info.get('v_thumbnail')
+    - duration = v_info.get('v_duration') (converted from milliseconds to seconds if present)
+    - upload_date = unified_strdate(v_info.get('v_reg_date'))
+    - uploader_id = data.get('userInfo', {}).get('u_alias')
+    - age_limit: set to 18 if data.get('accessInfo', {}).get('code') == 'VIDEO_STATUS_ADULT'; otherwise None
+  - Formats:
+    - Build formats list from data['videoFiles'].
+    - Use get_quality = qualities(['360p', '480p', '720p', '1080p']) to assign a quality ranking for each format.
+    - For each fmt in videoFiles, include:
+      - format_id: fmt['label']
+      - quality: get_quality(fmt['label'])
+      - url: fmt['url']
+      - ext: fmt['format']
+    - Sort formats with self._sort_formats(formats) to ensure a sensible order.
+  - Return a dict with:
+    - id: video_id
+    - title
+    - formats
+    - thumbnail
+    - duration
+    - upload_date
+    - uploader_id
+    - age_limit
+
+- Implementation details and notes
+  - Duration is converted from milliseconds to seconds if present.
+  - Upload date is normalized via unified_strdate for consistency with youtube-dl’s date format.
+  - Uses the standard youtube-dl format ranking via qualities and _sort_formats.
+  - Robust error handling for API-reported errors.
+  - Compatible with Python 2/3 (unicode_literals import).
+
+In short, this extractor queries Mgoon’s API for a given video, checks for errors, gathers basic metadata, determines access restrictions, builds and sorts available video formats, and returns a structured info dictionary suitable for youtube-dl.

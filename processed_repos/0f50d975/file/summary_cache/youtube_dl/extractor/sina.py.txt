@@ -1,0 +1,61 @@
+Concise summary of youtube-dl extractor file: SinaIE (sina.py)
+
+- Purpose
+  - Implement a Sina video extractor for youtube-dl to fetch metadata and MP4 formats from video.sina.com.cn pages.
+
+- Key class
+  - SinaIE(InfoExtractor): Main extractor handling Sina pages and data formats.
+
+- URL matching and variants
+  - _VALID_URL uses a verbose regex to support multiple URL shapes:
+    - Direct video_id in path (e.g., view/12345.html or anchor #12345).
+    - Pseudo IDs that require a separate page fetch to obtain video_id.
+    - External-redirect style token-based URLs (api/sinawebApi/outplay.php/...swf) where the video_id is in the redirected URL.
+
+- Core extraction flow (_real_extract)
+  - Extract video_id from URL groups:
+    - If video_id is present, proceed to data fetch directly.
+    - If token is present, treat as a redirected URL:
+      - Issue a HEAD request to the original URL to get the final URL, then recursively call _real_extract on the final URL.
+    - If pseudo_id is present:
+      - Download the page for the pseudo_id, check for an error element and raise ExtractorError if found.
+      - Extract video_id from the page via regex and continue.
+  - Data retrieval via Sina’s h5play API:
+    - Call http://s.video.sina.com.cn/video/h5play with video_id as a query param.
+    - If response code != 1, raise ExtractorError with the returned message.
+    - Otherwise, use data = response['data'].
+
+- Metadata extracted
+  - id: video_id
+  - title: data['title']
+  - description: trimmed data.get('description')
+  - thumbnail: data.get('image')
+  - duration: int_or_none(data.get('length'))
+  - timestamp: int_or_none(data.get('create_time'))
+
+- Formats construction
+  - Build from data.get('videos', {}).get('mp4', {}) items, each representing a quality.
+  - For each quality:
+    - Require file_api and file_id; skip if missing.
+    - url = file_api with vid=file_id appended via update_url_query(file_api, {'vid': file_id})
+    - format_id = quality_id
+    - extension ext = 'mp4'
+    - preference determined by qualities(['cif','sd','hd','fhd','ffd'])
+  - Sort formats with _sort_formats.
+
+- Utilities and error handling
+  - Uses HEADRequest to resolve redirected URLs.
+  - get_element_by_attribute and clean_html to detect and report HTML-based errors when dealing with pseudo IDs.
+  - _download_json to fetch JSON data, _download_webpage and _download_webpage_handle for pages and redirects.
+  - int_or_none for numeric fields; update_url_query to assemble final MP4 URLs.
+  - Raises ExtractorError with meaningful messages when API returns errors.
+
+- Tests
+  - _TESTS includes three example URLs with expected id, title, and extension, plus a skip case indicating a deleted page.
+
+- Notable implementation details
+  - Handles multiple Sina URL schemes and redirection logic to obtain a valid video_id.
+  - Uses Sina’s h5play API response structure to populate formats and metadata.
+  - Builds multiple MP4 formats with appropriate quality ordering and external URL construction.
+
+Overall, this extractor robustly handles Sina video URLs, resolves to a video_id when needed, fetches data from Sina’s h5play API, and assembles a set of MP4 formats along with standard metadata for each video.

@@ -1,0 +1,46 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/jove.py
+
+Overview
+- Implements a YouTube-DL extractor for Jove (jove.com) videos.
+- Class JoveIE extends InfoExtractor and provides a dedicated _real_extract implementation to fetch video metadata and the actual video URL.
+
+Key components
+- _VALID_URL: Regex to identify Jove video pages. Captures the numeric video id from URLs like http://www.jove.com/video/2744/...
+- _CHAPTERS_URL: Template URL to fetch video chapters XML, using the video_id as a parameter.
+- _TESTS: Two test cases with sample URLs, expected md5s, and info_dicts (id, ext, title, description, thumbnail, upload_date).
+
+Core functionality (_real_extract)
+- URL matching:
+  - Extracts video_id from the URL using the _VALID_URL regex.
+- Webpage retrieval:
+  - Downloads the main video page (webpage).
+- Chapters lookup:
+  - Searches the page for a chapters ID via regex /video-chapters?videoid=([0-9]+).
+  - Fetches the chapters XML via _CHAPTERS_URL.format(video_id=chapters_id).
+  - Handles errors if the chapters XML cannot be downloaded.
+- Video URL extraction:
+  - Reads the final video URL from the XML attribute video (chapters_xml.attrib.get('video')).
+  - Raises ExtractorError if the video URL is not found.
+- Metadata extraction:
+  - Title: via _html_search_meta('citation_title', …).
+  - Thumbnail: via _og_search_thumbnail(…) on the page.
+  - Description: via a targeted HTML regex that extracts content inside a specific div/paragraph structure (<div id="section_body_summary"><p class="jove_content">…</p></div>).
+  - Upload date: via _html_search_meta('citation_publication_date', …) wrapped with unified_strdate to normalize to YYYYMMDD; fatal=False to allow absence.
+  - Comment count: via a meta tag (? name="num_comments" content="N Comments?") parsed as an int; fatal=False for missing values.
+- Return value:
+  - A dict with keys: id, title, url, thumbnail, description, upload_date, comment_count.
+
+Implementation details and considerations
+- Uses Python 2/3 unicode support (from __future__ import unicode_literals).
+- Relies on helper methods from InfoExtractor:
+  - _download_webpage, _download_xml to fetch content.
+  - _html_search_regex, _html_search_meta, _og_search_thumbnail for metadata extraction.
+  - unified_strdate to standardize dates.
+- Error handling:
+  - If the final video URL cannot be obtained from the chapters XML, an ExtractorError is raised.
+- Potential edge cases:
+  - comment_count parsing uses int(...) on a value that may be None if the meta is missing; this could raise a TypeError if the meta is absent (fatal=False does not guarantee an integer default). In practice, the tests include data that exercises these fields, but this may be brittle for pages lacking the meta tag.
+- Design approach:
+  - The extractor uses a two-step approach where the public video URL is obtained from a chapters XML rather than directly parsing the video page, which mirrors how Jove serves video assets.
+
+In short, JoveIE fetches the video page, locates a chapters ID, downloads a chapters XML to obtain the real video URL, and collects standard metadata (title, thumbnail, description, upload date, and comments) to return a structured result suitable for youtube-dl.

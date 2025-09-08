@@ -1,0 +1,25 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/filmweb.py
+
+- Purpose: A YouTube-DL information extractor (FilmwebIE) for Filmweb.no. It retrieves video URLs embedded in two page types: trailers and filmnytt articles.
+
+- URL matching:
+  - _VALID_URL handles: http(s)://www.filmweb.no/trailere/article<id>.ece or /filmnytt/article<id>.ece
+  - Captures two groups: type (trailere or filmnytt) and id (digits)
+
+- Main flow (_real_extract):
+  - Extracts article_type and article_id from the URL.
+  - If article_type is 'filmnytt':
+    - Downloads the article page.
+    - Re-extracts the actual article_id from the page using data-videoid="...".
+  - Calls the JSON endpoint https://www.filmweb.no/template_v2/ajax/json_trailerEmbed.jsp with articleId to obtain embedCode.
+  - Extracts an iframe URL from embedCode via a regex on iframe src.
+  - Converts the URL to an absolute/Proto-relative-safe form with _proto_relative_url.
+  - Returns a url_transparent result pointing to the iframe URL and delegates actual video extraction to the TwentyThreeVideo extractor (ie_key: 'TwentyThreeVideo'), using the article_id as the id.
+
+- Key behaviors and details:
+  - Uses _download_webpage for HTML content and _download_json for JSON responses.
+  - Uses _search_regex to pull out the required IDs and iframe URL.
+  - The final video source is a TwentyThreeVideo iframe, so the extractor passes control to that backend.
+  - The _TEST provides a sample URL and expected info (id: 13033574, ext: mp4, title, upload date, timestamp, uploader_id, uploader), illustrating the kind of metadata produced.
+
+- Overall: Handles both trailer and filmnytt article pages, normalizes the embedded video ID when needed, fetches an embed code via a JSON endpoint, extracts the iframe video URL, and defers to the TwentyThreeVideo extractor for the actual video metadata extraction.

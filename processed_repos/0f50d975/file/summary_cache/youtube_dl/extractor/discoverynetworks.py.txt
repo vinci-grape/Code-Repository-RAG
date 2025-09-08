@@ -1,0 +1,44 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/discoverynetworks.py
+
+- Purpose
+  - Implement a youtube-dl extractor for Discovery Networks content (tlc.de, dmax.de in Germany and dplay.co.uk in the UK) by leveraging the Disco API via the DPlayIE base class.
+
+- Key class
+  - DiscoveryNetworksDeIE(DPlayIE)
+
+- Main URL pattern
+  - _VALID_URL matches streaming pages from:
+    - tlc.de, dmax.de (Germany) or dplay.co.uk (UK)
+  - Pattern extracts:
+    - domain (tlc.de, dmax.de, dplay.co.uk)
+    - programme (e.g., breaking-amish, dmax-highlights, ghost-adventures)
+    - alternate_id (the video identifier)
+  - Handles URLs with or without the /video/ segment:
+    - .../programme/<programme>/video/<alternate_id>
+    - .../programme/<programme>/<alternate_id>
+
+- Tests
+  - _TESTS includes:
+    - A successful extraction example from tlc.de with expected id, title, description, timestamp, etc., and download options (bestvideo, skip_download)
+    - Additional entries marked only_matching to ensure URL recognition without full extraction
+
+- Core extraction logic (_real_extract)
+  - Parses domain, programme, alternate_id from the URL using _VALID_URL.
+  - Determines country:
+    - 'GB' for dplay.co.uk
+    - 'DE' for all other domains
+  - Determines realm:
+    - 'questuk' when country is GB
+    - Otherwise, realm is the domain with the dot removed (e.g., tlc.de -> 'tlcde', dmax.de -> 'dmaxde')
+  - Delegates actual info retrieval to _get_disco_api_info (inherited from DPlayIE)
+    - Arguments:
+      - url: original URL
+      - path: '<programme>/<alternate_id>' (constructed as '%s/%s' % (programme, alternate_id))
+      - api_host: 'sonic-eu1-prod.disco-api.com'
+      - realm: computed realm
+      - country: computed country
+
+- Implementation details
+  - Uses a single extraction pathway via the Disco API through DPlayIE’s helper.
+  - The realm/country mapping enables proper API routing for UK vs. German content.
+  - The _VALID_URL and regex-based extraction provide flexible matching for both “programme” and “sendungen” paths and optional video segments.

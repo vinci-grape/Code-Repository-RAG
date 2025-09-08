@@ -1,0 +1,57 @@
+Here's a concise but comprehensive summary of the HiDive extractor code.
+
+Purpose
+- Implement a YouTube-dl (or similar) extractor for HiDive streaming URLs.
+- Supports optional login, fetches video playback settings, parses available formats and subtitles, and returns a standard info dictionary.
+
+Key classes / functions
+- HiDiveIE(InfoExtractor): Main extractor class.
+  - _VALID_URL: Regex pattern for HiDive stream URLs, captures title and key:
+    https://www.hidive.com/stream/{title}/{key}
+  - _GEO_BYPASS: Disabled (False) due to 403 issues with X-Forwarded-For when bypassing geo restrictions.
+  - _NETRC_MACHINE, _LOGIN_URL: Netrc machine name and login URL for HiDive.
+  - _TESTS: Contains a test case (requires authentication) with expected id, ext, title, series, season_number, and episode_number. Marked to skip if authentication isn’t available.
+  - _real_initialize(self): Attempts to log in if credentials are provided.
+    - Retrieves login info (email/password) via _get_login_info.
+    - Downloads the login page, extracts the login form, collects hidden inputs, adds Email/Password, and posts to log in.
+  - _real_extract(self, url): Core extraction logic.
+    - Parses URL to extract title and key, builds video_id as "title/key".
+    - Calls https://www.hidive.com/play/settings with Title, Key, and a fixed PlayerId to obtain rendition/settings data.
+    - Handles regional restrictions: if restrictionReason is RegionRestricted, raises geo restriction; if another restriction exists (and not None), raises an ExtractorError with the provided message.
+    - Iterates over settings['renditions']:
+      - If bitrates is a dict and contains an HLS URL, adds HLS formats via _extract_m3u8_formats (entry_protocol m3u8_native, m3u8_id suffixed with rendition_id, non-fatal on error).
+      - If ccFiles (subtitles) exist and are properly structured (list of [lang, _, url]), adds to subtitles under the corresponding language.
+    - Sorts the collected formats with _sort_formats.
+    - Attempts to extract season_number and episode_number from the key using patterns s(\d+) and e(\d+).
+    - Returns a dict with:
+      - id: video_id
+      - title: video_id
+      - subtitles: collected subtitles
+      - formats: collected and sorted formats
+      - series: title
+      - season_number: parsed season
+      - episode_number: parsed episode
+
+Important implementation details
+- Authentication
+  - _real_initialize handles optional login. If no credentials are provided, extraction proceeds without login.
+  - Login flow parses the login form and posts credentials securely via urlencode_postdata.
+- API interaction
+  - Uses the play/settings endpoint to fetch video settings, including renditions and ccFiles for subtitles.
+  - A fixed PlayerId is used in the request; this is likely required by HiDive’s API.
+- Formats and subtitles
+  - Only HLS (m3u8) formats are extracted from the renditions’ bitrates when an HLS URL is provided.
+  - Subtitles are collected from ccFiles, which are expected as [language, something, url].
+- Error handling
+  - Region-restricted videos trigger geo-restriction handling.
+  - Other non-None restrictions raise a descriptive ExtractorError.
+- Metadata
+  - The returned info dict uses:
+    - id and title set to video_id ("title/key")
+    - series set to the extracted title
+    - season_number and episode_number derived from the key (sXXeYY)
+- Notes on limitations
+  - _GEO_BYPASS is disabled due to observed 403 errors when bypassing geo checks.
+  - The loader expects a specific HiDive login flow and may require valid credentials to access many streams (as indicated by the test case).
+
+In short, this extractor logs in if possible, fetches HiDive playback settings, builds a list of available HLS video formats and captions, handles geo/other access restrictions, and returns a standard information dictionary suitable for streaming.

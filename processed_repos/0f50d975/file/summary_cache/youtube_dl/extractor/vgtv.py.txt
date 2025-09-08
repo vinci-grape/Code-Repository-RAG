@@ -1,0 +1,69 @@
+- Purpose
+  - VGTVIE is an extractor for VGTV and related partners (BTTV, FTV, Aftenposten/Aftonbladet). It resolves a URL to a media asset, fetches metadata and multiple formats (HLS, HDS, MP4) and returns a unified info dictionary for youtube-dl.
+
+- Core classes
+  - VGTVIE(XstreamIE)
+    - Main extractor for VGTV family.
+    - Handles both host-based URLs (vgtv.no, bt.no/tv, etc.) and appname-based URLs (vgtv, bttv, satv, fvn, aptv, abtv).
+    - Maps hosts to app names and app names to vendor codes used by the API.
+  - BTArticleIE(InfoExtractor)
+    - Article wrapper that locates a video id in BT articles and routes to VGTV via bttv.
+  - BTVestlendingenIE(InfoExtractor)
+    - Special path for Vestlendingen items; routes to VGTV via bttv and marks 404 in tests.
+
+- URL matching and routing
+  - _VALID_URL supports:
+    - host-based URLs (vgtv.no, bt.no, aftenbladet.no, etc.) with paths that include /video/, /live/, embed, or articles.
+    - appname-based URLs like abtv:, abtv:140026, etc.
+  - Based on the matched host or appname, it determines the vendor/app context to query the API.
+
+- Data retrieval and processing
+  - Downloads media JSON from:
+    - http://svp.vg.no/svp/api/v1/{vendor}/assets/{video_id}?appName={appname}-website
+  - If data status is 'inactive', raises ExtractorError (video no longer available).
+  - If video id length is 5 and appname is 'bttv', may call _extract_video_info('btno', video_id) for BTTV-specific handling.
+  - Extracts:
+    - streamUrls: hls, hds, mp4/pseudostreaming URLs
+    - streamType: determines is_live
+    - title, description, images.main (thumbnail), published (timestamp), duration (ms), displays (view count)
+  - Builds formats:
+    - HLS (m3u8): _extract_m3u8_formats with entry_protocol 'm3u8_native' for VOD, 'm3u8' for live; m3u8_id 'hls'; fatal=False
+    - HDS (f4m): _extract_f4m_formats with hdcore=3.7.0; marks extra_param_to_segment_url to avoid 404s
+    - MP4/direct URLs: from 'pseudostreaming' and 'mp4' fields; for each URL, parses filename to extract width, height, and tbr (from pattern (\d+)_(\d+)_(\d+)); assigns format_id 'mp4-{tbr}' and tbr/width/height when available
+  - If no formats found, checks geoblocking via streamConfiguration.properties and raises geo restriction if geoblocked for the video's host country.
+
+- Live vs VOD handling
+  - is_live flag derived from streamType == 'live'
+  - If live, uses _live_title(data['title']) for the title; otherwise uses data['title']
+  - duration is parsed as a float from data['duration'], with a 1000 divisor (ms to seconds)
+
+- Metadata assembly
+  - id: video_id
+  - title: live-aware title
+  - description: data['description']
+  - thumbnail: data['images']['main'] + '?t[]=900x506q80'
+  - timestamp: data['published']
+  - duration: float_or_none(data['duration'], 1000)
+  - view_count: data['displays']
+  - is_live: boolean flag
+
+- Important implementation details
+  - Robust URL handling via _HOST_TO_APPNAME and _APP_NAME_TO_VENDOR mappings
+  - Uses try_get for safely accessing nested fields
+  - Formats are aggregated and then sorted with _sort_formats
+  - Geo-blocks are detected and handled with raise_geo_restricted when formats are empty
+  - Works with both HLS and HDS streaming protocols and direct MP4 assets
+  - Handles obsolete URL schemas in host mapping to avoid redirects
+
+- Tests and expectations
+  - _TESTS cover:
+    - VGTV vod and live URLs with expected formats, titles, durations, and metadata
+    - geoblocked or unavailable videos (some tests are skipped or marked as only_matching)
+    - BT and ABTV variants to ensure cross-vendor compatibility
+    - A test for BT-related article path routed to VGTV
+  - Tests enforce proper extraction, geo-restriction handling, and format parsing
+
+- Summary of key pieces
+  - Main logic in VGTVIE._real_extract:
+    - Resolve app/vendor, fetch media JSON, build formats (HLS/HDS/MP4), handle live/VOD differences, apply geo restrictions, and populate final info dict
+  - Additional extractors (BTArticleIE, BTVestlendingenIE) delegate to VGTV via specific VGTV appname routing, enabling reuse of the VGTV parsing logic across related sites.

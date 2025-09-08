@@ -1,0 +1,107 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/lynda.py
+
+Purpose
+- Implement YouTube-DL extractors for Lynda.com (now LinkedIn Learning): individual videos (via LyndaIE) and courses (via LyndaCourseIE).
+- Supports paid content behind login, multiple video formats, and transcripts (subtitles).
+
+Core components
+- LyndaBaseIE (InfoExtractor)
+  - Handles login flow to access member-only content.
+  - Key attributes:
+    - _SIGNIN_URL, _PASSWORD_URL, _USER_URL: login endpoints
+    - _ACCOUNT_CREDENTIALS_HINT: hint shown when login is required
+    - _NETRC_MACHINE: credentials machine name
+  - _real_initialize: initiates login automatically at instance creation.
+  - _check_error(json_string, key_or_keys): static helper to raise ExtractorError if login response contains error fields (email, password, or ErrorMessage).
+  - _login_step(form_html, fallback_action_url, extra_form_data, note, referrer_url):
+    - Extracts the form action URL from provided HTML.
+    - Builds form data from hidden inputs, merges extra_form_data.
+    - Submits via HTTP POST with appropriate headers; handles non-200-like statuses (418, 500).
+    - Checks for errors in response using _check_error.
+    - Returns (response_json, action_url).
+  - _login():
+    - Retrieves username/password from _get_login_info().
+    - If credentials are not provided, returns (no login performed).
+    - Downloads signin page and detects if already logged in.
+    - Submits email (step 2) via _login_step; then submits password (step 3) via _login_step.
+    - Handles the two-step login flow and stores cookies/session for subsequent requests.
+
+- LyndaIE (video extractor)
+  - IE_NAME = 'lynda', IE_DESC = 'lynda.com videos'
+  - _VALID_URL: complex regex to match:
+    - video pages on lynda.com (or educourse.ga) with either:
+      - two/three path segments and a numeric video id, or
+      - player/embed path
+    - captures id and optionally course_id for fallback handling
+  - _TIMECODE_REGEX: used for transcript processing ([hh:mm:ss.sss] style)
+  - _TESTS: includes example URLs (one real video, others for matching behavior)
+  - _raise_unavailable(video_id): helper to signal login requirement for member-only videos.
+  - _real_extract(url):
+    - Parses video_id and course_id from URL.
+    - Builds query {'videoId': video_id, 'type': 'video'} and tries to fetch video JSON from https://www.lynda.com/ajax/player.
+    - Fallback path if initial JSON is not available:
+      - Tries https://www.lynda.com/ajax/course/{course_id}/{video_id}/play
+      - If not available, raises not-found/unavailable.
+      - If available, builds formats from play JSON (using formats_dict['urls'] and format_id, cdn name), and also fetches conviva data for title/description/duration/etc.
+      - Returns a dict with id, title, description, release_year, duration, creator, and formats.
+    - If video JSON is available:
+      - If it contains Status, raise ExtractorError with message (server-reported error).
+      - If HasAccess is False, raise_unavailable(video_id) (login required).
+      - Normalize video_id; read duration and title.
+      - Build formats from video['Formats'] and video['PrioritizedStreams']:
+        - Formats from Formats: url, extension, width, height, filesize, format_id (Resolution)
+        - Formats from PrioritizedStreams: combine prioritized_stream_id and inner format_id into format_id
+      - Validate and sort formats with _check_formats and _sort_formats.
+      - Get subtitles via extract_subtitles(video_id) (which uses _get_subtitles).
+      - Return dict: id, title, duration, subtitles, formats.
+  - _get_subtitles(video_id):
+    - Fetch JSON at https://www.lynda.com/ajax/player?videoId={video_id}&type=transcript
+    - If not found or NotFound, return {}
+    - Parse JSON; convert to SRT via _fix_subtitles
+    - Return {'en': [{'ext': 'srt', 'data': srt}]} if conversion successful.
+  - _fix_subtitles(subs):
+    - Converts transcript entries with Timecode and Caption fields into a valid SRT string.
+    - Uses _TIMECODE_REGEX to extract timecodes and generate sequential blocks.
+
+- LyndaCourseIE (course extractor)
+  - IE_NAME = 'lynda:course', IE_DESC = 'lynda.com online courses'
+  - _VALID_URL: matches course welcome/introduction pages (two or three path segments before a numeric course id) ending in -2.html
+  - _TESTS: only_matching tests for course URLs
+  - _real_extract(url):
+    - Extracts course_path and course_id from URL.
+    - item_template = https://www.lynda.com/{course_path}/{video_id}-4.html
+    - Tries to fetch course JSON from https://www.lynda.com/ajax/player?courseId={course_id}&type=course
+    - If course JSON not available:
+      - Fallback: download the page content and extract video ids with data-video-id attributes
+      - Build a playlist of direct video URLs using item_template and LyndaIE, then return a playlist_result with course_id and page title/description (OG data if available)
+    - If course JSON exists but Status == 'NotFound': raise ExtractorError("Course ... does not exist", expected=True)
+    - Otherwise, iterate through course['Chapters'], and within each chapter through chapter['Videos']:
+      - Skip videos with HasAccess is False (count unaccessible_videos)
+      - For accessible videos with video_id, add a transparent URL entry to the playlist pointing to LyndaIE for that video, including chapter metadata (title, number, id)
+    - If any videos were inaccessible, emit a warning via _downloader.report_warning with the membership hint (_ACCOUNT_CREDENTIALS_HINT).
+    - Return playlist_result(entries, course_id, course_title, course_description)
+
+Key implementation details and behavior
+- Login flow is integrated into LyndaBaseIE; subsequent extractors rely on logged-in session when needed.
+- Video extraction supports multiple pathways:
+  - Primary: /ajax/player JSON
+  - Fallback: /ajax/course/{course_id}/{video_id}/play + Conviva data
+- Formats assembly:
+  - Handles formats from both direct URLs (Formats) and prioritized streams.
+  - Includes resolution/height, width, filesize, extension, and format_id where available.
+- Subtitles:
+  - Subtitles are optional; retrieved via transcripts endpoint and converted to SRT with _fix_subtitles.
+  - Timecode parsing uses a dedicated regex.
+- Access control:
+  - If a video is behind membership, raises a login-required message.
+  - Courses may contain inaccessible videos; the extractor warns but continues for accessible items.
+- Course extraction:
+  - Attempts to pull course content via API first; if unavailable, falls back to page parsing of data-video-id attributes to build a video list.
+  - Aggregates videos by chapters and preserves chapter metadata in the output.
+- Compatibility and utilities:
+  - Uses helpers like compat_str, compat_urlparse, int_or_none, urlencode_postdata, and standard _download_* helpers from the parent class.
+  - Uses _check_formats and _sort_formats to validate and order formats consistently.
+  - Includes multiple tests to ensure URL matching and basic extraction behavior.
+
+Overall
+- This file provides a robust Lynda/LinkedIn Learning extractor with login support, multiple data sources for video info, comprehensive format handling, subtitle support, and a course-oriented extractor that can assemble playlists from course structure or fall back to page parsing.

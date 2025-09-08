@@ -1,0 +1,90 @@
+Here's a concise, yet comprehensive summary of the code in youtube-dl/youtube_dl/extractor/appletrailers.py:
+
+Overview
+- Defines two extractors for Apple Trailers:
+  - AppleTrailersIE: Main extractor for individual movie trailers and their clips.
+  - AppleTrailersSectionIE: Extractor for Apple Trailers sections (Just Added, Exclusive, etc.).
+- Uses youtube-dl’s common extraction utilities to build playlists or video entries with multiple formats.
+
+Key classes and main functionality
+
+1) AppleTrailersIE (InfoExtractor)
+- Purpose: Extracts trailers for a given movie from Apple Trailers, handling both JSON feeds and legacy HTML-based playlists.
+- URL pattern (_VALID_URL): 
+  - Matches http(s)://trailers.apple.com/(trailers|ca)/<company>/<movie> (captures company as uploader_id and movie slug).
+- JSON-driven path (preferred):
+  - Downloads the page to find FilmId via regex FilmId = '(\d+)'.
+  - Fetches JSON at http://trailers.apple.com/trailers/feeds/data/{film_id}.json.
+  - If JSON data exists, builds a playlist from film_data['clips']:
+    - For each clip, constructs formats from clip['versions'][version]['sizes'][size]['src'].
+    - Each format includes:
+      - format_id as "version-size"
+      - url with a heuristic to request higher quality: replace _<n+p>.mov with _h<n+p>.mov
+      - width, height (if available)
+      - language derived from the first two letters of the version
+    - Sorts formats and builds a clip entry:
+      - id: movie-<sanitized-clip-title> (lowercase, alphanumeric only)
+      - formats, title, thumbnail (clip['screen'] or clip['thumb'])
+      - duration: parsed from clip['runtime'] or fallback field
+      - upload_date: unified date from clip['posted']
+      - uploader_id: uploader_id extracted from URL
+    - Returns a playlist_result(entries, film_id, movie_title) using film page data.
+- Fallback path (legacy HTML playlist):
+  - If film_data is missing or not usable, builds a playlist by parsing an HTML playlist:
+    - playlist_url = urljoin(url, 'includes/playlists/itunes.inc')
+    - Downloads and pre-processes HTML via transform_source (fix_html):
+      - Strips script tags
+      - Normalizes <img> tags
+      - Sanitizes embedded iTunes.playURL(...) JSON to be JSON-loadable
+    - Parses XML/HTML with _download_xml and iterates over <div><ul><li> items
+      - Extracts trailer_info JSON from onClick attribute using _JSON_RE
+      - trailer_info contains: url, title, posted, runtime, etc.
+      - Builds video_id, thumbnail, upload_date, duration (parses minutes:seconds)
+      - Determines trailer_id from URL and fetches settings JSON at includes/settings/{trailer_id}.json
+      - Builds formats from settings['metadata']['sizes'] with format['src'] adjusted similarly to the JSON path
+      - Sorts formats and appends a video entry with:
+        - _type: 'video'
+        - id, formats, title, duration, thumbnail, upload_date, uploader_id
+        - http_headers with a QuickTime-compatible User-Agent
+    - Returns a playlist with type '_type': 'playlist', id: movie, and entries: playlist
+- Important implementation details:
+  - Uses _JSON_RE to parse embedded JSON data in the page and onClick attributes.
+  - Uses int_or_none, parse_duration, unified_strdate to normalize values.
+  - Language for formats is derived from the version code.
+  - Handles both JSON-based feeds and older HTML playlists, with a robust fallback.
+  - Warnings for missing JSON data are supported (fatal=False on feed fetch).
+
+2) AppleTrailersSectionIE (InfoExtractor)
+- Purpose: Extracts trailers listed under Apple Trailers sections (Just Added, Exclusive, Just HD, Most Popular, Movie Studios).
+- URL pattern (_VALID_URL):
+  - Matches http(s)://trailers.apple.com/#section=<id> where id is one of the section keys.
+- Section mapping (_SECTIONS):
+  - Maps section ids to feed_path and human-readable titles.
+- JSON-driven feed:
+  - Downloads JSON from http://trailers.apple.com/trailers/home/feeds/<feed_path>.json
+  - Builds a list of entries as external URLs:
+    - Each section entry e yields a URL result to 'http://trailers.apple.com' + e['location']
+  - Returns a playlist_result(entries, section, title) with the proper title from the mapping.
+
+Key implementation details and helpers
+- Uses:
+  - InfoExtractor as base class
+  - compat_urlparse for URL joins
+  - _download_webpage, _download_json, _download_xml for fetching sources
+  - _search_regex for regex extraction
+  - _sort_formats to order video formats
+  - parse_duration and unified_strdate for duration and dates
+- Regular expressions:
+  - _JSON_RE = iTunes.playURL\((.*?)\); used to extract embedded JSON data from scripts.
+- Data normalization:
+  - Film/clip IDs and titles are sanitized to form stable IDs.
+  - Durations parsed from various fields; upload_date formatted consistently.
+- Output types:
+  - playlist entries with either:
+    - A list of video formats for each clip (playlist path)
+    - A collection of video entries each with formats for legacy HTML-based playlists
+  - AppleTrailersSectionIE yields a simple playlist of external URLs to trailer pages.
+
+In short, the file provides two extractors to parse Apple Trailers:
+- AppleTrailersIE handles individual movie trailers via JSON feeds and an HTML fallback, extracting detailed format lists and clip metadata.
+- AppleTrailersSectionIE aggregates trailers from specific Apple Trailers sections via a feed, returning a playlist of external trailer pages.

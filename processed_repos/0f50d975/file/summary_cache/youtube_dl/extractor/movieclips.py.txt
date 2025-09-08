@@ -1,0 +1,32 @@
+- Purpose: Implement a YouTube-DL extractor for movieclips.com video pages. It delegates actual playback to ThePlatform by returning a url_transparent entry pointing to ThePlatform with necessary parameters.
+
+- Class and inheritance:
+  - MovieClipsIE(InfoExtractor)
+
+- URL handling:
+  - _VALID_URL matches: http(s)://www.movieclips.com/videos/...-<id> where <id> is a numeric string.
+  - _TEST demonstrates a sample URL and expected output, including meta fields and indicating ThePlatform should be used (add_ie: ['ThePlatform']).
+
+- Core logic (_real_extract):
+  - Extract video_id from the URL using _match_id.
+  - Download the page HTML with _download_webpage.
+  - Locate a JSON blob embedded in the page via the React engine: find the JavaScript snippet var __REACT_ENGINE__ = ({...});, parse it with _parse_json, and select the video entry from playlist.videos where v['id'] matches the extracted video_id.
+  - Build and return a url_transparent result with:
+    - _type: 'url_transparent' to indicate another extractor will handle the actual stream.
+    - ie_key: 'ThePlatform' to delegate to ThePlatform extractor.
+    - url: ThePlatform content URL modified to include mbr=true (via update_url_query), then wrapped with smuggle_url to force a SMIL URL (force_smil_url).
+    - title: extracted from the page via _og_search_title(webpage).
+    - description: extracted from the page meta description via _html_search_meta('description', webpage).
+    - duration: numeric duration converted with float_or_none(video.get('duration')).
+    - timestamp: parsed upload date via parse_iso8601(video.get('dateCreated')).
+    - thumbnail: video.get('defaultImage').
+    - uploader: video.get('provider').
+
+- Important implementation details:
+  - Uses a specific embedded React engine JSON to locate the video info rather than relying solely on page metadata.
+  - Delegates to ThePlatform by returning a url_transparent with ie_key set to 'ThePlatform', enabling reuse of ThePlatform’s download/parsing logic.
+  - Constructs a SMIL-based URL for ThePlatform by forcing SMIL with force_smil_url via smuggle_url.
+  - Robust metadata extraction using helpers: _og_search_title for title, _html_search_meta for description, parse_iso8601 for timestamps, and float_or_none for duration.
+
+- Error handling note:
+  - If the target video entry cannot be found in playlist.videos, the next(...) expression would raise StopIteration; the code assumes the React engine JSON contains a matching entry for the URL’s id.

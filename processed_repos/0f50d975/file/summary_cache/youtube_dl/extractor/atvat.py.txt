@@ -1,0 +1,53 @@
+Summary of ./youtube-dl/youtube_dl/extractor/atvat.py
+
+Purpose
+- ATVAtIE is a YouTube-DL extractor for atv.at pages that contain one or more video parts. It parses embedded JSON data from the page and returns a multi-video result where each entry corresponds to a video part with its own formats.
+
+Key components
+- ATVAtIE (class)
+  - Inherits from InfoExtractor.
+  - _VALID_URL: Matches ATV pages with two path segments and an id like v12345 or d67890, e.g. http://atv.at/aktuell/di-.../v1698449/.
+  - _TESTS: Includes a real example with expected id, title, and mp4 extension; another example only checking URL matching.
+
+Main workflow (_real_extract)
+1. Acquire display_id using _match_id(url) and download the page with _download_webpage.
+2. Extract JSON data containing video information from the page via two possible patterns:
+   - flashPlayerOptions = "<json>"
+   - class="...jsb_video/FlashPlayer..." data-jsb="<json>"
+   The exact JSON group is named 'json'. The JSON is unescaped and parsed with _parse_json, then accessed at ['config']['initial_video'] to obtain video_data.
+3. Extract top-level video_id and video_title from video_data.
+4. Build a list of parts (video entries):
+   - For each part in video_data.get('parts', []):
+     - part_id, part_title
+     - Build formats for this part:
+       - For each source in part.get('sources', []):
+         - source_url = source.get('src'); skip if missing
+         - ext = determine_ext(source_url)
+         - If ext == 'm3u8': use _extract_m3u8_formats(source_url, part_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False) and extend formats
+         - Otherwise, append a simple format dict with 'format_id' (source.get('delivery')) and 'url' (source_url)
+     - Sort formats with _sort_formats(formats)
+     - Append a part entry:
+       - id: part_id
+       - title: part_title
+       - thumbnail: part.get('preview_image_url')
+       - duration: int_or_none(part.get('duration'))
+       - is_live: part.get('is_livestream')
+       - formats: the list built above
+5. Return a multi_video result:
+   - {'_type': 'multi_video', 'id': video_id, 'title': video_title, 'entries': parts}
+
+Important implementation details
+- JSON extraction resilience: supports two possible in-page JSON locations to locate video data.
+- Formats handling:
+  - HLS streams (m3u8) are parsed via _extract_m3u8_formats with m3u8_native, allowing multiple format ranges via the 'hls' id. fatal is False to avoid failing if a particular stream is unavailable.
+  - Direct HTTP sources are appended as simple format dictionaries with format_id derived from the delivery field.
+- Data normalization:
+  - unescapeHTML is applied before JSON parsing to ensure valid JSON content.
+  - int_or_none is used to safely parse duration.
+- Output structure:
+  - Returns a multi_video object with an id, title, and an entries list where each entry represents a video part (with its own formats and metadata).
+- Extensibility: The extractor is robust to pages with multiple video parts and varying source types, thanks to per-part iteration and per-source handling.
+
+What it does not do
+- It does not handle non-ATV pages or ATV pages that do not expose the expected JSON structure.
+- If no parts exist, entries would be empty; the code assumes at least one part in typical pages.

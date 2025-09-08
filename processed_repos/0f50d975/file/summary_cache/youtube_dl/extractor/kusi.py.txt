@@ -1,0 +1,67 @@
+Summary of ./youtube-dl/youtube_dl/extractor/kusi.py
+
+Purpose:
+- Implement an extractor for KUSI (kusi.com) videos, handling both story pages and direct video clip pages. It fetches metadata and available video formats and returns a standard YouTube-DL info dictionary.
+
+Main functionality:
+- URL matching: _VALID_URL supports two shapes:
+  - http(s)://www.kusi.com/story/... (story pages)
+  - http(s)://www.kusi.com/video?clipId=123456 (direct clip pages)
+- Extraction flow:
+  - Parse clipId from the URL if present; otherwise extract it from the HTML in the story page.
+  - Download the page and extract affiliateId from the HTML.
+  - Build a request URL to http://www.kusi.com/build.asp with:
+    - buildtype=buildfeaturexmlrequest
+    - featureType=Clip
+    - featureid=clip_id
+    - affiliateno=affiliate_id
+    - clientgroupid=1
+    - rnd=<random number> (to bust caches)
+  - Download the resulting XML document containing video metadata and MRSS-formatted format data.
+  - Parse:
+    - HEADLINE -> title
+    - DURATION (in ms) -> duration (divide by 1000)
+    - ABSTRACT -> description
+    - THUMBNAILIMAGE/FILENAME -> thumbnail
+    - rfc822creationdate -> timestamp (converted via timeconvert)
+    - MRSS group/content entries -> video formats (each content tag has url, height, width, bitratebits)
+  - Decode URLs, convert numeric attributes to ints/floats as appropriate, and sort formats.
+  - Return a dict with id, title, description, duration, formats, thumbnail, timestamp.
+
+Key implementation details:
+- Class: KUSIIE(InfoExtractor)
+- URL patterns and matching:
+  - Supports both story and clipId-based URLs via a single _VALID_URL regex
+  - For story URLs, the clipId is extracted from the page HTML if not present in the URL
+- XML metadata retrieval:
+  - Uses a separate XML endpoint built with update_url_query and a randomized rnd parameter
+  - Employs _download_xml to fetch and parse MRSS-formatted data
+- Parsing utilities:
+  - xpath_text to extract values from XML nodes
+  - int_or_none / float_or_none to convert attributes
+  - timeconvert to convert RFC 822 date to a UNIX timestamp
+  - compat_urllib_parse_unquote_plus to decode URL-encoded format URLs
+- Formats:
+  - Each MRSS content entry yields a format dict with:
+    - url: decoded video URL
+    - height / width: optional ints
+    - vbr: bitrate in bits per second (scaled with scale=1000)
+  - _sort_formats to arrange formats by quality
+- Output fields:
+  - id: clip id (numeric, derived either from URL or HTML)
+  - title: HEADLINE from XML
+  - description: ABSTRACT from XML
+  - duration: DURATION / 1000
+  - formats: list of available video formats
+  - thumbnail: THUMBNAILIMAGE/FILENAME
+  - timestamp: creation time from RFC 822 date
+
+Testing:
+- _TESTS includes:
+  - A story URL test with expected id, ext, title, duration, upload_date, timestamp, and thumbnail pattern
+  - A direct clip URL test (only_matching) to ensure URL patterns are recognized
+
+Important notes:
+- The extractor relies on KUSI’s build.asp XML feed for clip metadata, including the MRSS-formatted content elements that describe available video formats.
+- It handles both URL shapes gracefully by locating clipId either from the URL or via an HTML search.
+- The implementation uses a randomized parameter to avoid caching effects on the XML feed.

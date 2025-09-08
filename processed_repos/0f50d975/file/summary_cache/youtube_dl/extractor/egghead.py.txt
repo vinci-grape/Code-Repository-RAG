@@ -1,0 +1,63 @@
+- Purpose: This file implements two YouTube-DL extractors for egghead.io: one for courses/playlists and one for individual lessons, plus a shared base to call the egghead API.
+
+- Base class
+  - EggheadBaseIE(InfoExtractor)
+    - _call_api(self, path, video_id, resource, fatal=True): helper that fetches JSON from https://app.egghead.io/api/v1/ + path using _download_json. Logs “Downloading <resource> JSON”.
+
+- Course/Playlist extractor
+  - EggheadCourseIE
+    - IE_DESC/IE_NAME identify as egghead course/playlist extractor.
+    - _VALID_URL matches egghead.io courses or playlists: https://(app.)egghead.io/(course|playlists)/<id>
+    - _TESTS: includes a real course URL and a test for app.egghead.io playlists path.
+    - _real_extract(self, url):
+      - Extracts playlist_id from URL.
+      - Fetches lessons via API at series/<id>/lessons.
+      - Builds entries by iterating lessons:
+        - Uses lesson’s http_url if present; skips if missing.
+        - Converts lesson id to string and uses url_result with EggheadLessonIE as the extractor.
+      - Fetches course metadata via series/<id> (non-fatal). If available, extracts id, title, description.
+      - Returns a playlist_result with:
+        - entries: list of lesson URLs (as EggheadLessonIE entries)
+        - playlist_id: course id as string (if available)
+        - title: course title (if available)
+        - description: course description (if available)
+
+- Lesson extractor
+  - EggheadLessonIE
+    - IE_DESC/IE_NAME identify as egghead lesson extractor.
+    - _VALID_URL matches https://(app.)egghead.io/(api/v1/)?lessons/<id>
+    - _TESTS: includes an example lesson URL with expected fields (id, display_id, ext, title, description, thumbnail, timestamp, duration, view_count, tags) and two non-matching tests.
+    - _real_extract(self, url):
+      - display_id = extracted id from URL.
+      - Fetches lesson data via API: lessons/<display_id>.
+      - lesson_id = stringified lesson['id']; title = lesson['title'].
+      - Builds formats from lesson['media_urls']:
+        - For each format_url:
+          - Skip if not a valid URL.
+          - ext = determine_ext(format_url)
+          - If ext == 'm3u8': extend formats with _extract_m3u8_formats(format_url, lesson_id, 'mp4', entry_protocol='m3u8', m3u8_id='hls', fatal=False)
+          - If ext == 'mpd': extend formats with _extract_mpd_formats(format_url, lesson_id, mpd_id='dash', fatal=False)
+          - Else: add {'url': format_url}
+      - Calls _sort_formats(formats)
+      - Returns a dict with:
+        - id: lesson_id
+        - display_id: display_id
+        - title: title
+        - description: lesson.get('summary')
+        - thumbnail: lesson.get('thumb_nail')  (note the field name; potential typo in API)
+        - timestamp: unified_timestamp(lesson.get('published_at'))
+        - duration: int_or_none(lesson.get('duration'))
+        - view_count: int_or_none(lesson.get('plays_count'))
+        - tags: try_get(lesson, lambda x: x['tag_list'], list)
+        - series: try_get(lesson, lambda x: x['series']['title'], compat_str)
+        - formats: the list built above
+
+- Key implementation details
+  - Uses compat_str to normalize IDs to strings.
+  - _call_api centralizes API calls to egghead’s v1 API, returning JSON.
+  - For course extraction, lessons are discovered via series/<id>/lessons and converted into lesson entries that point to EggheadLessonIE.
+  - For lesson extraction, supported media formats include HLS (m3u8) and DASH (mpd); other URLs are added directly as simple formats.
+  - Format handling uses _extract_m3u8_formats and _extract_mpd_formats with fatal=False to tolerate missing streams gracefully.
+  - Metadata fields include typical video info: id, display_id, title, description, thumbnail, timestamp, duration, view_count, tags, and series.
+  - Some fields rely on API data that may be optional (e.g., playlist_id, description); extractor checks for presence and uses fallbacks.
+  - Tests cover real-world URLs, ensuring correct extraction of IDs, titles, and metadata, plus non-matching URL checks.

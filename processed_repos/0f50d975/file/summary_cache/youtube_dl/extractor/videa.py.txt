@@ -1,0 +1,87 @@
+Here's a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/videa.py
+
+What it is
+- A YouTube-dl extractor class (VideaIE) for videos hosted on videa.hu (and videakid.hu).
+- Handles two main entry forms: direct video URLs and pages embedding the videa player (iframe or /player routes).
+
+Key components
+- Class: VideaIE(InfoExtractor)
+  - _VALID_URL: Regex to identify videa.hu video/embedding URLs and videaKid subdomain variants.
+  - _EMBED_REGEX: Regex pattern to locate embedded player URLs within a page (iframe-based embeds).
+  - _TESTS: Example URLs with expected results to validate extraction logic.
+  - _STATIC_SECRET: A long constant used in nonce/key derivation for the RC4-like decryption step.
+
+- _extract_urls(cls, webpage)
+  - Scans a webpage for embed URLs using _EMBED_REGEX and yields absolute URLs for embedded players.
+
+- compat_random_choices(population, *args, **kwargs)
+  - Lightweight helper mimicking random.choices with simple weighting behavior, used to generate an 8-char random seed (_s) for requests.
+
+- rc4(cipher_text, key)
+  - Custom RC4-like decryption/decoding implementation used to decrypt the data returned by the videa player when not XML directly.
+  - Returns a UTF-8 string after applying the RC4 stream with a key derived from the nonce and secret.
+
+- _real_extract(self, url)
+  - Core extraction logic:
+    - Derives video_id from URL, fetches the page (video_page).
+    - If the URL already points at a videa.hu player (/player), uses it directly; otherwise finds the iframe URL to the player page and fetches that page (player_page).
+    - Extracts nonce from the player page (_xt).
+    - Splits nonce into l (first 32 chars) and s (rest). Builds a decoded result by indexing into s using a mapping derived from the static secret.
+    - Parses the player URL querystring to compute two keys:
+      - Random seed _s: 8-character alphanumeric string.
+      - _t: portion of the decoded result.
+    - Performs a request to http://videa.hu/player/xml with the computed query parameters, receiving either:
+      - An XML string directly (b64_info starts with '<?xml'), or
+      - A base64-encoded RC4-encrypted payload which is decrypted using key = result[16:] + random_seed + handle.headers['x-videa-xs'].
+    - Parses the XML (via _parse_xml) to obtain:
+      - video node: contains title, poster_src, duration, is_adult_content.
+      - video_sources node: contains multiple video_source entries with URL, mimetype, codecs, width/height, and name.
+      - hash_values node: optional per-source hash values and expiry data.
+    - Builds a formats list by iterating video_source entries:
+      - Valid source_url and source_name are required.
+      - If a corresponding hash_value and source_exp exist, appends md5 and expires query parameters to the URL.
+      - Uses parse_codecs(source.get('codecs')) to parse codecs into dict form.
+      - Sets:
+        - url: absolute/proto-relative URL
+        - ext: derived from mimetype (fallback to 'mp4')
+        - format_id: name attribute
+        - width/height: integers if present
+    - Sorts formats by quality/preference (_sort_formats).
+    - Builds thumbnail URL from poster_src (proto-relative).
+    - Determines age_limit from is_adult_content:
+      - 18 if is_adult_content == '1'
+      - 0 if not adult or unspecified
+    - Returns a dict with video metadata:
+      - id, title, thumbnail, duration, age_limit, formats
+
+Important implementation details
+- Nonce/Key derivation:
+  - nonce = _xt from player_page
+  - l = nonce[:32], s = nonce[32:]
+  - result = ''.join(s[i - (index of l[i] in _STATIC_SECRET] - 31) for i in 0..31)
+  - key for RC4 decryption is constructed depending on response form:
+    - If encrypted payload: key = result[16:] + random_seed + handle.headers['x-videa-xs']
+- Random seed:
+  - _s is a random 8-character alphanumeric string generated using compat_random_choices with a restricted character set.
+- Data formats:
+  - Each video_source can provide:
+    - name, mimetype, codecs, width, height, and a URL.
+    - Optional: hash_value_<name> entries in hash_values and optional expires (source_exp) to append md5 and expires query params to the source URL.
+- XML parsing:
+  - Uses xpath_element, xpath_text helpers to navigate the XML structure and extract video, poster_src, duration, is_adult_content, and source/hash nodes.
+- Error handling:
+  - If no <video> node is found, raises ExtractorError with the embedded error element if provided.
+- URL normalization:
+  - Uses _proto_relative_url to convert potentially relative URLs to full URLs suitable for the extractor.
+- Compatibility:
+  - Uses multiple helper utilities from youtube-dl’s common utils (parse_qs, update_url_query, urljoin, etc.) and compat helpers (compat_b64decode, compat_ord, compat_struct_pack).
+
+What it achieves
+- Enables downloading videos hosted on videa.hu (and videakid.hu) by:
+  - Handling both direct player URLs and embedded iframe pages.
+  - Performing a nonce-based anti-leech/authorization flow to retrieve the actual video manifest.
+  - Decrypting/decoding the manifest payload (XML) via either direct XML or a custom RC4-like decryption.
+  - Extracting all available video formats, including per-format metadata (codec, resolution, extension).
+  - Returning a complete information dictionary compatible with youtube-dl’s framework: id, title, duration, thumbnail, age_limit, and formats ready for download.
+
+Overall, the extractor orchestrates a multi-step authentication/decoding process to obtain and parse the video manifest from videa.hu and expose downloadable video formats through youtube-dl.

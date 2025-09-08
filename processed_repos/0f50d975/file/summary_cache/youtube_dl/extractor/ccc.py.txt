@@ -1,0 +1,80 @@
+Here is a concise, comprehensive summary of the CCC extractor file:
+
+- Purpose
+  - Implements two extractors for CCC.de on YouTube-DL:
+    - CCCIE: extracts video/recording formats for a single CCC event.
+    - CCCPlaylistIE: collects all events for a CCC conference (playlist) and links them to CCCIE entries.
+
+- CCCIE (single event extractor)
+  - Class: CCCIE
+  - Identifier and URL:
+    - IE_NAME: 'media.ccc.de'
+    - _VALID_URL matches https://media.ccc.de/v/<id>
+  - Main workflow (_real_extract):
+    - Derives display_id from the URL via _match_id and downloads the page.
+    - Extracts event_id by regex: data-id='(\d+)' in the page.
+    - Fetches full event data from https://media.ccc.de/public/events/<event_id>.
+  - Formats construction:
+    - Iterates over event_data['recordings']:
+      - Skips if recording_url is missing.
+      - Builds format_id using language and folder:
+        - format_id starts with language if present.
+        - If folder is present, append '-' + folder; otherwise use folder as format_id.
+      - Determines video codec (vcodec) from folder:
+        - 'h264' appears in folder → vcodec = 'h264'
+        - folder in ('mp3', 'opus') → vcodec = 'none'
+        - else vcodec = None
+      - Creates a format dict with:
+        - format_id, url, width, height (int_or_none), filesize (int_or_none with invscale=1024*1024 to MB), language, vcodec
+    - Calls _sort_formats(formats) to order formats.
+  - Returned metadata:
+    - id: event_id
+    - display_id: display_id
+    - title: event_data['title']
+    - creator: joined string from event_data['persons'] (via try_get)
+    - description: event_data.get('description')
+    - thumbnail: event_data.get('thumb_url')
+    - timestamp: parse_iso8601(event_data.get('date'))
+    - duration: int_or_none(event_data.get('length'))
+    - tags: event_data.get('tags')
+    - formats: the assembled formats list
+  - _TESTS:
+    - Includes a concrete example with md5, and an expected info_dict (id, ext, titles, creator, description, thumbnail, upload_date, timestamp, duration, tags).
+
+- CCCPlaylistIE (playlist extractor)
+  - Class: CCCPlaylistIE
+  - Identifier and URL:
+    - IE_NAME: 'media.ccc.de:lists'
+    - _VALID_URL matches https://media.ccc.de/c/<id>
+  - Main workflow (_real_extract):
+    - playlist_id = lowercased _match_id(url)
+    - Downloads conference JSON from https://media.ccc.de/public/conferences/<playlist_id>
+    - Iterates over conf['events']:
+      - Extracts event frontend URL from event data (frontend_link)
+      - If present, adds an entry to the playlist using self.url_result(event_url, ie=CCCIE.ie_key()) so each item uses CCCIE
+    - Returns a playlist result with:
+      - entries (list of URL results to CCCIE)
+      - id (playlist_id)
+      - title (conf.get('title'))
+  - _TESTS:
+    - Example playlist test with title '30C3' and id '30c3' and 135 entries.
+
+- Key implementation details
+  - Robust data extraction:
+    - Uses _download_webpage, _download_json, _search_regex, and _match_id with safe fallbacks.
+    - Creator extraction uses try_get to gracefully handle missing fields.
+  - Format identification:
+    - Combines language and folder into a meaningful format_id, e.g., "en-1080p" or "de".
+    - Infers video codec from folder (e.g., h264, audio-only yields vcodec 'none').
+  - File size handling:
+    - Uses int_or_none with invscale to convert recording['size'] to MB.
+  - Timestamps and durations:
+    - Uses parse_iso8601 for date fields; int_or_none for 'length'.
+  - Playlist composition:
+    - Builds a playlist by aggregating event URLs from a conference and linking each via CCCIE, enabling centralized access to all related CCC videos.
+
+- Usage outcomes
+  - CCCIE enables downloading CCC.de event videos with multiple formats (video+audio, audio-only, etc.) and rich metadata (title, creator, description, thumbnail, date, duration, tags).
+  - CCCPlaylistIE enables aggregating all events of a conference into a single playlist, with each item resolved to CCCIE for actual video extraction.
+
+This summarizes the main functionality, structure, and noteworthy implementation details of the CCC extractor file.

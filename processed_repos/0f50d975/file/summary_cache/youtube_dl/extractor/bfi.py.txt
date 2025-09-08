@@ -1,0 +1,36 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/bfi.py
+
+- Purpose
+  - Implements an extractor for BFI (British Film Institute) player pages. It finds embedded Ooyala videos on a BFI page and exposes them as a playlist of Ooyala entries.
+
+- Main class
+  - BFIPlayerIE(InfoExtractor)
+    - IE_NAME = 'bfi:player'
+    - _VALID_URL: Regex that matches BFI player watch pages, e.g. https://player.bfi.org.uk/.../film/watch-<slug>-online
+    - _TEST: Sample URL with expected metadata and a skip note indicating playback may be blocked outside the UK
+
+- Key methods and workflow
+  - _real_extract(self, url)
+    - video_id = self._match_id(url): extracts the Ooyala video ID or page-specific ID from the URL using the _VALID_URL regex.
+    - webpage = self._download_webpage(url, video_id): downloads the HTML content of the BFI page.
+    - Scans the page for embedded players using the regex (?s)<[^>]+class="player"[^>]*> to locate HTML elements with class="player".
+    - For each matching player element:
+      - player_attr = extract_attributes(player_el): parses HTML tag attributes into a dictionary.
+      - ooyala_id = player_attr.get('data-video-id'): obtains the Ooyala video ID.
+      - If no data-video-id is present, skip this element.
+      - entries.append(self.url_result('ooyala:' + ooyala_id, 'Ooyala', ooyala_id, player_attr.get('data-label'))):
+        - Creates a URL result pointing to the Ooyala extractor with:
+          - URL: ooyala:<id>
+          - IE: 'Ooyala'
+          - video_id: the Ooyala ID
+          - display_id/label: the data-label attribute (used for naming)
+    - Returns self.playlist_result(entries): aggregates all discovered Ooyala videos into a single playlist result.
+
+- Important implementation details
+  - Multi-video handling: The code supports multiple embedded Ooyala players on a single BFI page and returns a playlist of all found videos.
+  - Tag attribute parsing: Uses extract_attributes to read data attributes from the HTML tag (notably data-video-id and data-label).
+  - External extractor integration: Delegates actual video extraction to the Ooyala extractor by using the constructed ooyala: URL, enabling reuse of existing Ooyala logic.
+  - Fallback behavior: If a player element lacks a data-video-id, it is ignored rather than causing failure.
+  - UK geo-block note: The _TEST includes a skip message indicating that BFI Player films cannot be played outside of the UK, reflecting typical geographic restrictions of the source site.
+
+In short, BFIPlayerIE parses a BFI player page for elements with class="player", extracts Ooyala video IDs, and returns a playlist of Ooyala video entries with optional human-friendly labels.

@@ -1,0 +1,69 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/senateisvp.py
+
+Purpose
+- Implement a YouTube-DL extractor for the Senate ISVP (Integrated Senate Video Player) pages on senate.gov. It supports both “arch” (archived/direct mp4) content and non-archived live/on-demand content per committee.
+
+Key class
+- SenateISVPIE(InfoExtractor)
+  - _COMM_MAP: A mapping of committee short names to stream identifiers and base domains. Each entry is [committee, stream_id, domain]. Includes a special arch entry with an empty stream_id and a dedicated domain.
+  - IE_NAME: 'senate.gov'
+  - _VALID_URL: Regex for URLs like http(s)://www.senate.gov/isvp/?<qs> where qs is the query string.
+  - _TESTS: Four tests demonstrating:
+    - Live content for judiciary with a poster thumbnail
+    - Live content for commerce
+    - Arch content for intel (checksum changes per request)
+    - A non-matching URL case to show only_matching behavior
+
+Key functions and workflow
+- _search_iframe_url(webpage)
+  - Static helper that scans a page for an iframe src pointing to a senate ISVP URL and returns that URL if found. Not directly used in _real_extract but available for iframe-based flows.
+
+- _get_info_for_comm(committee)
+  - Looks up the given committee name in _COMM_MAP and returns the two info fields (stream_num, domain) for format construction.
+
+- _real_extract(self, url)
+  - Unsmuggling and parsing:
+    - Uses unsmuggle_url to possibly recover forced title or other metadata.
+    - Extracts and parses the query string from the URL using compat_parse_qs.
+    - Validates presence of filename, type, and comm in the query; otherwise raises ExtractorError.
+  - Video identification and basic metadata:
+    - video_id is derived from the filename by removing a trailing .mp4 if present.
+    - Downloads the page content (webpage).
+    - Title: uses forced title from smuggled data if present; otherwise attempts to extract from the page title tag.
+    - thumbnail: derived from poster parameter in the query string, if present.
+  - Determine video type and committee:
+    - video_type = qs['type'][0]
+    - committee = video_type if video_type == 'arch' else qs['comm'][0]
+    - Retrieves stream_num and domain via _get_info_for_comm(committee)
+  - Formats construction:
+    - arch type:
+      - Builds a single direct MP4 URL: domain joined with video_id (ensuring .mp4 if needed) and appends the query string parameters ?v=3.1.0&fp=&r=&g= to avoid 403s.
+      - formats is a list with a single entry containing that URL.
+    - non-arch type:
+      - hdcore_sign = 'hdcore=3.1.0'
+      - f4m URL: domain/z/{video_id}_1@{stream_num}/manifest.f4m? + hdcore_sign
+      - m3u8 URL: domain/i/{video_id}_1@{stream_num}/master.m3u8
+      - Extract formats from the F4M manifest via _extract_f4m_formats, tagging each entry with extra_param_to_segment_url set to hdcore_sign to prevent 403s on segment requests.
+      - Extract formats from the M3U8 playlist via _extract_m3u8_formats. For each format, if the M3U8 filename includes a -p or -b tag, append that tag to the format_id for clarity.
+      - Sort the formats with _sort_formats.
+  - Return metadata:
+    - id: video_id
+    - title: resolved title
+    - formats: list of formats constructed above
+    - thumbnail: thumbnail URL or None
+
+Important implementation details
+- The code handles two distinct delivery modes:
+  - arch: direct, single MP4 URL with domain-based path, plus specific query parameters to avoid access issues.
+  - non-arch: streaming formats derived from both f4m (Flash) and m3u8 (HLS) manifests, with careful parameter handling to avoid 403 errors and to label formats meaningfully.
+- Access control workarounds:
+  - For f4m formats, adds extra_param_to_segment_url with hdcore_sign to ensure segment requests are accepted.
+  - The m3u8 format IDs may be augmented with -p or -b if present in the playlist filename to reflect profile/bitrate variants.
+- Title handling:
+  - Supports a “smuggled” forced title via unsmuggle_url, otherwise falls back to extracting from the HTML title tag.
+- Robustness:
+  - Validates required query parameters; raises ExtractorError if missing.
+  - Uses compat_* helpers for Python 2/3 compatibility in query parsing and URL handling.
+
+In short
+- This extractor parses Senate ISVP URLs, identifies whether the content is archived or live per committee, and builds a formats list by either a direct MP4 URL (arch) or via F4M and M3U8 manifests (non-arch). It returns standard info dict with id, title, formats, and thumbnail. It contains a mapping of committees to their streaming domains and uses that to assemble correct streaming URLs.

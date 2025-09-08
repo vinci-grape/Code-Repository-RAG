@@ -1,0 +1,48 @@
+- Purpose: Implement WSJ video extractors for youtube-dl to fetch WSJ video metadata and formats, and to extract embeds from WSJ article pages.
+
+- Key classes:
+  - WSJIE (InfoExtractor)
+    - Main WSJ video extractor.
+    - _VALID_URL matches:
+      - WSJ video iframe embeds (video-api.wsj.com/api-video/player/iframe.html?guid=...),
+      - WSJ or Barron’s video pages under /video/...,
+      - a wsj: style ID scheme (custom URL type).
+    - _real_extract(url):
+      - Extracts video_id via _match_id.
+      - Fetches video metadata via HTTP JSON API:
+        - Endpoint: http://video-api.wsj.com/api-video/find_all_videos.asp
+        - Params: type=guid, count=1, query=video_id, fields=(list of fields)
+      - Builds title from name or titletag.
+      - Collects formats from three sources (if present):
+        - HDS (F4M): from videoURL using _extract_f4m_formats with f4m_id='hds', fatal=False.
+        - HLS (M3U8): from hls using _extract_m3u8_formats with ext='mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False.
+        - MP4s: from videoMP4List array; for each entry with url, adds a format dict including:
+          - url, format_id (e.g., 'http' or 'http-<bitrate>'), tbr, width, height, fps.
+      - Sorts formats with _sort_formats.
+      - Returns a dict with:
+        - id, formats, thumbnails (thumbnailList),
+        - creator (author), uploader_id (editor),
+        - duration, upload_date (parsed with unified_strdate, based on formattedCreationDate),
+        - title, categories (keywords).
+  - WSJArticleIE (InfoExtractor)
+    - Article page extractor to find embedded WSJ video.
+    - _VALID_URL matches WSJ articles: https://www.wsj.com/articles/...
+    - _real_extract(url):
+      - Gets article_id via _match_id.
+      - Downloads the article page.
+      - Extracts a video_id from a data-src attribute via regex: data-src="([a-fA-F0-9-]{36})".
+      - Returns a URL result redirecting to wsj:<video_id> using WSJIE as the real extractor (ie_key()).
+
+- Important implementation details:
+  - The WSJIE extractor uses a specific API call to obtain all relevant video metadata/format options in one request, requesting fields such as hls, videoURL (F4M), videoMP4List, thumbnailList, author, duration, etc.
+  - Formats are aggregated from:
+    - F4M (HDS) via _extract_f4m_formats,
+    - M3U8 (HLS) via _extract_m3u8_formats,
+    - Direct MP4s via a manual formats list built from videoMP4List entries.
+  - The code gracefully handles missing sources (fatal=False) to avoid failing if a particular format type is unavailable.
+  - Output fields follow youtube-dl conventions: id, formats, thumbnails, uploader_id, creator, duration, upload_date, title, and categories.
+  - The WSJArticleIE acts as a convenience wrapper to detect embedded WSJ videos in article pages and delegate extraction to WSJIE via wsj:<video_id>.
+
+- Tests:
+  - _TESTS for WSJIE include a real GUID-based WSJ video with expected id, ext, upload_date, uploader_id, creator, duration, title, and categories.
+  - Additional tests ensure other WSJ/Barron’s URLs and WSJ article URLs correctly match the extractor’s URL patterns (only_matching).

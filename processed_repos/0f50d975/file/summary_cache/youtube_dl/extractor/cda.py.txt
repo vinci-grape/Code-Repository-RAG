@@ -1,0 +1,78 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/cda.py
+
+Purpose
+- Implement an InfoExtractor for CDA.pl video pages to extract metadata and video formats, handling age gates, geo restrictions, and multiple video quality versions.
+
+Key components
+- Class CDAIE(InfoExtractor)
+  - _VALID_URL: Regex for CDA video pages (including cda.pl/video/<id> and eb.d.cda.pl paths).
+  - _BASE_URL: Base CDA domain used for constructing full URLs.
+  - _TESTS: Several test cases with expected metadata (id, ext, title, description, thumbnail, duration, age_limit, etc.) and a premium-only/geo-restricted scenario.
+
+Core functionality
+- Page retrieval and initial checks
+  - Sets HTML5 player cookie: cda.player = html5 to request modern player assets.
+  - Downloads the main video page: /video/<id>.
+  - Handles premium-only case by raising ExtractorError if message indicates premium-only access.
+  - Detects geo-restriction and triggers geo-restricted handling if needed.
+  - Detects age gate form; if present, triggers age-confirmation flow.
+
+- Age confirmation flow
+  - _download_age_confirm_page(url, video_id, ...): creates a birthday form via random_birthday ('rok', 'miesiac', 'dzien'), posts to /a/validatebirth with necessary headers, and returns the resulting page.
+  - need_confirm_age flag indicates an age check was required, used later to set age_limit and to choose how to fetch additional formats.
+
+- Metadata extraction
+  - Uploader: extracted via regex targeting itemprop="author" or "name" in HTML.
+  - View count: extracted with a pattern like "Odsłony: ...".
+  - Average rating: extracted from ratingValue meta/span if present.
+  - info_dict: built with id, title (from OpenGraph), description (OpenGraph), uploader, view_count, average_rating, thumbnail (OpenGraph), duration (parsed later), age_limit (18 if age-confirmed else 0), and an empty formats list to be filled.
+
+- JSON-LD and additional format data
+  - info (from _search_json_ld) is obtained to merge with the primary info_dict later.
+  - A crucial nested section decrypts obfuscated CDN URLs:
+    - decrypt_file(a): removes anti-tamper tokens, unquote, ROT-rot13 transforms if needed, fixes .cda.mp4 endings, normalizes upstream domains, and returns a full HTTPS URL ending in .mp4.
+  - extract_format(page, version): finds player_data JSON blob embedded in the page, loads it, and reads video.file:
+    - If file starts with "uggc" → ROT13 decode, adjust if ends with adc.mp4.
+    - If file is not a full http URL → decrypt_file(video['file']).
+    - Builds a format dict with url and optional format_id and height by parsing the accompanying HTML for the quality tag.
+    - Updates info_dict['duration'] from video['duration'] if available.
+  - Initial call: extract_format(webpage, 'default') to capture the default/primary format data.
+
+- Handling additional formats/versions
+  - Scans the page for additional quality links with data-quality attributes.
+  - For each found href and resolution (e.g., 720p, 1080p), fetches the corresponding version page:
+    - If age-confirmation is needed, uses _download_age_confirm_page; otherwise uses _download_webpage.
+    - If the page fetch fails (empty), logs a warning and continues.
+    - Calls extract_format on the fetched page to append more formats (with appropriate height and format_id).
+  - Continues to collect all available formats across versions.
+
+- Finalization
+  - _sort_formats(formats) to order formats by quality/bitrate.
+  - Returns merge_dicts(info_dict, info) to combine basic metadata with JSON-LD data for a complete info dictionary.
+
+Important implementation details
+- Robustness to CDA’s obfuscation:
+  - Uses decrypt_file to rebuild non-direct URLs from CDA’s obfuscated strings.
+  - Handles ROT13 obfuscated fields and non-URL-based values.
+- Age gate handling:
+  - Uses random_birthday to generate realistic birth date data.
+  - Posts to /a/validatebirth with appropriate module and module_id to bypass age gate when allowed.
+  - age_limit is set to 18 if age was confirmed; otherwise 0.
+- Metadata extraction:
+  - Uses OpenGraph helpers (_og_search_title/_og_search_description/_og_search_thumbnail) for reliable metadata when available.
+  - Falls back to direct regexes for uploader, view_count, and rating when needed.
+- Multiple formats:
+  - Starts with a default format and then aggregates additional formats by parsing multiple versions/quality buttons on the page.
+  - Each version can be fetched via age-confirmation flow or directly, depending on whether age verification is still active.
+- Error handling:
+  - Raises specific ExtractorError for premium-only content (expected) and geo-restriction via geo-limits.
+  - Logs warnings when a specific format/version cannot be retrieved.
+
+Output
+- The extractor returns a merged dictionary containing:
+  - id, title, description, uploader, view_count, average_rating, thumbnail, duration, age_limit
+  - formats: a list of dicts with url, height, format_id (when available)
+  - plus any additional fields provided by the JSON-LD data (merged in)
+
+In short
+- CDAIE scrapes CDA.pl video pages, handles age and geo restrictions, decrypts obfuscated video URLs, collects multiple video formats across versions, and assembles a complete metadata dictionary suitable for youtube-dl.

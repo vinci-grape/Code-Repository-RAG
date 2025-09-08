@@ -1,0 +1,73 @@
+Concise summary of TF1 extractor (youtube-dl/youtube_dl/extractor/tf1.py)
+
+Purpose
+- Extracts video metadata from TF1 site by querying TF1’s GraphQL API and returning a URL that delegates to TF1’s Wat streaming (WAT) handler.
+
+Key components
+- TF1IE class
+  - Inherits from InfoExtractor (standard youtube-dl extractor pattern).
+
+- _VALID_URL
+  - Regular expression that matches TF1 video URLs of the form:
+    https://www.tf1.fr/<program_slug>/videos/<id>.html
+  - Captures:
+    - program_slug: the program section (e.g., tmc/quotidien)
+    - id: slug for the video page (used in GraphQL query)
+
+- _TESTS
+  - Provides test cases to validate extraction:
+    - Example 1: a Quotidien video with expected metadata (id, ext, title, description, upload_date, timestamp, duration, series, tags).
+    - Example 2 and 3: only_matching tests for other TF1 video URLs (ensures URL patterns still match).
+
+- _real_extract(self, url)
+  - Core extraction logic:
+    - Parse program_slug and slug from the URL using _VALID_URL.
+    - Query TF1 GraphQL endpoint: https://www.tf1.fr/graphql/web
+      - Query id is a constant string.
+      - Variables payload includes programSlug and slug.
+      - The response is expected at data.videoBySlug.
+    - wat_id = video['streamId'] (the streaming identifier for WAT).
+
+  - Metadata extraction:
+    - tags: collect non-empty tag labels from video['tags'].
+    - decoration: video.get('decoration') or {} used as a container for more metadata.
+    - thumbnails: build from decoration.image.sources if present
+      - Each source provides url and width (converted to int).
+    - title: video.get('title')
+    - description: decoration.get('description')
+    - timestamp: parse_iso8601(video.get('date'))
+    - duration: int_or_none(try_get(video, lambda x: x['publicPlayingInfos']['duration']))
+    - series: decoration.get('programLabel')
+    - season_number: int_or_none(video.get('season'))
+    - episode_number: int_or_none(video.get('episode'))
+
+  - Return value
+    - A dict with _type: 'url_transparent', enabling chaining to another extractor.
+    - id: wat_id
+    - url: 'wat:' + wat_id (special Wat URL scheme)
+    - title, thumbnails, description, timestamp, duration, tags, series, season_number, episode_number
+
+Implementation details and nuances
+- GraphQL-based extraction:
+  - Instead of scraping HTML, uses a GraphQL query to obtain structured video data by slug.
+  - The variables payload includes programSlug and slug, enabling contextual data retrieval.
+
+- Robust nested data access:
+  - Uses try_get and or {} / or [] fallbacks to avoid KeyError when optional fields are missing.
+  - Helper functions used:
+    - int_or_none: safely convert numeric fields to int or None.
+    - parse_iso8601: convert ISO8601 date strings to Unix timestamp.
+    - try_get: safe path traversal for nested dicts/lists.
+
+- Thumbnails handling:
+  - Builds a list of thumbnail dicts from decoration.image.sources, if available.
+  - Each thumbnail includes url and optional width.
+
+- Media type handling:
+  - Uses _type = 'url_transparent' and constructs a URL prefixed with 'wat:' to hand off to the appropriate streaming extractor for WAT format.
+  - This approach centralizes the video data and delegates actual media retrieval to the WAT handler.
+
+- Potential fragility:
+  - Relies on TF1 GraphQL schema and field names remaining stable (videoBySlug, streamId, decoration, image.sources, publicPlayingInfos.duration, etc.). If the API changes, extraction may fail.
+
+Overall, the extractor focuses on fetching structured video metadata via TF1’s GraphQL API and returning a transparent URL to the WAT-based streaming, while gathering rich metadata (title, timestamps, duration, series, tags, thumbnails, etc.) for downstream use.

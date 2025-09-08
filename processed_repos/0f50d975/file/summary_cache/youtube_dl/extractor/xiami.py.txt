@@ -1,0 +1,78 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/xiami.py
+
+- Purpose
+  - Implement YouTube-dl extractors for Xiami Music to fetch song, album, artist, and collection data from Xiami’s APIs, constructing standardized info dictionaries for download.
+
+- Core classes
+  - XiamiBaseIE (InfoExtractor)
+    - Provides common Xiami functionality and helpers used by all Xiami extractors.
+    - API base endpoint: https://emumo.xiami.com/song/playlist/cat/json/id
+    - Geo-restriction handling: _download_webpage_handle inspects the page for “Xiami is currently not available in your country.” and raises a georestriction error.
+    - _extract_track(track, track_id=None): builds a normalized track dict with:
+      - id: track['song_id'] or provided track_id
+      - url: decrypted track URL via _decrypt(track['location'])
+      - title: “Artist - TrackName” if artist available, else TrackName
+      - thumbnail: track['pic'] or track['album_pic']
+      - duration: int_or_none(track['length'])
+      - creator: first artist before a semicolon
+      - track: track_name
+      - track_number: int_or_none(track['track'])
+      - album: track['album_name'] or track['title']
+      - artist: artist string
+      - subtitles: if lyrics URL exists, add origin subtitle with the lyrics URL
+    - _extract_tracks(item_id, referer, typ=None): downloads playlist JSON from API_BASE_URL/item_id[ /type/typ ] with Referer header and returns a list of extracted track dicts via _extract_track.
+    - _decrypt(origin): decrypts Xiami’s obfuscated track URL. Algorithm:
+      - n = int(origin[0]); origin = origin[1:]
+      - Split origin into n chunks as evenly as possible (some chunks may be longer by 1).
+      - Reassemble by taking the i-th character of each chunk in order (column-major reconstruction), building a string.
+      - URL-decode the result and replace '^' with '0'.
+      - Uses compat_urllib_parse_unquote for decoding.
+
+  - XiamiSongIE (XiamiBaseIE)
+    - IE_NAME: 'xiami:song'
+    - _VALID_URL matches Xiami song URLs: https://(www.)?xiami.com/song/{id}
+    - _real_extract(url): returns the first track from _extract_tracks for the given song id.
+
+  - XiamiPlaylistBaseIE (base for album/artist/collection)
+    - Inherits XiamiBaseIE; implements common playlist extraction.
+    - _real_extract(url): extracts item_id from URL and returns a playlist result using _extract_tracks(item_id, url, self._TYPE).
+
+  - XiamiAlbumIE (XiamiPlaylistBaseIE)
+    - IE_NAME: 'xiami:album'
+    - IE_DESC: Chinese label for album
+    - _VALID_URL: matches xiami.com/album/{id}
+    - _TYPE: '1' (album type in API)
+    - Tests include album with expected playlist count and georestriction behavior.
+
+  - XiamiArtistIE (XiamiPlaylistBaseIE)
+    - IE_NAME: 'xiami:artist'
+    - _VALID_URL: matches xiami.com/artist/{id}
+    - _TYPE: '2' (artist type in API)
+    - Tests cover artist playlists and georestriction edge cases.
+
+  - XiamiCollectionIE (XiamiPlaylistBaseIE)
+    - IE_NAME: 'xiami:collection'
+    - _VALID_URL: matches xiami.com/collect/{id}
+    - _TYPE: '3' (collection type in API)
+    - Test defines a collection with a minimum playlist count and georestriction behavior.
+
+- Data flow and API usage
+  - For songs: XiamiSongIE uses the single-song flow and returns the first track from the playlist JSON.
+  - For albums/artists/collections: XiamiAlbumIE, XiamiArtistIE, XiamiCollectionIE fetch a playlist via the API endpoint using item_id and _TYPE, and return a playlist_result containing all extracted tracks.
+
+- Subtleties and implementation details
+  - Track title composition favors artist if available; otherwise uses the track name alone.
+  - Lyrics/subtitles are supported if a lyric URL is present (added as origin subtitles with ext 'lrc').
+  - The decrypted track URL is essential since the API provides obfuscated location data.
+  - Creator is parsed from the artist field by splitting on semicolons to get a primary artist.
+  - Duration, track number, and album fields are robustly extracted with int_or_none to handle missing values.
+  - Geo-restriction checks are embedded in the base downloader to conveniently skip/unblock where Xiami is not available.
+
+- Tests
+  - Includes several _TESTS and _TEST cases for song, album, artist, and collection, covering:
+    - Normal extraction
+    - Georestriction skipping
+    - Matching and non-matching URLs
+    - Handling of Lyric/LRC subtitles
+
+Overall, the module provides a structured set of extractors for Xiami content, with a shared decryption routine for track URLs, robust track metadata extraction, and support for songs as well as album/artist/collection playlists.

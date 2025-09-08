@@ -1,0 +1,97 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/viu.py
+
+Overview
+- Implements VIU extractors for youtube-dl: single videos, playlists, and OTT videos.
+- Uses a common ViuBaseIE to authenticate with VIU and centralize API calls.
+- Handles HLS/m3u8 formats, subtitles, and metadata with region/geo awareness.
+
+Key classes and main functionality
+
+1) ViuBaseIE (base extractor)
+- Purpose: Centralizes VIU API authentication and API request handling.
+- Initialization:
+  - _real_initialize makes a request to https://www.viu.com/api/apps/v2/authenticate with guest credentials.
+  - Stores the authentication token from the X-VIU-AUTH response header in self._auth_token.
+- _call_api(path, …):
+  - Combines geo-verification headers with the stored X-VIU-AUTH token.
+  - Calls the VIU API at https://www.viu.com/api/<path>.
+  - Expects a JSON response with a top-level 'response' key.
+  - If response['status'] != 'success', raises ExtractorError with the message from the API.
+  - Returns the API response payload.
+
+2) ViuIE (single video extractor)
+- URL pattern (_VALID_URL):
+  - Matches viu: or standard https URLs under viu.com that point to a media page, e.g., /media/<id>.
+- Tests (_TESTS):
+  - Examples include geo-restricted tests and a non-matching India subdomain example.
+- _real_extract(url):
+  - Extracts video_id from the URL.
+  - Retrieves video data via _call_api('clip/load', video_id, …) with appid, fmt, and id in query.
+  - video_data = first item from the item list.
+  - title = video_data['title'].
+  - Determines m3u8 manifest URL:
+    - If url_path and tdirforwhole and jwhlsfile exist, builds m3u8_url as url_path/tdirforwhole/jwhlsfile.
+    - Otherwise falls back to video_data['href'].
+  - Formats:
+    - Uses _extract_m3u8_formats(m3u8_url, video_id, 'mp4') to gather formats.
+    - Sorts formats with _sort_formats(formats).
+  - Subtitles:
+    - Scans video_data keys for subtitle_<lang>_<ext> (ext in vtt or srt) and aggregates into a subtitles dict.
+  - Returns a dict with:
+    - id, title, description, series, episode, episode_number, duration, formats, subtitles.
+
+3) ViuPlaylistIE (playlist extractor)
+- IE_NAME: 'viu:playlist'
+- URL pattern (_VALID_URL): playlists at https://www.viu.com/.../listing/playlist-<id>
+- _real_extract(url):
+  - Extracts playlist_id.
+  - Fetches playlist data via _call_api('container/load', playlist_id, …) with id='playlist-' + playlist_id.
+  - Iterates over playlist_data['item']; for each item with an id:
+    - Converts id to string via compat_str.
+    - Appends a VOI (video object) result: self.url_result('viu:' + item_id, 'Viu', item_id).
+  - Returns a playlist result with entries, playlist_id, and title (from playlist data).
+
+4) ViuOTTIE (OTT video extractor)
+- IE_NAME: 'viu:ott'
+- URL pattern (_VALID_URL): https://viu.com/ott/{country_code}/{language}/vod/<id>
+- Tests: geo-restricted examples (Singapore, Hong Kong).
+- _AREA_ID mapping:
+  - HK: 1, SG: 2, TH: 4, PH: 5
+- _real_extract(url):
+  - Parses country_code and video_id from the URL.
+  - Builds a query for product detail:
+    - r='vod/ajax-detail', platform_flag_label='web', product_id=<video_id>.
+  - area_id = _AREA_ID.get(country_code.upper()); if present, adds area_id to the query.
+  - Fetches product_data from http://www.viu.com/ott/<country_code>/index.php with the query; uses ['data'].
+  - video_data = product_data.get('current_product'); if missing, raises ExtractorError indicating regional restriction.
+  - Fetches stream data from CloudFront endpoint:
+    - URL: https://d1k2us671qcoau.cloudfront.net/distribute_web_<country_code>.php
+    - query includes ccs_product_id from video_data.
+    - Headers include Referer (original URL) and Origin (base domain of the URL).
+  - stream_data = response['data']['stream'].
+  - Builds formats from stream_data['url'] items:
+    - For each vid_format and stream_url:
+      - height parsed from vid_format using regex s(\d+)p.
+      - Creates format dict with format_id, url, height, ext='mp4', and filesize from stream_sizes.get(vid_format) if available.
+  - Subtitles from video_data.get('subtitle', []) if subtitle entries have 'url'.
+  - title = video_data['synopsis'].strip()
+  - Returns dict with:
+    - id, title, description, series (from product_data['series']['name'] if present), episode, episode_number, duration, thumbnail, formats, subtitles.
+
+Implementation details and notable behavior
+- Authentication:
+  - ViuBaseIE authenticates once per extractor instance via _real_initialize and uses the token in subsequent API calls.
+  - All API calls use a common helper _call_api that attaches geo verification headers and the X-VIU-AUTH token.
+- API response handling:
+  - Expects a 'response' object with 'status' == 'success' for _call_api success; otherwise raises a descriptive ExtractorError.
+- Formats and subtitles:
+  - For single videos, formats come from an HLS/M3U8 manifest via _extract_m3u8_formats.
+  - Subtitles are gathered by scanning keys named like subtitle_<lang>_<ext> in video data (e.g., subtitle_en_vtt, subtitle_en_srt).
+- OTT extraction:
+  - OTT flow uses country-specific endpoints and applies area restrictions via area_id when available.
+  - Stream information is fetched from CloudFront with proper Referer and Origin headers to reflect the request origin.
+  - Formats include height (parsed from format id, e.g., s720p) and filesize if provided by the service.
+- Geo-restrictions and tests:
+  - Tests demonstrate geo-restricted cases (India, Indonesia, Singapore, Hong Kong), and some URLs are marked skip based on geography.
+
+Overall, the file provides a cohesive set of extractors for VIU that share authentication and API access logic, capable of handling standard video pages, playlists, and OTT detail pages with appropriate format and subtitle extraction.

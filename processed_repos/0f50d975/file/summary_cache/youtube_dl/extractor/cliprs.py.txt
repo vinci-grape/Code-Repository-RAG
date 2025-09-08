@@ -1,0 +1,23 @@
+- Purpose: A youtube-dl extractor for clip.rs videos. It defines how to locate and extract video metadata from a Clip.rs page.
+
+- Class and inheritance:
+  - ClipRsIE inherits from OnetBaseIE, leveraging common Onet-based extraction utilities.
+
+- Key components:
+  - _VALID_URL: Regex matching Clip.rs video pages. Pattern captures an id segment in the URL path: https?://(www.)?clip.rs/{id}/<digits>.
+  - _TEST: Embedded test case with a sample URL and expected metadata (id, ext, title, description MD5, duration, timestamp, upload_date) to validate the extractor.
+  - _real_extract(url): Main extraction routine.
+    - display_id = self._match_id(url): extracts the URL slug id using the regex.
+    - webpage = self._download_webpage(url, display_id): fetches the page HTML.
+    - mvp_id = self._search_mvp_id(webpage): finds the MVP video id within the page (delegated to OnetBaseIE utilities).
+    - info_dict = self._extract_from_id(mvp_id, webpage): builds the video info dictionary from the MVP id (also provided by OnetBaseIE).
+    - info_dict['display_id'] = display_id: preserves the URL slug in the result.
+    - return info_dict: outputs the final dictionary containing video metadata (e.g., id, ext, title, description, duration, timestamp, upload_date).
+
+- Important implementation details:
+  - The extractor delegates heavy lifting to OnetBaseIE methods (_search_mvp_id, _extract_from_id, _download_webpage), so it requires only URL parsing and orchestration.
+  - The _VALID_URL pattern ensures it only matches Clip.rs pages with the expected structure.
+  - The returned info_dict aligns with youtube-dl’s standard fields, and includes a display_id for URL readability/reference.
+
+- Overall functionality:
+  - Given a Clip.rs page URL, it locates the corresponding MVP video ID on the page, extracts metadata (title, duration, upload date, etc.), and returns a structured info dictionary suitable for download/processing by youtube-dl.

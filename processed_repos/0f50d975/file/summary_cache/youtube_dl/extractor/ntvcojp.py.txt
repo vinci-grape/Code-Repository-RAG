@@ -1,0 +1,42 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/ntvcojp.py
+
+Purpose
+- Implement a YouTube-DL extractor for Nippon Television Network’s cu.ntv.co.jp pages. It identifies videos hosted on Brightcove and delegates extraction to the BrightcoveNew extractor.
+
+Main class
+- NTVCoJpCUIE(InfoExtractor)
+  - IE_NAME: 'cu.ntv.co.jp'
+  - IE_DESC: 'Nippon Television Network'
+  - _VALID_URL: Matches cu.ntv.co.jp URLs (excluding /program) and captures an id slug.
+  - _TEST: Example URL with expected metadata (id, title, upload_date, description, uploader_id, timestamp); uses skip_download to only fetch metadata.
+  - BRIGHTCOVE_URL_TEMPLATE: Template for the Brightcove player URL: http://players.brightcove.net/{account}/default_default/index.html?videoId={video_id}
+
+Key functionality (core logic in _real_extract)
+- Display ID extraction and page fetch:
+  - display_id = matched slug from URL
+  - webpage = downloaded HTML of the page
+- Parse Brightcove config:
+  - Extract JSON object assigned to PLAYER_CONFIG with a regex.
+  - Convert JS-style JSON (likely single quotes) to proper JSON using js_to_json.
+  - Parse into a Python dict as player_config.
+- Obtain video details:
+  - video_id = player_config['videoId']
+  - account_id = player_config.get('account') or '3855502814001' (default)
+- Build metadata and final URL:
+  - title: extracted from the page via a regex targeting an h1 element with class "title"
+  - description: from meta description or og:description
+  - url: a Brightcove URL constructed with account_id and video_id, wrapped with smuggle_url to attach geo_countries: ['JP'] (geo-restriction handling)
+  - The extract target is BrightcoveNew (ie_key), with _type set to 'url_transparent' to delegate to the Brightcove extractor
+  - id: video_id
+  - display_id: original slug
+- Returns a dict:
+  - _type: 'url_transparent'
+  - id, display_id, title, description, url, ie_key: 'BrightcoveNew'
+
+Implementation details
+- Uses _search_regex and _download_webpage for page content and pattern searching.
+- Uses _parse_json with js_to_json to robustly parse the PLAYER_CONFIG object embedded in JavaScript.
+- Falls back to a default Brightcove account if not present in the config.
+- Uses smuggle_url to ensure proper geo restriction metadata (JP) accompanies the redirected Brightcove URL.
+
+Overall, the extractor retrieves a page’s Brightcove video configuration, derives the Brightcove video URL, fetches basic metadata from the page, and delegates actual video extraction to the BrightcoveNew backend while enforcing Japan geo-restriction.

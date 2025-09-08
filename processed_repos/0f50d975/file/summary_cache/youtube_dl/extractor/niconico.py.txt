@@ -1,0 +1,119 @@
+Here’s a concise, structured summary of the code in ./youtube-dl/youtube_dl/extractor/niconico.py.
+
+Overview
+- This module implements multiple extractors for Nico Nico Douga (Niconico):
+  - NiconicoIE: core extractor for individual videos (HTML5 and legacy SMILE/SWF/DMC streams).
+  - NiconicoPlaylistIE: extracts playlists from user MyList pages.
+  - NicovideoSearchBaseIE and derived: search-based extractors (regular search, search URL, and date-constrained search).
+  - NicovideoSearchDateIE: date-based search with interval splitting to gather results.
+  - NiconicoUserIE: extracts videos from a user’s page via NicoNavi API.
+- Uses Nico Nico’s API extensively, with fallbacks to HTML metadata when needed.
+
+Key classes and main functionality
+- NiconicoIE (InfoExtractor)
+  - Purpose: extract a single video page from Nico Nico Douga.
+  - Login support: attempts login if credentials are provided (optional). Uses account.nicovideo.jp API.
+  - Data sources:
+    - data-api-data attribute from the watch page (parsed as JSON).
+    - getthumbinfo API on ext.nicovideo.jp for extra video info and error handling.
+    - watchAPIDataContainer in the page for additional video details.
+  - Formats extraction:
+    - DMC formats: from quality info in api_data['media']['delivery']['movie'] for all audio/video quality combos. Uses helper _extract_format_for_quality to build format dicts with:
+      - url, format_id (video_quality.id and audio_quality.id combined, removing archive_ prefix),
+      format_note, ext (mp4), vcodec/acodec, vbr/abr, height/Width, protocol ('niconico_dmc'), and HTTP headers (Origin and Referer).
+    - SMILE/HTTP fallback:
+      - If video has a Smile URL (video_real_url), determines economy mode (low quality end). If not economy, prefers source.
+      - Uses FFmpegPostProcessor to probe the Smile URL to get stream metadata (video and audio streams) and size/extension info.
+      - Creates a format for the Smile source with appropriate fields (size, vcodec/acodec, bitrates, resolution, etc.), considering economy mode and source status.
+      - Adds this as a format if filesize is present.
+    - Final steps:
+      - Sort formats with _sort_formats.
+      - Resolve title, thumbnail, description, uploader, timestamps, view/comment counts, duration, and urls from a mix of API data and HTML metadata (watchAPIDataContainer, data-api-data, og:image, meta tags, etc.).
+      - Handle errors reported by getthumbinfo (DELETED, NOT_FOUND, COMMUNITY, etc.).
+      - Compute uploader and channel information from API data (owner, channel, or community data).
+      - Build and return the final info dict with id, title, formats, thumbnail, description, uploader, timestamp, counts, duration, and webpage_url.
+  - Handling of watch URLs:
+    - For some URLs, the code uses a login-guarded session/heartbeat for content_uri resolution in DMC/html5 delivery.
+
+- NiconicoPlaylistIE (InfoExtractor)
+  - Purpose: extract a Nico Nico Douga MyList as a playlist.
+  - URL pattern matches mylist pages.
+  - Uses nvapi.nicovideo.jp/v2/mylists/{list_id} to fetch data (page, pageSize) with API headers.
+  - Extracts title, description, uploader, uploader_id from the first page’s data.
+  - Builds entries by paging 25 items at a time, yielding URLs to individual video watch pages.
+  - Returns a playlist dict with id, title, description, uploader, uploader_id, and OnDemandPagedList for entries.
+
+- NicovideoSearchBaseIE and derived (InfoExtractor)
+  - Purpose: generic search-based extraction for Nico Nico Douga.
+  - Base class:
+    - _entries(url, item_id, query, note): crawls a search page, extracting all data-video-id values, yielding video watch URLs as results.
+    - _get_n_results(query, n): builds a list of results for a query, slicing to n if needed, returns a playlist_result.
+  - NicovideoSearchIE
+    - IE_DESC: “Nico video search”
+    - IE_NAME: “nicovideo:search”
+    - _search_results uses the base _entries over the search URL.
+  - NicovideoSearchURLIE
+    - IE_NAME: “nicovideo:search_url”
+    - _VALID_URL matches /search/ pages and extracts a query id from the URL.
+    - _real_extract returns a playlist of entries found by _entries.
+  - NicovideoSearchDateIE
+    - IE_DESC: “Nico video search, newest first”
+    - IE_NAME: “nicovideo:search:date”
+    - _START_DATE, _RESULTS_PER_PAGE, _MAX_PAGES control date-based pagination.
+    - _entries(url, item_id, start_date, end_date): iterative/date-range aware search that splits the interval if the last page is full, to ensure complete results.
+    - _get_entries_for_date(url, item_id, start_date, end_date, page_num, note): builds a query with start, end, sort and order, and delegates to the base _entries for actual item extraction.
+
+- NiconicoUserIE (InfoExtractor)
+  - Purpose: extract all videos for a Nico Nico user via the NVAPI.
+  - URL pattern matches user pages: /user/{id}
+  - _API_URL template: https://nvapi.nicovideo.jp/v1/users/{id}/videos?sortKey=registeredAt&sortOrder=desc&pageSize={page_size}&page={page}
+  - _entries(list_id): paginates through the API, collecting items from json_parsed['data']['items']; yields each as a video watch URL.
+  - _real_extract(url): delegates to playlist_result of _entries(list_id).
+
+Important implementation details and behaviors
+- API usage and headers
+  - Many endpoints use API headers: X-Frontend-ID: 6, X-Frontend-Version: 0.
+  - Some endpoints use additional _API_HEADERS when fetching metadata (e.g., for MyLists and user videos).
+- Login flow
+  - Implemented in NiconicoIE._login. If no credentials are provided, extraction proceeds unauthenticated.
+  - If login fails, a warning is issued but extraction continues where possible.
+- Data sources and fallbacks
+  - Primary data for formats comes from the data-api-data JSON on the watch page.
+  - Additional video data comes from getthumbinfo (ext.nicovideo.jp) XML payload.
+  - Metadata (title/description/thumbnail) is gathered from multiple sources with fallbacks (data-api-data, watchAPIDataContainer, og:image meta, etc.).
+- Video formats
+  - DMC formats: built from the video and audio quality combinations available in the API data. The helper _extract_format_for_quality computes:
+    - url scheme like niconico_dmc:video_id/video_quality_id/audio_quality_id
+    - format_id derived from video and audio IDs
+    - vcodec/acodec, vbr/abr, height/width, and http headers (Origin and Referer)
+    - protocol explicitly set to 'niconico_dmc'
+  - SMILE/HTTP fallback:
+    - If a Smile URL exists (video_real_url), uses FFprobe to determine streams and size/extension.
+    - Distinguishes economy (low) vs regular streams; labels formats as 'smile' or 'smile_low'.
+    - Adds a format with fields like container/extension, vcodec/acodec, tbr/vbr/abr, height/width, and filesize.
+- Heartbeat/session for HTML5/http streams
+  - If needed, code constructs a session for the http-based streaming path or m3u8 path (encryption, http_parameters, etc.).
+  - A heartbeat URL and data are prepared to keep the session alive; a ping function checks permission status.
+  - The final content URL is taken from the session response.
+- Time stamps and counts
+  - Timestamp logic gathers from first_retrieve, postedDateTime, or video_detail/registeredAt fallbacks.
+  - view_count and comment_count are collected from several places (viewCounter fields or HTML text fallbacks).
+- Error handling
+  - Handles video deletion, not found, or community-locked videos via getthumbinfo and API data.
+  - If a video requires an account and can’t be accessed, tests indicate skipping with a specific skip message.
+- Playlist and user extraction
+  - Playlists: OnDemandPagedList is used to lazily fetch pages of video IDs for MyLists.
+  - Users: Fetches all videos via the NVAPI, paging until all items are retrieved.
+
+Summary of how to use
+- NiconicoIE extracts individual Nico Nico Douga videos, including modern HTML5 streams and legacy SMILE/DMC streams, with robust fallback logic for metadata.
+- NiconicoPlaylistIE extracts MyList playlists into a standard YouTube-DL playlist object.
+- NicovideoSearchIE, NicovideoSearchURLIE, and NicovideoSearchDateIE provide search-based extraction (by query, by URL, or by date ranges with adaptive paging).
+- NiconicoUserIE extracts a user’s videos through the NVAPI.
+- The module emphasizes authenticated access where possible, multi-source metadata gathering, and careful handling of various Nico Nico streaming formats.
+
+If you want a quick hit list of exposed methods:
+- NiconicoIE: core video extraction (formats, metadata, login).
+- NiconicoPlaylistIE: mylist-based playlist extraction.
+- NicovideoSearchBaseIE and subclasses: search-based extraction helpers.
+- NicovideoUserIE: user video listing extraction.

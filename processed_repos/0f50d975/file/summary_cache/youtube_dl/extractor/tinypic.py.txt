@@ -1,0 +1,31 @@
+- Purpose: A youtube-dl extractor for tinypic.com that retrieves direct video URL, thumbnail, and title from the tinypic player page.
+
+- Class and metadata:
+  - TinyPicIE extends InfoExtractor.
+  - IE_NAME = 'tinypic', IE_DESC = 'tinypic.com videos'.
+  - _VALID_URL matches tinypic player pages of the form ...tinypic.com/player.php?v=ID&s=NUMBER and captures id as group 'id'.
+
+- Tests:
+  - Two _TESTS entries:
+    - One with a real tinypic player URL, expecting id, ext 'flv', and a title.
+    - One with a localized domain (de.tinypic.com) using only_matching.
+
+- Core logic (_real_extract):
+  - Extract video_id from URL using _VALID_URL.
+  - Download the page HTML via _download_webpage.
+  - Find file_id and server_id by regex on the page that matches:
+    fo.addVariable("file", "FILEID");
+    fo.addVariable("s", "SERVERID");
+  - If the pattern isn’t found, raise ExtractorError indicating the video does not exist (marked as expected).
+  - Build title:
+    - Extract keywords meta tag via _html_search_meta('keywords', webpage, 'title').
+    - If keywords end with the suffix ", Video, images, photos, videos, myspace, ebay, video hosting, photo hosting", strip that suffix to form the title; otherwise use an empty title.
+  - Construct direct URLs:
+    - video_url: http://v{server_id}.tinypic.com/{file_id}.flv
+    - thumbnail: http://v{server_id}.tinypic.com/{file_id}_th.jpg
+  - Return a dict with: id (file_id), url (video_url), thumbnail, and title.
+
+- Implementation notes:
+  - Uses a precise regex to locate the file and server IDs embedded in the page’s JavaScript variables.
+  - Title extraction relies on the presence of a keywords meta tag and a known trailing keywords suffix; otherwise returns an empty title.
+  - The extractor assumes the media is hosted as an FLV file on a numbered tinypic server URL.

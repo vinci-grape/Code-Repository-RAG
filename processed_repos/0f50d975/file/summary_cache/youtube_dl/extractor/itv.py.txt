@@ -1,0 +1,118 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/itv.py
+
+Overview
+- This module implements ITV-related extractors for youtube-dl, including ITVX (ITV’s streaming platform) and ITV articles/BTCC pages that use Brightcove for video hosting.
+- Key classes:
+  - ITVBaseIE: Shared utilities and HTTP handling shared by ITV extractors.
+  - ITVIE: Extractor for ITVX video pages (watch/hub flows). Uses iOS/playlist API to fetch video data and build formats.
+  - ITVBTCCIE: Extractor for ITV news/BTCC pages that embed Brightcove videos; delegates to BrightcoveNewIE for actual video extraction.
+
+Main functionality and flow
+- ITVBaseIE
+  - _handle_request_webpage_error: Centralized error handling for HTTP errors, with optional fatal vs non-fatal behavior and video_id context.
+  - _vanilla_ua_header: Returns a minimal User-Agent header to avoid geo/UA-related blocking.
+  - _download_webpage_handle: Specialised wrapper around parent method to:
+    - Use vanilla UA under conditions.
+    - Normalize/limit expected_status for 403 responses (geo-blocks).
+    - Detect geo-restrictions on 403 and raise appropriate geo-restriction errors (e.g., GB only).
+    - Delegate to base class after preparing headers/status.
+    
+- ITVIE (ITVX extractor)
+  - _VALID_URL: Matches ITVX watch/hub URLs with a specific regex, and is marked as a working but potentially limited extractor (_WORKING = False).
+  - _og_extract: Helper to extract basic info from OpenGraph: title, description, thumbnail, uploader (site_name).
+  - _real_extract(url):
+    - video_id extraction from URL.
+    - Downloads the page and parses a genie-container-like element to extract data-video-id or data-video-playlist.
+    - Prepares a JSON POST request payload describing user/device/client capabilities and availability, and sends it to the ITV playlist API (Accept: application/vnd.itv.vod.playlist.v2+json).
+    - Handles geo/auth headers via geo_verification_headers.
+    - Parses the JSON response for the video data:
+      - Video data is found at Playlist.Video; determine ios_base_url and build media URLs.
+      - For each MediaFiles entry, collect hrefs:
+        - If extension is m3u8, use _extract_m3u8_formats to build HLS formats (entry_protocol='m3u8', id='hls') with fatal=False.
+        - Otherwise, append direct URL formats.
+      - Sort formats and attach vanilla UA headers to all formats.
+      - Subtitles: collect English subtitles if present, with proper ext (vtt default).
+      - Next.js data merging: enrich video_data with additional title/episode fields from Next.js data when present.
+      Title/episode handling:
+        - Build a comprehensive title via multiple sources: page title/episode title, plus episode descriptions (num_ep_title) and episode-specific info.
+        - If episode subtitle exists, append to title.
+      Thumbnails:
+        - Build thumbnails from a get_thumbnails() helper by iterating imagePresets in video_data.
+      Other metadata:
+        - duration: parse_duration with a minor regex tweak to handle a timing format hh:mm:ss:nnn.
+        - timestamp: parsed from broadcastDateTime/dateTime (parse_iso8601).
+        - series, series_number, episode, episode_number, channel, categories, age_limit (mapped for children category).
+      Result:
+        - Return a merged info dict including id, title, formats, subtitles, duration, description, timestamp, thumbnails, series-related fields, and more, based on the assembled video data and og data.
+    - Notes:
+      - The code merges dynamic Next.js data into video_data to better populate fields like headerTitle/episodeTitle later.
+      - Uses a helper to build thumbnails list from imagePresets when available.
+      Adds default HTTP headers (vanilla UA) to each format for compatibility.
+    - Behavior on UK geo-block: some pages are UK-only; the tester data often marks them as requiring UK access.
+
+- ITVBTCCIE (Brightcove-driven ITV pages)
+  - _VALID_URL: Matches ITV pages under itv.com that are not watch/hub; effectively article/news pages including BTCC; returns a playlist of videos if multiple Brightcove entries exist.
+  - Description: “ITV articles: News, British Touring Car Championship”
+  - Brightcove integration:
+    - Uses Brightcove constants:
+      - BRIGHTCOVE_URL_TEMPLATE
+      - BRIGHTCOVE_ACCOUNT
+      - BRIGHTCOVE_PLAYER
+    - _real_extract(url):
+      - Fetches the page and derives a relative link path from the URL header after redirection.
+      - Fetches Next.js data (_search_nextjs_data) to locate Brightcove content (content = next.js pageProps body content with data).
+      - Filters for Brightcove content in the data structure.
+      - Builds a list of entries that yield BrightcoveNewIE video results:
+        - For each video_id in the data, determine account and player IDs (falling back to the class constants) and construct a Brightcove URL using BRIGHTCOVE_URL_TEMPLATE.
+        - Pass contraband data to smuggle geolocation/referrer information to Brightcove (to bypass ITV geo/IP restrictions).
+        - Yield url_result with BrightcoveNewIE as the extractor and the video_id.
+      - Fallback handling for older pages: also scans for data-video-id in the page and yields corresponding Brightcove URLs.
+      - Title: attempts to fetch an OpenGraph title for the playlist.
+      - Returns a playlist_result of all yielded Brightcove entries with the playlist_id and title.
+    - The contraband data includes specific geo IP blocks ITV accepts and the referrer URL to help circumvent geo restrictions when calling Brightcove.
+
+Key implementation details
+- Error handling and geo-blocking:
+  - ITVBaseIE._download_webpage_handle adjusts requests to detect and report geo-restrictions (403 with specific messages) and to gracefully handle non-fatal errors when appropriate.
+  - It uses a vanilla User-Agent when needed to avoid UA-based blocking and uses detect-403 logic to trigger geo restrictions.
+- HTTP/JSON interactions:
+  - ITVIE uses a POST to the Itv playlist API with a structured payload representing a generic device/browser, including entitlements and client capabilities.
+  - Itd uses Accept: application/vnd.itv.vod.playlist.v2+json for playlist metadata.
+- Formats handling:
+  - HLS streams are collected via _extract_m3u8_formats with entry_protocol='m3u8' and id 'hls'.
+  - Direct video URLs are collected as simple formats with 'url' keys.
+  - All formats receive a standard UA header to mitigate server rejections.
+- Subtitles:
+  - English subtitles parsed from Subtitles entries, with extension detection (default vtt if not determinable).
+- Metadata extraction:
+  - Primary metadata from OpenGraph via _og_extract, supplemented with data from Next.js (title, episode) when available.
+  - Duration parsing includes a small normalization to handle non-standard time formatting (hh:mm:ss:nnn -> hh:mm:ss.nn via a regex substitution).
+  - Thumbnails can be pulled from OpenGraph or from video_data imagePresets.
+  - Series/episode metadata and numeric episode counts are parsed when available; fallbacks exist if data is absent.
+- Brightcove integration:
+  - ITVBTCCIE uses BrightcoveNewIE via url_result with a contraband payload that includes geo/IP blocks and referrer to satisfy ITV constraints.
+  - It supports both current Brightcove data and older data-video-id patterns.
+
+Test coverage
+- The _TESTS sections demonstrate expected behavior, including:
+  - ITVX show extraction with a detailed info_dict (id, title, description, timestamp, duration, etc.).
+  - UK-only restrictions and fallbacks for various ITVX hub/watch pages.
+  - Brightcove-based ITV articles (BTCC and News) with minimal expectations for IDs and titles.
+  - ITVBTCCIE tests include playlist min counts and article-based IDs.
+
+Summary of main classes/functions
+- ITVBaseIE
+  - _handle_request_webpage_error(err, video_id=None, errnote=None, fatal=True)
+  - _vanilla_ua_header()
+  - _download_webpage_handle(url, video_id, *args, **kwargs)
+- ITVIE (ITVX)
+  - _og_extract(webpage, require_title=False)
+  - _real_extract(url)
+- ITVBTCCIE
+  - _real_extract(url)
+
+Overall purpose
+- Provide robust ITV content extraction by:
+  - Handling ITVX video pages (watch/hub) via a bespoke iOS-playlist JSON API, building formats and metadata, while gracefully handling geo-restrictions.
+  - Handling ITV articles/BTCC pages that embed Brightcove videos by discovering Brightcove data in Next.js payloads and delegating to BrightcoveNewIE, with ITV-specific referrer/IP considerations.
+- Ensure compatibility with ITV’s geo-blocking, dynamic Next.js data shaping, and mixed hosting strategies (direct media links, HLS, and Brightcove).

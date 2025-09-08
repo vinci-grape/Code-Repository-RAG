@@ -1,0 +1,64 @@
+Concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/rtlnl.py
+
+Purpose
+- Implement a YouTube-DL extractor for RTL.nl and RTLxl.nl video pages. It fetches metadata and video formats using RTL’s API and constructs a unified info dictionary for download.
+
+Key class
+- RtlNlIE(InfoExtractor)
+  - Inherits standard extraction helpers from youtube-dl’s InfoExtractor framework.
+
+Main functionality
+- URL matching
+  - _VALID_URL covers multiple RTL URL schemes (rtlxl.nl and rtl.nl, including old/new page layouts and embed formats).
+  - Extracts a UUID-like id from the URL via _match_id, which becomes the video id used throughout extraction.
+
+- Metadata retrieval
+  - Fetches JSON metadata from the RTL API endpoint:
+    http://www.rtl.nl/system/s4m/vfd/version=2/uuid=<uuid>/fmt=adaptive/
+  - The API response structure is used as follows:
+    - material[0] provides core video data (e.g., duration, original_date, etc.).
+    - abstracts[0]['name'] provides the base title.
+    - material.get('title') is optional subtitle; if present, appended to the title as "title - subtitle".
+    - material.get('synopsis') supplies the description.
+    - material['videopath'] and meta['videohost'] (defaulting to http://manifest.us.rtl.nl) together form the m3u8 manifest URL.
+
+- Formats extraction
+  - Builds the m3u8 URL: meta['videohost'] (default) + videopath.
+  - Uses _extract_m3u8_formats to obtain MP4 formats from the HLS manifest, with m3u8_id='hls' and fatal=False (allowing the extractor to continue if the manifest is unavailable).
+  - Sorts formats via _sort_formats to prefer higher quality etc.
+
+- Thumbnails
+  - Collects thumbnails from meta['poster_base_url'] and meta['"thumb_base_url"'] if present.
+  - Each thumbnail URL is built with _proto_relative_url(meta[p] + uuid).
+  - Attempts to extract width/height from the thumbnail URL using regex:
+    - width from /sz=([0-9]+)
+    - height from /sz=[0-9]+x([0-9]+)
+  - Uses int_or_none to safely parse numeric values.
+
+- Returned information
+  - id: uuid
+  - title: combined base title and optional subtitle
+  - formats: list of video formats extracted from the m3u8 manifest
+  - timestamp: material['original_date'] (epoch seconds)
+  - description: material['synopsis']
+  - duration: parse_duration(material.get('duration'))
+  - thumbnails: list of thumbnail dictionaries (if available)
+
+Important implementation details
+- Robust URL handling: supports multiple RTL URL schemas, including new and old layouts and embeds.
+- Metadata vs. formats separation: video formats are derived from an external m3u8 manifest referenced by the API data.
+- Subtitle handling: only applied to the title if a subtitle exists in the metadata.
+- Thumbnails extraction: attempts to infer size from the thumbnail URL when provided.
+- Edge cases and tests: _TESTS includes scenarios for new/old URL schemes, best format selection, encrypted georestricted m3u8 streams (marked as only_matching), and cases with empty synopsis or missing episodes. Some URLs are marked only_matching to indicate they are not extractable in this path and serve for URL matching tests.
+
+Summary of key methods/fields used
+- _real_extract(self, url): main extraction method
+- self._download_json(url, video_id): fetches API metadata
+- self._extract_m3u8_formats(m3u8_url, id, 'mp4', m3u8_id='hls', fatal=False): obtain formats
+- self._sort_formats(formats): order formats by quality
+- self._proto_relative_url(url): normalize possibly relative URLs
+- self._search_regex(pattern, string, name, fatal=False): extract numeric values for thumbnails
+- int_or_none(value): safely parse integers
+- parse_duration(value): convert duration to seconds if needed
+
+Overall, the extractor centralizes around querying RTL’s vfd API with a video UUID, building an HLS-derived format list, and assembling standard metadata (title, description, timestamp, duration, thumbnails) for downstream consumption.

@@ -1,0 +1,51 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/varzesh3.py
+
+- Purpose
+  - Implement a YouTube-dl extractor (Varzesh3IE) for videos hosted on video.varzesh3.com.
+
+- Class and inheritance
+  - Varzesh3IE inherits from InfoExtractor.
+  - Provides a dedicated _real_extract implementation to fetch and parse video pages.
+
+- URL matching and tests
+  - _VALID_URL: Matches Varzesh3 video pages with a slug-like path and captures an id component.
+  - _TESTS: Includes two tests
+    - A real URL test that expects an mp4 video, with title, description, and thumbnail; marked to skip on HTTP 404.
+    - A second test that expects a description to be missing and warns accordingly.
+
+- Main extraction flow (_real_extract)
+  - display_id: Extracted from the URL via _match_id.
+  - webpage: HTML content downloaded with _download_webpage.
+  - video_url: Found by locating a <source> tag with a src attribute via a regex.
+  - title: Extracted from the <title> tag, then cleaned by removing a leading prefix "ویدیو ورزش 3 | ".
+  - description:
+    - First tries to extract from a div with class "matn" using _html_search_regex.
+    - If not found, falls back to the Open Graph description meta via _html_search_meta('description') and cleans it.
+  - thumbnail:
+    - First attempts to use the Open Graph thumbnail via _og_search_thumbnail.
+    - If not available, tries to locate a Facebook sharer URL on the page, parses its query string, and extracts p[images][0] as a fallback thumbnail.
+  - video_id:
+    - Primary method: search for a link tag with rel "canonical" or "shortlink" whose href contains "/?p=...".
+    - If not found, fall back to extracting a JavaScript variable: var VideoId = <digits>;
+  - Output: Returns a dict with
+    - url: video_url
+    - id: video_id
+    - title: title
+    - description: description
+    - thumbnail: thumbnail
+
+- Key implementation details
+  - Uses compatibility helpers: compat_urllib_parse_urlparse and compat_parse_qs to parse URLs and query strings.
+  - Uses utility functions: remove_start to strip a known prefix from the page title; clean_html to sanitize HTML from metadata.
+  - Robust metadata extraction:
+    - Title normalization to remove site prefix.
+    - Description fallback strategy to ensure some description is returned when possible.
+    - Thumbnail fallback path: og:image first, then Facebook sharer URL parameter p[images][0].
+  - Video ID resolution includes a primary path via canonical/shortlink href and a fallback via a JavaScript variable, increasing resilience to page structure changes.
+
+- Notable behaviors
+  - If the page does not contain a direct video URL in a <source> tag, extraction would fail at that step.
+  - The tests indicate handling for missing descriptions (warning) and 404 pages (skip).
+
+- Overall role
+  - This extractor encapsulates the logic to retrieve the direct video URL and associated metadata from Varzesh3 video pages, producing a standard info dictionary compatible with youtube-dl’s downstream processing.

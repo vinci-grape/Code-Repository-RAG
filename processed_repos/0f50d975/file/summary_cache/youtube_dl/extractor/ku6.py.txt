@@ -1,0 +1,30 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/ku6.py
+
+- Purpose: Implements an extractor for Ku6 video pages (v.ku6.com) to obtain a direct video URL and metadata.
+
+- Key class:
+  - Ku6IE(InfoExtractor): Subclasses youtube-dl's InfoExtractor to handle Ku6 show pages.
+
+- Important attributes:
+  - _VALID_URL: Regex to match Ku6 show URLs and capture the video id:
+    https?://v.ku6.com/show/(?P<id>[a-zA-Z0-9\-\_]+)(?:\.)*html
+  - _TEST: Provides a sample URL, expected MD5, and expected info_dict (id, ext, title) for unit tests.
+
+- Main functionality (in _real_extract):
+  1. Extracts video_id from URL using self._match_id(url).
+  2. Downloads the web page HTML with self._download_webpage(url, video_id).
+  3. Extracts the video title from HTML using self._html_search_regex(r'<h1 title=.*>(.*?)</h1>', webpage, 'title').
+  4. Builds a data API URL: http://v.ku6.com/fetchVideo4Player/<video_id>.html.
+  5. Downloads JSON metadata via self._download_json(dataUrl, video_id).
+  6. Retrieves the direct video URL from the JSON: downloadUrl = jsonData['data']['f'].
+  7. Returns a dict with:
+     - id: video_id
+     - title: extracted title
+     - url: direct video URL (downloadUrl)
+
+- Implementation details:
+  - Uses typical youtube-dl helpers: _match_id, _download_webpage, _html_search_regex, _download_json.
+  - The returned dict does not explicitly set 'ext', but the test in _TEST implies the extension is inferred from the final video URL (e.g., f4v).
+  - The code assumes Ku6's API structure remains as accessed: fetchVideo4Player/<id>.html returns JSON with jsonData['data']['f'] containing the video URL.
+
+- Overall flow: Given a Ku6 show page, the extractor fetches the page, gets the title, queries a Ku6 API endpoint for the downloadable video URL, and returns a compact info dictionary for youtube-dl to download.

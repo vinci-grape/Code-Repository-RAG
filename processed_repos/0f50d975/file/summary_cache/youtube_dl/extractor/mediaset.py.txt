@@ -1,0 +1,74 @@
+Concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/mediaset.py
+
+Purpose
+- Implement a YouTube-DL extractor for Mediaset content served via Mediaset Play, using ThePlatform (TP) metadata and SMIL-based formats to retrieve video streams and metadata.
+
+Key class
+- MediasetIE, subclass of ThePlatformBaseIE
+  - Uses ThePlatform API (TP) to fetch streaming formats and related data.
+  - Overrides several methods to tailor Mediaset’s delivery and embedding quirks.
+
+Main functionality and flow
+- URL matching
+  - _VALID_URL detects either mediaset: URIs or HTTP(S) Mediaset Play URLs, extracting a 16+ character alphanumeric program GUID.
+- Program/embed URL discovery
+  - Static method _extract_urls(ie, webpage) scans a page for iframe embeds pointing to Mediaset’s player (playerIFrame or Twitter variant).
+  - Extracts programGuid from the iframe URL query string; if present, adds the embed URL to results.
+  - If programGuid is not present, looks for an id in the query, fetches the embed URL (redirect), and re-checks for programGuid to include the embed.
+  - This supports discovering multiple embed URLs from a page.
+- SMIL/format handling
+  - _parse_smil_formats override tweaks video source URLs found in SMIL to normalize/clean them:
+    - Modifies the src attribute of each video element to remove or normalize certain query parameters, targeting a URL pattern like (https?://vod05)t(-mediaset-it.akamaized.net/.+?.mpd).
+  - Then delegates to ThePlatformBaseIE’s _parse_smil_formats for standard parsing.
+- Real extraction process (_real_extract)
+  - Derives the ThePlatform GUID from the URL.
+  - Builds a ThePlatform path tp_path = 'PR1GhC/media/guid/2702976343/' + guid and fetches base metadata via _extract_theplatform_metadata(tp_path, guid).
+  - Formats and subtitles collection:
+    - Iterates asset_type = SD, HD.
+    - For each asset_type, tries formats in this order: MPEG4, MPEG-DASH+none, M3U+none by calling _extract_theplatform_smil on URLs like:
+      http://link.theplatform.eu/s/PR1GhC (TP TLD eu) /s/<tp_path>, with query parameters mbr=true, formats=<format>, assetTypes=<asset_type>.
+    - If a call raises ExtractorError, stores the first exception (first_e) and stops trying that asset_type/format combo, but continues with others if possible.
+    - On success, marks HD formats with higher quality (HD = 1, SD = 0), aggregates formats, and merges subtitles.
+  - Error handling
+    - If a first exception occurred and no formats were collected, raises the first exception.
+    - Sorts the formats list for consistent ordering.
+  - Supplemental metadata from ThePlatform feed
+    - Downloads additional data from ThePlatform feed API:
+      https://feed.entertainment.tv.theplatform.eu/f/PR1GhC/mediaset-prod-all-programs/guid/-/{guid}
+      with specific fields: tvSeasonNumber, tvSeasonEpisodeNumber, mediasetprogram$brandTitle, mediasetprogram$publishInfo, mediasetprogram$numberOfViews, etc.
+    - If feed data is present, enriches info with:
+      - episode_number, season_number (integers)
+      - series (brandTitle)
+      - uploader and uploader_id (from publishInfo)
+      - view_count (numberOfViews)
+  - Final metadata assembly
+    - Sets info['id'] = guid
+    - Attaches formats and subtitles
+    - Returns the info dictionary
+- Tests
+  - _TESTS contain multiple real-world URLs for full episodes, clips, and various embed patterns.
+  - Some tests are marked only_matching for non-video or embed-only URLs.
+  - Expected metadata includes id, ext, title, description, thumbnail, duration, upload_date, series, timestamp, uploader, uploader_id, etc.
+
+Important implementation details
+- ThePlatform integration
+  - Relies on ThePlatformBaseIE helper methods to fetch:
+    - _extract_theplatform_metadata(tp_path, guid)
+    - _extract_theplatform_smil(url, guid, note)
+    - _download_json(url, guid, fatal=False, query=...)
+    - _merge_subtitles(subs_a, subs_b)
+  - Uses ThePlatform TLD eu for link construction.
+- Robustness and fallbacks
+  - Tracks first ExtractorError encountered across SMIL fetch attempts; if no formats are obtained and an error occurred, it raises the first error.
+  - Attempts multiple SMIL/format combinations per SD/HD to maximize chance of success.
+- URL construction and helpers
+  - Uses update_url_query to add query params like mbr and formats to ThePlatform SMIL URLs.
+  - Uses compat_parse_qs and compat_urllib_parse_urlparse for safe query extraction in _extract_urls.
+  - Uses int_or_none to safely coerce numeric fields from feed data.
+- Data enrichment
+  - Separates base metadata from extended data fetched from ThePlatform feed API to populate series, uploader, and view counts when available.
+
+In short
+- This extractor retrieves Mediaset content via ThePlatform, supporting both full episodes and clips.
+- It discovers embed URLs, normalizes SMIL-based formats, gathers SD/HD streams, handles subtitles, and enriches metadata with ThePlatform feed data (episode/season numbers, series, uploader, views).
+- It has special handling for Mediaset-specific iframe and embed patterns and adjusts SMIL video sources to ensure valid manifest URLs.

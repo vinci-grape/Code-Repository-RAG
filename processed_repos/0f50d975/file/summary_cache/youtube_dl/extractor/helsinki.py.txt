@@ -1,0 +1,61 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/helsinki.py
+
+Overview
+- Implements a YouTube-DL extractor for Helsinki University video site (helsinki.fi).
+- Extracts video information from URLs of the form:
+  http(s)://video.helsinki.fi/Arkisto/flash.php?id=<digits>
+
+Key class
+- HelsinkiIE(InfoExtractor)
+  - Subclass of youtube_dl.extractor.common.InfoExtractor.
+  - IE_DESC: 'helsinki.fi'
+  - _VALID_URL: Regex to identify matching Helsinki video pages and capture the numeric id.
+  - _TEST: Provides a test case with expected id, mp4 extension, title, and description (md5-hash). Indicates to skip download (likely because the actual video uses RTMP).
+
+Main functionality (core methods)
+- _real_extract(self, url)
+  - video_id = self._match_id(url)
+    - Extracts the id from the URL using the _VALID_URL regex.
+  - webpage = self._download_webpage(url, video_id)
+    - Downloads the page content for further parsing.
+  - params = self._parse_json(
+      self._html_search_regex(
+        r'(?s)jwplayer\("player"\).setup\((\{.*?\})\);',
+        webpage, 'player code'
+      ),
+      video_id,
+      transform_source=js_to_json
+    )
+    - Locates the JWPlayer setup block in the HTML via a regex.
+    - Extracts the JavaScript object that configures the player.
+    - Converts the JavaScript object to JSON-safe text using transform_source=js_to_json, and parses it as JSON.
+    - The resulting 'params' is a dictionary containing at least a 'sources' key.
+  - formats = [{ 'url': s['file'], 'ext': 'mp4' } for s in params['sources']]
+    - Builds a list of formats from the sources array in the JWPlayer config.
+    - Each source dict is expected to have a 'file' key with the video URL; assumes mp4 extension.
+  - self._sort_formats(formats)
+    - Sorts formats for best available quality.
+  - Return a dict with:
+    - 'id': video_id
+    - 'title': self._og_search_title(webpage).replace('Video: ', '')
+      - Uses OpenGraph title from the page, with a cleanup removing a leading "Video: " if present.
+    - 'description': self._og_search_description(webpage)
+      - Uses OpenGraph description from the page.
+    - 'formats': formats
+      - The list of available video formats gathered from the JWPlayer config.
+
+Important implementation details
+- JWPlayer config parsing:
+  - The code searches for the snippet jwplayer("player").setup({...}); within the HTML. This is typical for pages that embed video via JWPlayer.
+  - The inner object is captured as a string and converted from JavaScript object notation to JSON-compatible text using js_to_json before JSON parsing.
+  - The 'sources' field inside the JWPlayer config is the source of video URLs; each source provides a 'file' URL, treated as an mp4.
+- Robustness and expectations:
+  - Uses _og_search_title and _og_search_description to obtain metadata from the page if available.
+  - Assumes the presence of a 'sources' key in the JWPlayer config; if missing, extraction would fail.
+  - The _TEST indicates that the download should be skipped for the test (likely because the actual video delivery is RTMP or requires a different handling). The code, however, builds mp4 formats from the JWPlayer config, so the test is tailored to the reported data.
+
+What you gain from this extractor
+- It enables extracting Helsinki video pages by pulling the JWPlayer setup block, converting it to JSON, reading the list of video sources, and returning a structured info dictionary with id, title, description, and a list of mp4 formats for download/streaming.
+
+Notes
+- The implementation is focused and concise: find the player setup, parse sources, prepare formats, and return standard InfoExtractor fields.

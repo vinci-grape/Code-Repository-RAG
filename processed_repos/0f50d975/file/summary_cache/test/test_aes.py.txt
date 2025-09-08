@@ -1,0 +1,49 @@
+Concise summary of the code in ./youtube-dl/test/test_aes.py
+
+Purpose
+- A unit test module for the AES utilities provided by youtube_dl.aes. It verifies encryption/decryption in ECB and CBC modes and also tests a password-based decrypt helper.
+
+Main components
+- Test class: TestAES (subclasses unittest.TestCase)
+- Key functions tested (imported from youtube_dl.aes):
+  - aes_encrypt, aes_decrypt (likely ECB)
+  - aes_cbc_encrypt, aes_cbc_decrypt (CBC mode)
+  - aes_decrypt_text (password-based decryption, likely using a salt/IV from provided data)
+  - aes_ecb_encrypt (ECB mode)
+- Helpers from youtube_dl.utils:
+  - bytes_to_intlist, intlist_to_bytes (convert between Python bytes and the int-list format used by the AES routines)
+- Test data setup (setUp)
+  - key and iv are both the list [0x20, 0x15] followed by 14 zeros (i.e., 16-byte values)
+  - secret_msg = b'Secret message goes here'
+  - The tests rely on deterministic, hard-coded test vectors.
+
+Tests and behavior
+- test_encrypt
+  - Encrypts msg = b'message' with key = [0,1,2,...,15] using aes_encrypt
+  - Decrypts with aes_decrypt and reconstructs bytes with intlist_to_bytes
+  - Asserts the decrypted bytes equal the original message
+- test_cbc_decrypt
+  - Uses a specific hard-coded ciphertext converted to intlist
+  - Decrypts with aes_cbc_decrypt(data, key, iv)
+  - Converts to bytes and compares to secret_msg after stripping trailing 0x08 bytes (PKCS#7 padding)
+- test_cbc_encrypt
+  - Encrypts secret_msg with aes_cbc_encrypt(data, key, iv)
+  - Converts to bytes and asserts equality with a specific expected CBC ciphertext
+- test_decrypt_text
+  - Constructs a base64-encoded string consisting of iv[:8] followed by some ciphertext bytes
+  - password derived from the key (converted to utf-8 text)
+  - Calls aes_decrypt_text(encrypted, password, 16) and asserts it yields secret_msg
+  - Repeats with a different ciphertext and length parameter 32 (testing 128-bit vs 256-bit key behavior)
+- test_ecb_encrypt
+  - Encrypts secret_msg with aes_ecb_encrypt(data, key)
+  - Converts to bytes and asserts equality with a fixed expected ECB ciphertext
+
+Implementation details and behavior notes
+- Test vectors are deterministic and hard-coded to validate exact outputs.
+- The tests work with an int-list representation for AES (hence the use of bytes_to_intlist and intlist_to_bytes to bridge to/from Python bytes).
+- CBC tests imply PKCS#7 padding (the decrypted data is asserted after removing trailing 0x08 bytes).
+- aes_decrypt_text appears to use a password-derived key/IV scheme (password is derived from the key, UTF-8), and the test confirms both 16-byte and 32-byte key lengths.
+- The test module adjusts sys.path to enable importing youtube_dl modules from the repository layout.
+
+Overall
+- This file provides a focused suite of unit tests covering basic AES operations (ECB/CBC), decryption helpers with passwords, and ensures consistency with predefined vectors for encryption/decryption correctness.

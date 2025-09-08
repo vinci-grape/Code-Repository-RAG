@@ -1,0 +1,28 @@
+Summary of ./youtube-dl/youtube_dl/extractor/formula1.py
+
+- Purpose:
+  - A youtube-dl extractor for Formula 1 video pages that delegates the actual downloading to the BrightcoveNew extractor.
+
+- Key components:
+  - Class Formula1IE(InfoExtractor): main extractor class.
+  - _VALID_URL: regex to match Formula 1 video URLs. Example pattern: https://www.formula1.com/en/latest/video.<anything>.<id>.html
+  - _TEST: unit test data for the extractor, including:
+    - url (example)
+    - md5 of the video
+    - info_dict with id (brightcove video id), ext (mp4), title, timestamp, upload_date, uploader_id
+    - add_ie: ['BrightcoveNew'] indicating delegation to BrightcoveNew
+  - BRIGHTCOVE_URL_TEMPLATE: template URL for the Brightcove player, using the Brightcove account/videoId format:
+    http://players.brightcove.net/6057949432001/S1WMrhjlh_default/index.html?videoId=%s
+
+- Main logic (_real_extract):
+  - Extracts the Brightcove video id from the URL using self._match_id(url).
+  - Returns a URL result that points to the BrightcoveNew extractor with the given videoId:
+    self.url_result(self.BRIGHTCOVE_URL_TEMPLATE % bc_id, 'BrightcoveNew', bc_id)
+
+- Implementation details:
+  - Uses Python 2/3 compatible headers (__future__ unicode_literals, utf-8).
+  - The extraction is a thin wrapper: it does not fetch or parse the page itself; instead, it computes the Brightcove URL and delegates to the BrightcoveNew extractor.
+  - The _TEST indicates the downstream extraction target and expected metadata (id, title, timestamps, etc.), reflecting the Brightcove-based video properties.
+
+- Overall behavior:
+  - When given a Formula 1 video page URL, the extractor identifies the embedded Brightcove video id and forwards extraction to BrightcoveNew, effectively bridging Formula 1 pages to Brightcove-hosted video data.

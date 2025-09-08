@@ -1,0 +1,38 @@
+Concise but comprehensive summary of the file
+
+What it is:
+- A YouTube-DL extractor class OnceIE for unicornmedia.com content delivered under the “Once” service.
+- Extends InfoExtractor and implements logic to discover both adaptive (HLS) and progressive (MP4) formats for a given content item.
+
+Main components:
+- Class OnceIE(InfoExtractor)
+  - _VALID_URL: Regex that matches URLs under *.unicornmedia.com/now/... containing domain_id, application_id, and media_item_id. It targets content files with extension .once, .m3u8, or .mp4.
+  - ADAPTIVE_URL_TEMPLATE: URL template to fetch the HLS master playlist (adaptive formats) using domain_id, application_id, media_item_id.
+  - PROGRESSIVE_URL_TEMPLATE: URL template to fetch the progressive MP4 content using domain_id, application_id, rendition_id, media_item_id.
+
+Key function:
+- _extract_once_formats(self, url, http_formats_preference=None)
+  - Extracts domain_id, application_id, media_item_id from the URL via the class _VALID_URL.
+  - Retrieves adaptive (HLS) formats using _extract_m3u8_formats on the ADAPTIVE_URL_TEMPLATE URL.
+    - Uses m3u8_id='hls' and fatal=False so missing playlists won’t crash extraction.
+  - Builds progressive HTTP MP4 formats from the adaptive formats:
+    - For each adaptive format, normalizes ad-related parameters by replacing adsegmentlength digits with adsegmentlength=0 to avoid embedding ads in the playlist (mitigates a known issue).
+    - Attempts to derive a rendition_id from the adaptive format URL using a regex on the path /now/media/playlist/.../([^/]+).
+    - If a rendition_id is found, creates a progressive_format as a copy of the adaptive format, but:
+      - URL is rebuilt via PROGRESSIVE_URL_TEMPLATE with domain_id, application_id, rendition_id, media_item_id.
+      - format_id is adjusted by replacing 'hls' with 'http'.
+      - protocol is set to 'http'.
+      - preference is set to the provided http_formats_preference.
+    - Collects these progressive formats.
+  - Validates the progressive formats with _check_formats(progressive_formats, media_item_id).
+  - Returns a combined list: original adaptive formats plus the newly built progressive formats.
+
+Important implementation details:
+- The code specifically targets content under Unicorn Media’s Once service and handles both HLS (adaptive) and HTTP progressive MP4 formats.
+- It modifies the HLS URL to ensure ads don’t pollute the playlist by neutralizing adsegmentlength parameters.
+- It derives a separate progressive MP4 URL from the HLS playlist’s rendition information, enabling HTTP progressive download as an alternative to the HLS stream.
+- The format_id for progressive formats is derived from the HLS format_id by replacing 'hls' with 'http', signaling the different transport method.
+- The _extract_once_formats method accepts an optional http_formats_preference to influence the ordering/selection of HTTP formats relative to others.
+
+Overall flow:
+- Given a Once content URL, the extractor collects available HLS formats, then augments them with corresponding HTTP progressive MP4 formats when possible, ensuring a broader set of playable formats for the item.

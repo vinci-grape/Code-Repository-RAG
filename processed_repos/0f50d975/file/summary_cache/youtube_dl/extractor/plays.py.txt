@@ -1,0 +1,51 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/plays.py
+
+- Purpose
+  - Implement a YouTube-dL extractor for Plays.tv video pages, capable of discovering video metadata and building a complete list of available formats (DASH MPD plus additional HTML5 sources) and returning a structured info dictionary.
+
+- Main class
+  - PlaysTVIE (inherits from InfoExtractor)
+
+- URL pattern
+  - _VALID_URL matches plays.tv video/pages with either /video/ or /embeds/ paths and an 18-character hex video id.
+  - Example: https://plays.tv/video/56af17f56c95335490
+
+- Tests
+  - _TESTS includes:
+    - A real video URL with expected id, extension (mp4), title, and description.
+    - An embeds URL used for matching validation (only_matching).
+
+- Core method: _real_extract(self, url)
+  - Extracts the video id from the URL using _match_id.
+  - Downloads the video page HTML from https://plays.tv/video/{id}.
+  - Pulls JSON-LD metadata from the page via _search_json_ld for initial info (title, thumbnail, potentially description).
+  - Extracts MPD and additional sources from the video tag:
+    - Looks for a video tag with data-mpd attribute to obtain the MPD URL and the inner <source> blocks.
+    - mpd_url and sources are captured via a single regex.
+  - Formats handling:
+    - Builds DASH formats using _extract_mpd_formats on the absolute MPD URL (_proto_relative_url converts relative to absolute) with mpd_id='DASH'.
+    - Parses additional HTML5 sources from the embedded sources string using a regex that captures the resolution (res) and the src URL:
+      - res may be something like "720h"; height is derived as int from the captured height portion.
+      - Each source contributes a format dict with:
+        - url: absolute URL via _proto_relative_url
+        - format_id: 'http-' + res
+        - height: integer height or None if not parseable
+  - Formats are sorted with _sort_formats.
+  - Info dictionary augmentation:
+    - id: video_id
+    - description: Falls back to OpenGraph description if JSON-LD lacks it, via _og_search_description
+    - thumbnail: Uses the JSON-LD thumbnail if present; otherwise falls back to OpenGraph thumbnail via _og_search_thumbnail
+    - formats: the compiled list of DASH and HTML5 sources
+  - Returns the enriched info dictionary.
+
+- Implementation details and techniques
+  - Uses JSON-LD extraction for initial metadata with _search_json_ld.
+  - Combines DASH (MPD) formats with additional per-source formats parsed from the HTML of the video tag.
+  - Robust URL handling through _proto_relative_url to ensure absolute URLs for both MPD and source URLs.
+  - Height extraction uses int_or_none to safely convert the string height to an integer.
+  - Metadata_fallbacks:
+    - Description from OpenGraph if not available in JSON-LD.
+    - Thumbnail from JSON-LD or OpenGraph as fallback.
+  - The code assumes the Plays.tv page contains a video tag with a data-mpd attribute and nested source tags; if not present, extraction would fail (as is common in web extractors that parse page structures directly).
+
+Overall, PlaysTVIE fetches a Plays.tv page, parses both DASH and non-DASH sources, constructs a comprehensive formats list, augments metadata from JSON-LD and OpenGraph, and returns a complete info dictionary suitable for download in youtube-dl.

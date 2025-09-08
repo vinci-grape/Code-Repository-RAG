@@ -1,0 +1,44 @@
+Concise summary of youtube-dl extractor file: ./youtube-dl/youtube_dl/extractor/vtm.py
+
+- Purpose
+  - Implement a dedicated extractor for VTM (vtm.be) videos. It queries a GraphQL API to obtain video metadata and then returns a Medialaan URL-type result that points to the video embed page for further extraction by the Medialaan extractor.
+
+- Main class
+  - VTMIE (subclass of InfoExtractor)
+
+- URL pattern and tests
+  - _VALID_URL: Matches vt m be URLs containing a slug with a UUID at the end, e.g. ...~v{uuid}
+  - _TEST: Provides a sample URL with expected metadata (id, ext, title, timestamp, upload_date, duration). Note: the test’s expected id and other fields reflect the test setup and may differ from runtime id handling.
+
+- Core functionality (_real_extract)
+  - Extracts the UUID from the URL using _match_id.
+  - Performs a GraphQL query against:
+    https://omc4vm23offuhaxx6hekxtzspi.appsync-api.eu-west-1.amazonaws.com/graphql
+    with the following request:
+      - query: getComponent(type: Video, uuid: "<uuid>") { ... fields ... }
+      - fields requested: description, duration, myChannelsVideo, program { title }, publishedAt, title
+      - headers: x-api-key set to a fixed key ('da2-lz2cab4tfnah3mve6wiye4n77e')
+  - Parses the response at data.getComponent to a video dict.
+
+- Returned data
+  - Returns a dict with _type = 'url' (i.e., a URL-type result to be processed further)
+  - id: uuid (the extracted UUID from the original URL)
+  - title: video.get('title')
+  - url: 'http://mychannels.video/embed/{myChannelsVideo}' (embed URL constructed from the numeric myChannelsVideo field)
+  - description: video.get('description')
+  - timestamp: parse_iso8601(video.get('publishedAt'))
+  - duration: int_or_none(video.get('duration'))
+  - series: try_get(video, lambda x: x['program']['title']) to fetch the program title if present
+  - ie_key: 'Medialaan' (delegate to Medialaan extractor for the actual video)
+
+- Implementation details
+  - Utilities used:
+    - int_or_none: safely convert duration to int or return None
+    - parse_iso8601: parse publication date into a unix timestamp
+    - try_get: safely access nested fields (used to extract program title)
+  - The GraphQL query is embedded as a string with Python string formatting to insert the UUID.
+  - The returned URL-type dict indicates the next step should be handled by the Medialaan extractor (ie_key = 'Medialaan').
+
+- Notes
+  - The code comment in _TEST mentions an area for future improvement regarding how the URL-type result is processed.
+  - This extractor serves as a bridge: it fetches metadata via GraphQL, then hands off to Medialaan for the actual video retrieval/processing using the embed URL.

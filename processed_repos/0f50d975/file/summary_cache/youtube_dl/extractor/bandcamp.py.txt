@@ -1,0 +1,82 @@
+Here is a concise but comprehensive summary of the code in youtube-dl/youtube_dl/extractor/bandcamp.py.
+
+Overall
+- Implements Bandcamp extractors for processing:
+  - Individual tracks (BandcampIE)
+  - Albums/playlists (BandcampAlbumIE)
+  - Bandcamp Weekly show (BandcampWeeklyIE)
+- Uses embedded JSON data attributes on Bandcamp pages to obtain track/album/weekly data.
+- Builds and returns standardized information dictionaries (id, title, uploader, duration, timestamp, formats, etc.) suitable for youtube-dl.
+
+Key classes and main functionality
+- BandcampIE (Track extractor)
+  - URL pattern: tracks under any subdomain of bandcamp.com (track/<track-id>).
+  - _real_extract flow:
+    - Download page and parse embedded data-tralbum JSON via _extract_data_attr.
+    - Extract basic info: track_id, track title, duration, artist, album, etc.
+    - Build formats from track_info['file']: supports multiple formats if file_ is a dict of format_url per format_id (e.g., mp3-128).
+      - Each format gets: format_id, url (proto-relative), ext, vcodec='none', acodec, abr (bitrate).
+    - If a free download page is available (freeDownloadPage):
+      - Download and parse blob data to extract more download options (downloads, download_formats).
+      - For each downloadable item, build a stat URL (reverse-engineered pattern) and fetch a JSON stat to obtain a retry_url.
+      - Add additional formats using the retry_url with vcodec='none', ext from download_formats, and filesize from size_mb.
+    - Determine artist, timestamp, and duration (fallbacks via page metadata if missing).
+    - Final title composition: "Artist - Track" if artist exists, else track title.
+    - Return a data dict including id, title, thumbnail, uploader, timestamp, release_timestamp, duration, track, track_number, track_id, artist, album, and formats.
+
+- BandcampAlbumIE (Album/Playlist extractor)
+  - URL pattern: album pages (with optional subdomain) and albums under bandcamp.com.
+  - _real_extract flow:
+    - Extract uploader_id and album_id from _VALID_URL.
+    - Download page and parse data-tralbum JSON.
+    - Obtain track_info array; require tracks to have duration (only tracks with duration are considered songs).
+    - Build entries list consisting of links to individual tracks via BandcampIE (url_result with BandcampIE.ie_key()) for tracks that have duration.
+      - Each entry uses t['title_link'] as the URL, track_id as id, and t['title'] as title.
+    - Return a playlist dict with:
+      - uploader_id, id (playlist_id), title (from current title), description (from current about), and entries.
+  - additional behavior:
+    - suitable() overridden to avoid overlapping with BandcampWeeklyIE or BandcampIE; uses parent suitability otherwise.
+    - If no trackinfo or no tracks with duration are found, raises ExtractorError.
+
+- BandcampWeeklyIE (Weekly show extractor)
+  - URL pattern: bandcamp weekly show page (/?show=<id> with possible URL variations).
+  - _real_extract flow:
+    - Download page and parse blob data via data-blob attribute to get bcw_data[show_id].
+    - Build formats from show['audio_stream'] items:
+      - Determine extension by matching known KNOWN_EXTENSIONS in the format_id; otherwise ext=None.
+      - Each format includes format_id, url, ext, vcodec='none'.
+    - Sort formats.
+    - Title: show.get('audio_title') or 'Bandcamp Weekly', append subtitle if present.
+    - Return a data dict with id, title, description (desc or short_desc), duration (audio_duration), is_live=False, release_date, series='Bandcamp Weekly', episode, episode_id, and formats.
+
+Important implementation details
+- Data extraction:
+  - Uses _extract_data_attr(webpage, video_id, attr='tralbum' or 'embed' or 'blob') to parse JSON embedded in data-%s attributes.
+  - Fallbacks and safe access with try_get to avoid KeyErrors.
+- Formats handling:
+  - For tracks, formats come from track_info['file'] when available; supports multiple formats per track.
+  - For free downloads, constructs a stat URL by converting the download URL path (replacing '/download/' with '/statdownload/') and appending a random .rand parameter to evade caches.
+  - Fetches JSON stat data from stat URL to obtain a retry_url for actual media.
+  - Downloads may specify extensions via blob['download_formats'], mapped as format_id -> extension.
+  - All downloaded formats set vcodec='none' (audio only) and ext appropriately; format notes and filesize are included when available.
+- Time and date handling:
+  - timestamp/unified_timestamp for publish dates; release_timestamp from album_release_date; unified_strdate for release_date; duration via track info or meta duration.
+- URL handling:
+  - _proto_relative_url used to convert format URLs to proper protocol-relative URLs when needed.
+  - update_url_query used to add random parameter to stat URLs to bypass caching.
+- Tests:
+  - _TESTS include representative track URLs with expected id, ext, title, duration, uploader, upload_date, timestamp, and a note about download limits.
+  - Weekly tests validate opus format and episode/series metadata.
+- Edge cases:
+  - Album extractor filters tracks to those having duration (not all tracks may be songs).
+  - BandcampWeeklyIE.suitable is used to avoid false positives for album pages that might otherwise match.
+
+Key data fields returned
+- BandcampIE: id, title, thumbnail, uploader, timestamp, release_timestamp, duration, track, track_number, track_id, artist, album, formats.
+- BandcampAlbumIE: id, title, uploader_id, description, entries (playlist entries with BandcampIE links).
+- BandcampWeeklyIE: id, title, description, duration, is_live, release_date, series, episode, episode_id, formats.
+
+In short, this file provides comprehensive extraction logic for Bandcamp music:
+- Track-level extraction with support for multiple formats and paid/free downloads.
+- Album-level extraction producing a playlist of track entries.
+- Weekly show extraction producing a formats list for the weekly mix and enriched metadata.

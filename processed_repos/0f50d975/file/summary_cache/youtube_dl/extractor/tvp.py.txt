@@ -1,0 +1,96 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/tvp.py
+
+Overview
+- Provides YouTube-DL extractors for TVP (Telewizja Polska) media:
+  - TVPIE: entry point for TVP video pages that delegates to embedded player extraction.
+  - TVPEmbedIE: handles the actual embedded TVP player, discovers video URLs and builds a rich list of formats (MSS/ISM, F4M/HDS, HLS, plus direct MP4 fallbacks).
+  - TVPWebsiteIE: handles TVP website series/pages, yielding a playlist of TVPEmbedIE entries for each video in the series.
+
+Key classes and main functionality
+- TVPIE (InfoExtractor)
+  - IE_NAME: 'tvp', Description: Telewizja Polska.
+  - _VALID_URL: Matches TVP video pages (vod.tvp.pl, tvp.pl, etc.) and captures a video id.
+  - _real_extract(url):
+    - Downloads the page, extracts a video_id via multiple patterns:
+      - iframe src with object_id parameter
+      - JavaScript object_id pattern
+      - data-video-id attribute
+    - Returns a url_transparent pointing to tvp:<video_id> (TVPEmbed), with:
+      - description/thumbnail parsed from OpenGraph or HTML meta
+      - ie_key: 'TVPEmbed'
+  - Effect: defers actual format extraction to TVPEmbedIE by using the TVP embed URL scheme.
+
+- TVPEmbedIE (InfoExtractor)
+  - IE_NAME: 'tvp:embed'.
+  - _VALID_URL: Accepts either tvp:<video_id> or the session tvplayer.php URL with object_id.
+  - _real_extract(url):
+    - video_id = match_id(url)
+    - Downloads embed page: http://www.tvp.pl/sess/tvplayer.php?object_id=<video_id>
+    - Error handling: if page contains a notAvailable message, raises ExtractorError with the message.
+    - Title assembly: extracts Title; if SeriesTitle is present, prefixes it to the title.
+    - thumbnail: from poster field if present.
+    - video_url discovery:
+      - Tries to parse a direct source: 0:{src:"<url>"} pattern.
+      - If not found or if the URL contains material_niedostepny.mp4, falls back to API:
+        - GET http://www.tvp.pl/pub/stat/videofileinfo?video_id=<video_id> to obtain video_url.
+    - Formats construction (multiformat support):
+      - If a video_url_base can be derived from video_url (regex on base URL):
+        - Attempts to build multiple formats from a DASH/ISM/F4M/M3U8 chain:
+          - _extract_ism_formats(video_url_base + '.ism/Manifest', ... , fatal=False)
+          - _extract_f4m_formats(video_url_base + '.ism/video.f4m', ... , fatal=False)
+          - _extract_m3u8_formats(video_url_base + '.ism/video.m3u8', ..., fatal=False)
+          - Sorts and filters M3U8 formats (removing those with vcodec 'none')
+          - Also creates additional HTTP MP4 formats for numbered variants by replacing HLS entries:
+            - For each M3U8 format, enumerate http URLs like <video_url_base>-N.mp4
+            - If valid, clone the M3U8 format with updated http URL and protocol set to 'http'
+        - If video_url_base not found, falls back to a single direct format:
+          - formats = [{ 'format_id': 'direct', 'url': video_url, 'ext': determine_ext(video_url, 'mp4') }]
+      - Self._sort_formats(formats)
+    - Returns:
+      - id: video_id
+      - title
+      - thumbnail
+      - formats
+  - Notes:
+    - Supports multiple streaming protocols (ISM/MSS, F4M/HDS, M3U8/HLS) and HTTP fallbacks.
+    - Uses embedded metadata to build a richer title (series + title) when available.
+
+- TVPWebsiteIE (InfoExtractor)
+  - IE_NAME: 'tvp:series'.
+  - _VALID_URL: Matches TVP website series URLs: https://vod.tvp.pl/website/<display_id>,<id>/video
+  - _TESTS: Includes a series page, a film page, and an entry that is only_matching.
+  - _entries(display_id, playlist_id):
+    - Builds URL: https://vod.tvp.pl/website/<display_id>,<playlist_id>/video
+    - Paginates over pages starting at 1:
+      - Downloads page with page query parameter.
+      - Extracts video_ids via regex:
+        - Looks for links to /video/<display_id>,<something>,<video_id>
+      - Deduplicates with orderedSet
+      - For each video_id, yields a URL result:
+        - 'tvp:<video_id>' with ie_key TVPEmbed.ie_key() and video_id
+  - _real_extract(url):
+    - Parses display_id and playlist_id from URL using _VALID_URL.
+    - Returns playlist_result of self._entries(display_id, playlist_id).
+
+Key implementation details
+- Pattern matching and ID extraction:
+  - TVPIE uses multiple regex strategies to locate the internal video_id from a page (iframe, object_id, data-video-id).
+  - TVPEmbedIE supports both direct TVP embed URLs and TVP session URLs.
+- Error handling:
+  - Not-available content on TVPEmbedIE raises ExtractorError with a clear message.
+- Metadata extraction:
+  - Uses OpenGraph (og) data for description/thumbnail when available; otherwise falls back to HTML meta description.
+  - Title construction in TVPEmbedIE optionally prefixes with SeriesTitle when present.
+- Formats handling:
+  - When possible, builds a rich set of formats from an ISM/MSS, F4M, and M3U8/DASH stack.
+  - Also creates additional HTTP MP4 variants from the base video URL to maximize compatibility.
+  - Ensures only valid URLs are included and sorts formats for correct preference order.
+- Playlist extraction:
+  - TVPWebsiteIE pages are parsed page-by-page; video IDs are collected and converted into TVPEmbedIE entries, enabling a combined playlist experience.
+
+Usage flow
+- A user requests a TVP video page; TVPIE returns a transparent redirect to tvp:<video_id>.
+- TVPEmbedIE resolves the actual media URLs and builds formats, returning a fully detailed video entry.
+- For TVP series pages, TVPWebsiteIE enumerates all video IDs in the series and yields entries pointing to the TVPEmbedIE for each video, producing a playlist.
+
+This module effectively centralizes TVP video extraction by first locating an internal video id, then resolving and aggregating all available streaming formats through TVPEmbedIE, with TVPWebsiteIE enabling series-based playlists.

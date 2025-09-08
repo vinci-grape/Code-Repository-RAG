@@ -1,0 +1,80 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/wat.py
+
+Purpose
+- Implement a YouTube-DL extractor for wat.tv videos (WatIE).
+
+Key class
+- WatIE(InfoExtractor)
+  - _VALID_URL: Regex to recognize wat.tv video URLs (including old/alternative formats) and capture a video id.
+  - IE_NAME: 'wat.tv'
+  - _GEO_BYPASS: False (geolocation restrictions apply and should be enforced)
+  - _TESTS: Includes two sample URLs with expected info (one with an mp4, other with DRM/geoblock scenarios).
+
+Main workflow (_real_extract)
+- Input: a wat.tv video URL
+- Step 1: Extract video_id using _match_id(url).
+  - If video_id is purely numeric and longer than 6 digits, keep as is.
+  - Otherwise, interpret it as a base-36 number and convert to a decimal string via compat_str(int(video_id, 36)).
+  - Rationale: wat.tv URLs may use short alphanumeric IDs; this converts them to the numeric id used by their API.
+
+- Step 2: Retrieve video metadata
+  - Request: https://mediainfo.tf1.fr/mediainfocombo/{video_id} with query parameters context=MYTF1 and pver=4001000.
+  - Response: JSON with a top-level 'media' object (video_info).
+  - If video_info contains error_desc:
+    - If error_code == 'GEOBLOCKED', raise geo-restricted error with error_desc and geoList.
+    - Otherwise, raise ExtractorError(error_desc, expected=True).
+
+- Step 3: Prepare basic info
+  - title = video_info['title']
+  - thumbnail = video_info.get('preview')
+  - duration = int_or_none(video_info.get('duration'))
+  - upload_date: try to read from video_data['mediametrie']['chapters'][0]['estatS4'] and convert via unified_strdate.
+    - Uses try_get to safely access nested fields.
+
+- Step 4: Collect available formats
+  - formats = []
+  - Helper: extract_formats(manifest_urls)
+    - Iterates over manifest_urls dict items (format_type -> url).
+    - If url is absent, skip.
+    - If format_type in ('dash', 'mpd'):
+      - Use _extract_mpd_formats on the URL, with a host replacement:
+        replace '://das-q1.tf1.fr/' with '://das-q1-ssl.tf1.fr/' (SSL endpoint).
+      - mpd_id set to 'dash', fatal=False (non-fatal if MPD extraction fails)
+    - If format_type == 'hls':
+      - Use _extract_m3u8_formats on the URL with m3u8_native, and hls as the ID, fatal=False.
+
+  - delivery = video_data.get('delivery') or {}
+  - Call extract_formats({delivery.get('format'): delivery.get('url')}) to try direct delivery formats.
+
+  - If no formats collected yet:
+    - If delivery.get('drm') is present, raise ExtractorError('This video is DRM protected.', expected=True).
+    - Fallback: fetch manifest_urls from http://www.wat.tv/get/webhtml/{video_id} (fatal=False).
+    - If manifest_urls is present, call extract_formats(manifest_urls) to collect formats.
+
+- Step 5: Finalize formats
+  - self._sort_formats(formats) to order formats by quality/preference.
+
+- Step 6: Return InfoDict
+  - id: video_id
+  - title: title
+  - thumbnail: thumbnail
+  - upload_date: normalized date (YYYYMMDD) via unified_strdate
+  - duration: duration as integer (or None)
+  - formats: formats (list of dicts with format details)
+
+Important implementation details
+- Geolocation and access control:
+  - If the API reports GEOBLOCKED, raises geo-restricted error using geoList.
+- DRM handling:
+  - If no formats found and delivery indicates DRM, raises a DRM-protected error (expected=True).
+- Format extraction:
+  - Supports MPD/DASH and HLS formats via _extract_mpd_formats and _extract_m3u8_formats.
+  - Includes a host rewrite for MPD URLs to a SSL endpoint (das-q1-ssl.tf1.fr) to ensure secure access.
+- Fallback mechanism:
+  - If direct delivery formats are not available, attempts to fetch additional manifest data from wat.tv/get/webhtml/{video_id} as a JSON payload, then extracts formats from it.
+- Robustness:
+  - Uses try_get to safely access nested JSON data, int_or_none for numerical fields, and unified_strdate for date formatting.
+  - Handles missing manifest data gracefully and only raises DRM/geoblock errors when applicable.
+
+Overall
+- This extractor retrieves video metadata from TF1’s mediainfo service, interprets the provided delivery/manifest URLs to build a set of usable video formats (MPD/DASH and HLS), and returns a standard youtube-dl InfoDict containing id, title, thumbnail, upload date, duration, and a properly sorted formats list. It includes logic for geoblocking, DRM protection, and fallback manifest retrieval to maximize success acrossWat.tv content.

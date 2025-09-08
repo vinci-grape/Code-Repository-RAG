@@ -1,0 +1,76 @@
+- Overview
+  - This is the Sohu extractor (SohuIE) for youtube-dl (youtube_dl/extractor/sohu.py).
+  - It handles Sohu videos, including the main site and the my.tv subdomain. It supports single videos and multipart (playlist) videos, and enforces geo-restriction handling for Mainland China.
+
+- URL pattern and tests
+  - _VALID_URL matches http/https Sohu URLs, with an optional mytv subdomain flag, capturing the video id.
+  - _TESTS includes several scenarios:
+    - Mainland China geo-blocked video (skip note present)
+    - Standard single video
+    - My.tv video (us region)
+    - Multipart video with multiple parts and per-part durations
+    - Video title containing a dash
+  - Tests define expected id, title, extension, and for multipart cases, a playlist with per-part info.
+
+- Main flow (_real_extract)
+  - Extracts video_id and whether the URL uses the mytv path via regex from the URL.
+  - Downloads the webpage and derives an normalized title from og:title, stripping a trailing Chinese suffix.
+  - Finds the initial video id (vid) set in the page via a JavaScript variable.
+  - Fetches initial video data via _fetch_data(vid, mytv) using one of two JSON endpoints depending on mytv:
+    - http://my.tv.sohu.com/play/videonew.do?vid=
+    - http://hot.vrs.sohu.com/vrs_flash.action?vid=
+  - Validates playback status:
+    - If vid_data['play'] != 1, it may raise a geo restriction error or an ExtractorError if the video is problematic.
+  - Builds a map of available formats (formats_json) by iterating over possible format ids: nor, high, super, ori, h2644k, h2654k.
+    - For each, get the corresponding format’s vid_id from vid_data['data'] as '%sVid'.
+    - If present, fetch data for that vid_id (unless it matches the original vid).
+  - Determines the number of parts (totalBlocks) and constructs a playlist with per-part entries.
+
+- Parts and format resolution
+  - For each part i (0 to totalBlocks-1):
+    - For each available format (as per formats_json):
+      - Access per-format data: data['clipsURL'], data['su'], and data['width'], data['height'], data['clipsBytes'], etc.
+      - Resolve the actual video URL via a CDN URL resolution loop:
+        - Start with video_url = 'newflv.sohu.ccgslb.net' and repeatedly fetch resolution data from:
+          http://<allot>/?<params>, where params include:
+            prot=9, file=clipsURL[i], new=su[i], prod=flash, rb=1, and optionally idc=<cdnId>
+        - Decode the JSON response to obtain part_info['url'] as the real video_url and optionally part_info['nid'] as cdnId.
+        - Retry up to 5 times if the URL isn’t resolved yet; otherwise raise an ExtractorError.
+      - Build a format dict for this part/format with:
+        - url: resolved video_url
+        - format_id: the format_id (nor/high/super/ori/…)
+        - filesize: from clipsBytes[i] when available
+        - width, height, fps: as available
+    - Sort formats for the part and append a playlist entry with:
+      - id: "<video_id>_part<part_number>"
+      - title: the cleaned title
+      - duration: clipsDuration[i]
+      - formats: the list of resolved formats for this part
+
+- Final result construction
+  - If the playlist has only one entry, return that info dict (and set its id to the original video_id).
+  - If there are multiple parts, return a multi_video structure:
+    - _type: 'multi_video'
+    - entries: playlist
+    - id: video_id
+    - title: title
+
+- Key implementation details
+  - Uses a nested _fetch_data helper to retrieve JSON data for a given video id, with geo-verification headers.
+  - Handles cross-origin/geo checks via self.geo_verification_headers() and self.raise_geo_restricted() when needed.
+  - Supports multiple formats per video and per-part resolution by lazy-fetching format-specific data and resolving actual CDN URLs for each part.
+  - Builds precise per-part durations and per-part file sizes to populate the final playlist or single video info.
+  - Uses urllib-compatible encoding (compat_urllib_parse_urlencode) for parameter construction when resolving URLs.
+  - Ensures robust error handling for repeated CDN URL resolution attempts, with a clear failure message if resolution fails.
+
+- Main classes/functions involved
+  - SohuIE(InfoExtractor): primary extractor class.
+  - _VALID_URL: regex for matching Sohu URLs (including mytv).
+  - _TESTS: test scenarios for the extractor.
+  - _real_extract(url): main extraction logic.
+  - _fetch_data(vid_id, mytv): helper to fetch JSON data for a given video id with proper headers.
+  - _download_webpage, _download_json, _parse_json, _og_search_title, _sort_formats: utility methods from the base extractor.
+  - int_or_none, try_get: small helpers for robust type handling and safe extraction.
+
+- Output
+  - Returns either a single video info dictionary or a multi_video structure with a list of per-part entries, each containing a list of formats with URLs and metadata (size, resolution, fps).

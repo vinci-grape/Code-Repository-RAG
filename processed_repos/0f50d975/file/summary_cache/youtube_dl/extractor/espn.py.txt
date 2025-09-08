@@ -1,0 +1,72 @@
+This file implements video extractors for ESPN content (and related sites) and a FiveThirtyEight page that embeds ABC News video.
+
+Main components
+
+1) ESPNIE (OnceIE)
+- Purpose: Extract ESPN videos by querying ESPN’s video clips API and building a unified set of downloadable formats.
+- Key methods:
+  - _VALID_URL: Complex regex to match ESPN video URLs (clip, iframe/twitter, watch/player, and certain ESPNfc paths) and capture the numeric video id.
+  - _real_extract(url):
+    - video_id = _match_id(url)
+    - Fetch clip data from http://api-app.espn.com/v1/video/clips/<video_id> and take the first video entry.
+    - title = clip['headline']
+    - Build formats by traversing nested sources in clip['links'] ('source' and 'mobile') via:
+      - traverse_source(source, base_source_id=None): recursively walk dictionaries, skipping 'alert', and handling strings (URLs) and nested dicts.
+      - extract_source(source_url, source_id=None): avoid duplicates; determine extension; handle various format types:
+        - If OnceIE.suitable(source_url): delegate to _extract_once_formats(source_url)
+        - If ext == 'smil': _extract_smil_formats(source_url, video_id, fatal=False)
+        - If ext == 'f4m': _extract_f4m_formats(source_url, video_id, f4m_id=source_id, fatal=False)
+        - If ext == 'm3u8': _extract_m3u8_formats(source_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id=source_id, fatal=False)
+        - Else: create a basic format dict {'url': source_url, 'format_id': source_id}; optionally parse video properties from URL with regex (\d+)p(\d+)_(\d+)k. to set height, fps, tbr; if source_id == 'mezzanine', set format 'preference' to 1.
+      - Also sets 'preference' for mezzanine formats to prefer them.
+    - After collecting formats from both 'source' and 'mobile', call _sort_formats(formats).
+    - Metadata: description (caption or description), thumbnail, duration, timestamp (unified_timestamp(originalPublishDate)).
+    - Return dict: id, title, description, thumbnail, timestamp, duration, formats.
+- Important details:
+  - Uses a deduplicated set (format_urls) of URLs to avoid duplicates.
+  - Supports multiple format types (direct media URLs, SMIL, F4M, M3U8, and OnceIE).
+  - Uses fatal=False for SMIL/F4M/M3U8 to continue on partial failures.
+  - Traverses nested link structures to discover all available sources.
+
+2) ESPNArticleIE (InfoExtractor)
+- Purpose: Extract ESPN article pages that embed video, routing them to ESPNIE when possible.
+- _VALID_URL: Matches ESPN article pages (e.g., espn.go, espn domain with various paths).
+- _TESTS: Examples that should be matched (only_matching).
+- Suitable override:
+  - suitable(cls, url): Returns False if ESPNIE.suitable(url) is True, otherwise defers to the parent suitable. This ensures ESPN articles don’t get handled by ESPNIE when not appropriate.
+- _real_extract(url):
+  - video_id = _match_id(url)
+  - Download the page and find the embedded video id using a regex that looks for a video-play-button element with a data-id attribute.
+  - Return a URL result pointing to http://espn.go.com/video/clip?id=<video_id> with ESPNIE’s extractor (ESPNIE.ie_key()).
+
+3) FiveThirtyEightIE (InfoExtractor)
+- Purpose: Extract videos from FiveThirtyEight features that embed an ABC News video.
+- _VALID_URL: Matches FiveThirtyEight feature pages under /features/... .
+- _TEST: Example feature page with expected id, ext, title, and description; skip_download.
+- _real_extract(url):
+  - video_id = _match_id(url)
+  - Download the page and locate the embedded ABC News video iframe URL via a regex capturing https://fivethirtyeight.abcnews.go.com/video/embed/<numbers>/<numbers>.
+  - Return a URL result pointing to the embed URL with type 'AbcNewsVideo'.
+
+Implementation details and utilities used
+
+- Uses ESPN API to fetch clip data: http://api-app.espn.com/v1/video/clips/<id>, then processes clip['videos'][0].
+- Uses common extraction helpers:
+  - _extract_once_formats, _extract_smil_formats, _extract_f4m_formats, _extract_m3u8_formats, etc.
+- Determines video format properties from:
+  - Direct URLs (height, fps, tbr via regex on URL: (\d+)p(\d+)_(\d+)k.)
+  - Known format handlers (smil, f4m, m3u8, etc.)
+- Deduplication via format_urls set to avoid processing the same URL twice.
+- Metadata extraction:
+  - title from clip['headline']
+  - description from clip['caption'] or clip['description']
+  - thumbnail from clip['thumbnail']
+  - duration from clip['duration']
+  - timestamp from clip['originalPublishDate'] using unified_timestamp
+- Formats are sorted with _sort_formats(formats) before returning.
+- The file includes comprehensive _TESTS sections for ESPNIE, ESPNArticleIE, and FiveThirtyEightIE to validate URLs, IDs, and expected behavior (including skip_download behavior and expected warnings for certain formats).
+
+In short
+- This module provides ESPN video extraction via ESPN’s API (ESPNIE), with robust handling of multiple source types and nested sources.
+- It adds ESPNArticleIE to route ESPN article pages that embed videos to ESPNIE when appropriate, and FiveThirtyEightIE to extract embedded ABC News videos from FiveThirtyEight features.
+- It emphasizes format discovery from a variety of source types, careful deduplication, and extraction of rich metadata.

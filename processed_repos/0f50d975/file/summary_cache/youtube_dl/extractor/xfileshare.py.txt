@@ -1,0 +1,85 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/xfileshare.py
+
+Purpose
+- Implement an InfoExtractor for XFileShare-based video sites. It can extract video formats from embedded players (primarily JWPlayer) and fall back to direct source URLs when JWPlayer data is unavailable.
+
+Main class and structure
+- Class: XFileShareIE(InfoExtractor)
+  - _SITES: A list of host patterns mapped to site names. Used to identify valid hosts and for label/human-readable descriptions.
+  - _VALID_URL: Regex to match XFileShare-based video pages. It captures host and id, supporting either embed- URLs or direct IDs.
+  - _EMBED_REGEX: Regex used to find embed URLs on pages for any of the supported hosts.
+  - _FILE_NOT_FOUND_REGEXES, _TITLE_REGEXES, _SOURCE_URL_REGEXES, _THUMBNAIL_REGEXES: Regex tuples used to detect file-not-found messages, extract potential titles, locate direct video URLs, and grab thumbnails.
+  - _TESTS: Example tests for various sites and scenarios, including JWPlayer-based extraction, decoded sources, maintenance mode, and fallback sources.
+
+Key functions and workflow
+- _extract_urls(cls, webpage)
+  - Classmethod that scans a webpage for embed URLs using _EMBED_REGEX and yields them. Used for aggregating possible video pages.
+
+- _real_extract(self, url)
+  Core extraction process:
+  - Parse host and video_id from URL via _match_valid_url.
+  - Build an embed URL:
+    - For certain hosts (govid.me, vidlo.us), embed URL is embed-%s.html format; otherwise embed is a direct video_id path.
+  - Download the embed page (self._download_webpage).
+  - Early error checks:
+    - If page indicates maintenance mode, raise ExtractorError with the page content as a warning.
+    - If file not found patterns appear, raise ExtractorError indicating the video does not exist.
+  - Gather hidden form inputs (self._hidden_inputs) to potentially submit a form later.
+  - If op == 'download1':
+    - Extract possible countdown and sleep accordingly.
+    - POST back to the page with gathered form fields to initiate the download and fetch updated content.
+  - Title extraction:
+    - Try multiple TITLE_REGEXES, fallback to og:title, or use video_id. Strip whitespace.
+  - Obfuscated code decoding (two passes, loop until no obfuscated code remains):
+    - Looks for packed-JS pattern: eval(function(p,a,c,k,e,d){...}) and decodes with decode_packed_codes.
+    - Looks for a custom obfuscation pattern (ﾟ...): uses aa_decode to convert to plaintext.
+    - The aa_decode function decodes a custom obfuscated string using a symbol table and a delimiter, yielding readable characters. It handles both base-10 and hexadecimal (base 16) numeric codes.
+  - JWPlayer data extraction:
+    - Use _find_jwplayer_data to locate JWPlayer configuration in the (potentially decoded) webpage.
+    - Use _parse_jwplayer_data to extract formats (JWPlayer formats). Use m3u8_id='hls' and dash_id='dash' for identifiers.
+  - If JWPlayer formats are not found:
+    - Fallback to direct URL extraction:
+      - Iterate _SOURCE_URL_REGEXES to pull out potential media URLs (mp4, m3u8, etc.) embedded in script blocks or JSON-like structures.
+      - Also attempt to parse a sources array from the page (sources: [...] ) and parse each JSON object to extract URLs.
+    - Build a formats list:
+      - If a URL ends with .m3u8, use _extract_m3u8_formats to obtain HLS formats (with entry_protocol='m3u8_native' and m3u8_id='hls').
+      - Otherwise, append a simple format entry with the direct URL and format_id 'sd'.
+  - Sort the formats with _sort_formats.
+  - Thumbnail extraction via _THUMBNAIL_REGEXES.
+  - If title was not determined earlier, fall back to a generic title or video_id.
+  - Return a merged dictionary including:
+    - id: video_id
+    - title: resolved title
+    - thumbnail: thumbnail URL (if found)
+    - formats: list of format dictionaries (possibly empty if no sources found)
+    - http_headers: {'Referer': url} to be used when fetching media
+  - The code also retains a warning mechanism if JWPlayer data extraction fails but sources exist, to notify about JWPlayer issues.
+
+Important implementation details
+- Obfuscated code handling:
+  - The code includes a robust two-pass deobfuscation:
+    - Packed JavaScript decoding via decode_packed_codes when encountering patterns like eval(function(p,a,c,k,e,d){...}).
+    - A custom a/p/k/e/d style obfuscation decoded by aa_decode, using a symbol_table that maps obfuscated fragments to digits and punctuation, with a delimiter '(ﾟДﾟ)[ﾟεﾟ]+'.
+  - The decoding loop continues until no obfuscated blocks remain, ensuring sites that dynamically obfuscate the player are handled.
+- Hidden form workflow:
+  - The code considers a potential two-step download flow where the page requires a POST with hidden inputs (op=download1). It handles a countdown timer embedded in the page, then posts back to trigger the actual video page content fetch.
+- Fallbacks for non-JWPlayer sources:
+  - If JWPlayer data isn’t found, it explicitly searches for direct video URLs with multiple regexes and parses any inline sources array. It can handle both m3u8 and direct mp4/flv-like URLs.
+- Robust title and thumbnail extraction:
+  - Several heuristics for title extraction to adapt to different site layouts.
+  - Thumbnail extraction supports multiple patterns (poster attribute, image/poster fields in scripts).
+- Key helper methods from parent classes:
+  - _hidden_inputs(webpage): to fetch hidden form fields
+  - _download_webpage(url, video_id, note=None, data=None, headers=None): to fetch pages
+  - _find_jwplayer_data(webpage, video_id): fetch JWPlayer configuration
+  - _parse_jwplayer_data(jwplayer_data, video_id, ...): extract formats from JWPlayer data
+  - _extract_m3u8_formats: extract HLS formats from an m3u8 URL
+  - _search_regex, _og_search_title, _generic_title, _parse_json, etc.: various utilities used for extraction
+- Compatibility considerations:
+  - Uses compat_chr for character conversion and int parsing is robust with int_or_none.
+  - Uses standard YouTube-dl utility methods for merging results and handling HTTP headers.
+
+In short
+- This extractor targets XFileShare-based sites, handling both JWPlayer-driven pages and pages with direct media URLs.
+- It decodes obfuscated JavaScript when necessary, supports two-stage download flows, and provides a fall-back mechanism to assemble formats from raw sources if JWPlayer data is unavailable.
+- It returns a well-formed video info dict with id, title, thumbnail, formats, and referer header, including error handling for maintenance and missing files.

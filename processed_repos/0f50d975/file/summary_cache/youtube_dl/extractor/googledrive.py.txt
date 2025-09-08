@@ -1,0 +1,87 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/googledrive.py
+
+Overview
+- Implements a YouTube-DL extractor for Google Drive hosted videos.
+- Main goal: enumerate downloadable video formats from Google Drive, support direct downloads (with Google confirmation when needed), and extract subtitles/automatic-captions via Google’s timedtext service.
+
+Key class
+- GoogleDriveIE(InfoExtractor)
+  - Inherits common extraction helpers from InfoExtractor.
+
+Important attributes
+- _VALID_URL: Regex to identify Google Drive/Docs/Drive video/file URLs (including uc/open/uc?id= or file/d/ with 28+ char id).
+- _FORMATS_EXT: Mapping of Drive format IDs to file extensions (e.g., '18' -> 'mp4', '43' -> 'webm', etc.).
+- _BASE_URL_CAPTIONS: Base URL for timed text (subtitles) requests.
+- _CAPTIONS_ENTRY_TAG: Mapping for XML tags used to find captions in the captions XML ('subtitles' -> 'track', 'automatic_captions' -> 'target').
+- _caption_formats_ext: Cached list of caption format codes discovered from the captions XML.
+- _captions_xml: Cached parsed XML for captions to avoid re-downloading.
+- _extract_url(webpage): Static helper to extract a direct Google Drive file URL from an iframe containing a Google video/player embed.
+
+Main methods and their roles
+- _download_subtitles_xml(video_id, subtitles_id, hl)
+  - Downloads the subtitles XML from timedtext with parameters id, vid, hl, v, type=list, etc.
+  - Caches the XML and collects available caption format codes (from <format> elements) into _caption_formats_ext for later URL construction.
+
+- _get_captions_by_type(video_id, subtitles_id, caption_type, origin_lang_code=None)
+  - Builds a dictionary of caption tracks for either subtitles or automatic_captions.
+  - For each language entry found in the captions XML, constructs possible caption URLs for each format code in _caption_formats_ext.
+  - If origin_lang_code is provided (for automatic captions), uses it as the lang parameter and optionally adds tlang in the query.
+  - Returns a mapping of language code to a list of {url, ext} dicts.
+
+- _get_subtitles(video_id, subtitles_id, hl)
+  - Orchestrates retrieval of subtitles by calling _download_subtitles_xml and _get_captions_by_type with 'subtitles'.
+
+- _get_automatic_captions(video_id, subtitles_id, hl)
+  - Orchestrates retrieval of automatic captions by parsing the original track language and calling _get_captions_by_type with 'automatic_captions' and origin language.
+
+- _real_extract(self, url)
+  - Core extraction logic:
+    - Extract video_id via self._match_id(url).
+    - Fetch video info from https://drive.google.com/get_video_info with docid=video_id, parse query-string results with compat_parse_qs.
+    - Helper get_value(key) to fetch first value from parsed info dict.
+    - If title is missing but a reason is provided, raise ExtractorError with that reason (expected=True).
+    - Build formats list:
+      - Parse fmt_stream_map and fmt_list if present.
+      - From fmt_list, build a resolutions dict mapping format_id -> (width, height).
+      - For each entry in fmt_stream_map, create a format dict with:
+        - url: lowercase-escaped URL
+        - format_id: format_id
+        - ext: mapped extension via _FORMATS_EXT
+        - width/height if resolution known
+      - This covers direct streaming/download URLs provided by Google Drive.
+    - Build a direct download source URL: https://drive.google.com/uc?id=<video_id>&export=download
+    - Request the source file URL (with support for non-fatal requests):
+      - If Content-Disposition header exists, add a format with:
+        - url: the final URL (urlh.geturl())
+        - ext: derived from title (default mp4) via determine_ext
+        - format_id: 'source'
+        - quality: 1
+      - If not, fetch a confirmation page, attempt to extract a confirm parameter, re-request with confirm, and if Content-Disposition appears, add the format as above.
+      - If confirmation cannot be extracted, warn with an error message from the page (tries to extract messages from uc-error-subcaption or uc-error-caption).
+    - If no formats collected and reason exists, raise ExtractorError(reason, expected=True).
+    - Sort formats (self._sort_formats).
+    - Subtitle-related data:
+      - hl (language) from video info
+      - ttsurl (for subtitles): extract subtitles_id from ttsurl if present
+      - subtitles = self.extract_subtitles(video_id, subtitles_id, hl)
+      - automatic_captions = self.extract_automatic_captions(video_id, subtitles_id, hl)
+    - Return a dict with:
+      - id, title
+      - thumbnail: https://drive.google.com/thumbnail?id=<video_id>
+      - duration: int_or_none(length_seconds)
+      - formats
+      - subtitles
+      - automatic_captions
+
+Implementation details and nuances
+- Caching: _captions_xml is cached to avoid repeated downloads of the captions XML.
+- Robust URL handling: uses update_url_query and lowercase_escape to normalize URLs; uses redirect-safe URLs in formats to ensure cookies are handled correctly (as noted in comments about cookies and redirects).
+- Subtitle handling: supports both standard subtitles and automatic captions via Google’s timedtext API; language handling allows optionally using an origin language when requesting automatic captions.
+- Direct download handling: Google Drive sometimes requires a confirmation step for large files; the code detects a non-Content-Disposition response, fetches a confirmation page, extracts a confirm code, and retries. If still not possible, it emits a warning with a helpful error message from the page.
+- Error handling: propagates reason-based errors from get_video_info when available; otherwise, raises a generic ExtractorError if there are no formats but a reason exists.
+- Edge cases covered by tests: 
+  - Long video IDs (>28 characters) are treated appropriately as “only_matching” in tests.
+  - Anonymous access restrictions for some Drive-hosted videos are handled (tests mark them as only_matching).
+
+In short
+- This extractor retrieves Google Drive video information and formats via get_video_info, constructs a comprehensive list of downloadable formats (including a direct source URL with proper cookie handling), and gathers both subtitles and automatic captions through Google’s timedtext service. It includes robust handling for download confirmations, language/caption metadata, and thumbnail/duration metadata, returning a complete info dict suitable for youtube-dl usage.

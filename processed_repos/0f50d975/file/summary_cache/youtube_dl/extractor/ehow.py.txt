@@ -1,0 +1,28 @@
+Summary:
+- This is a youtube-dl extractor for eHow videos, implemented as EHowIE(InfoExtractor).
+- Key metadata:
+  - IE_NAME = 'eHow'
+  - _VALID_URL matches eHow pages with a numeric id at the end of the URL path, e.g. http://www.ehow.com/video_12245069_...
+  - _TEST provides an example URL and expected extracted fields (id, ext, title, description, uploader) and a sample MD5 for the video content.
+- Core extraction flow (_real_extract):
+  - Extracts video_id from the URL using _match_id.
+  - Downloads the page with _download_webpage.
+  - Locates the direct video URL by searching for a parameter named file= or source= in the page via _search_regex. Captured URL is video_url.
+  - Applies compat_urllib_parse_unquote to decode any percent-encoded characters, yielding final_url.
+  - Retrieves uploader from the page meta tag using _html_search_meta('uploader', webpage).
+  - Obtains the title from the OpenGraph title via _og_search_title and strips a trailing ' | eHow' if present.
+  - Collects thumbnail and description from OpenGraph data via _og_search_thumbnail and _og_search_description.
+  - Returns a dict with:
+    - id: video_id
+    - url: final_url
+    - title: cleaned title
+    - thumbnail: OpenGraph thumbnail
+    - description: OpenGraph description
+    - uploader: uploader meta value
+- Implementation details:
+  - Uses Python 2/3 compatible helpers from compat, notably compat_urllib_parse_unquote.
+  - Relies on OpenGraph and HTML meta data for metadata; assumes the page embeds the video URL in a file= or source= parameter.
+  - The returned dict does not explicitly set 'ext'; youtube-dl infers extension from the video URL (in tests, 'flv' is expected).
+- Potential caveats:
+  - If eHow changes its page structure or video URL embedding, the regex for video URL or metadata extraction may fail.
+  - The extractor is tailored to pages that follow the pattern captured by _VALID_URL.

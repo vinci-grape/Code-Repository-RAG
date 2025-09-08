@@ -1,0 +1,24 @@
+Summary:
+This is a YouTube-DL extractor for GPUS Tech Conference on-demand videos. It does not download the video itself; instead it parses the video page to locate a root XML manifest and delegates to the DigitallySpeaking extractor to handle the actual video retrieval.
+
+Key functionality:
+- Defines GPUTechConfIE, a subclass of InfoExtractor, with a specific URL pattern for 2015 GTC on-demand video pages.
+- Extracts the video identifier from the URL (the numeric part after S in S5156.html).
+- Downloads the page and parses two JavaScript variables from the HTML:
+  - rootPath: base URL for resources (with a fallback default value).
+  - xmlFileId: identifier for the XML manifest.
+- Constructs a manifest URL as rootPath/xml/xmlFileId.xml and returns it as a url_transparent result, delegating extraction to the DigitallySpeaking (ie_key = 'DigitallySpeaking') extractor.
+- Provides a _TEST entry that describes expected metadata (id, ext, title, duration) as produced by the downstream extractor.
+
+Key implementation details:
+- _VALID_URL uses a precise regex: https?://on-demand.gputechconf.com/gtc/2015/video/S(?P<id>\d+)\.html
+- _real_extract flow:
+  - video_id = self._match_id(url)
+  - webpage = self._download_webpage(url, video_id)
+  - root_path = self._search_regex(r'var\s+rootPath\s*=\s*"([^"]+)', webpage, 'root path', default='http://evt.dispeak.com/nvidia/events/gtc15/')
+  - xml_file_id = self._search_regex(r'var\s+xmlFileId\s*=\s*"([^"]+)', webpage, 'xml file id')
+  - Return {'_type': 'url_transparent', 'id': video_id, 'url': '%sxml/%s.xml' % (root_path, xml_file_id), 'ie_key': 'DigitallySpeaking'}
+- The actual video metadata is obtained via the DigitallySpeaking extractor, as indicated by ie_key.
+- The default root_path ensures robust URL construction if the page doesn’t define the variable.
+
+Overall, the extractor acts as a lightweight bridge to locate the XML manifest and hand off to DigitallySpeaking for the real media extraction.

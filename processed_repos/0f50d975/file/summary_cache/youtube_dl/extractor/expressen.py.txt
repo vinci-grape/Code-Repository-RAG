@@ -1,0 +1,57 @@
+Concise summary of expressen.py
+
+- Purpose
+  - Implement an InfoExtractor for Expressen (and DI) video pages. Handles extracting video formats, metadata, and timestamps from page data embedded in data attributes.
+
+- Key class
+  - ExpressenIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL: Matches Expressen/Di video pages and embedded players. Captures a display_id from the final path segment.
+  - _TESTS: Includes a real page test with metadata (id, title, description, duration, timestamp, thumbnail, etc.) and several only_matching tests for embedded/iframe scenarios.
+
+- URL extraction helper
+  - _extract_urls(webpage): Static method that scans a page for iframes embedding Expressen/DI video players and returns the embedded URLs. Uses a regex targeting URLs like /tvspelare/video or /videoplayer/embed under tv/...
+
+- Core extraction flow (_real_extract)
+  - display_id = self._match_id(url): obtains the slug portion of the URL as display_id.
+  - Downloads the page: webpage = self._download_webpage(url, display_id).
+
+  - Helper to read JSON-like data from data attributes:
+    - extract_data(name): finds a data-%s attribute with JSON content via _search_regex, unescapes HTML, and parses JSON with _parse_json.
+    - It looks for data-video-tracking-info and data-article-data.
+
+  - Data extraction:
+    - info = extract_data('video-tracking-info')
+    - video_id = info['videoId']
+    - data = extract_data('article-data')
+    - stream = data['stream']
+
+  - Formats handling:
+    - If the stream URL ends with an m3u8 manifest (determine_ext(stream) == 'm3u8'):
+      - Use self._extract_m3u8_formats(stream, display_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls')
+    - Else:
+      - Use a single format: [{'url': stream}]
+    - Sort formats with self._sort_formats(formats)
+
+  - Metadata extraction:
+    - title: info.get('titleRaw') or data['title']
+    - description: info.get('descriptionRaw')
+    - thumbnail: info.get('socialMediaImage') or data.get('image')
+    - duration: int_or_none(info.get('videoTotalSecondsDuration') or data.get('totalSecondsDuration'))
+    - timestamp: unified_timestamp(info.get('publishDate'))
+
+  - Return dict with:
+    - id: video_id
+    - display_id: display_id
+    - title, description, thumbnail, duration, timestamp
+    - formats
+
+- Important implementation details
+  - Uses two data attributes from the page (data-video-tracking-info and data-article-data) as sources of JSON payloads, parsing them after HTML unescape.
+  - Supports both HLS (m3u8) and direct video URL formats.
+  - Uses determine_ext to decide format handling based on the stream URL.
+  - Timestamps are normalized via unified_timestamp and durations via int_or_none.
+  - Output fields include both id (numeric video_id) and display_id (URL slug) for clarity.
+
+Overall, this extractor pulls embedded video data from Expressen/DI pages, supports both m3u8 and direct formats, and gathers standard metadata (title, description, thumbnail, duration, timestamp) for each video.

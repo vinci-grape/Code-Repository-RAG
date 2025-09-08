@@ -1,0 +1,39 @@
+concise summary
+
+- Purpose: Implement a YouTube-DL extractor for Hypem track pages (HypemIE).
+
+- Main class and URL pattern:
+  - Class: HypemIE(InfoExtractor)
+  - _VALID_URL: matches http(s)://hypem.com/track/<id> where <id> is a 5-character lowercase alphanumeric string.
+  - _TEST: provides a representative track URL and expected metadata (id, ext, title, uploader, timestamp, upload_date) and md5 of the file.
+
+- Extraction flow (_real_extract):
+  1. Extract track_id from the URL.
+  2. Download the track page HTML.
+  3. Locate and parse a JSON blob embedded in a script tag:
+     - Tag: <script type="application/json" id="displayList-data">...</script>
+     - JSON structure contains a 'tracks' list; take the first track.
+  4. From the track data, read:
+     - track['id'] as track_id
+     - track['song'] as title
+  5. Retrieve the final direct audio URL by querying:
+     - http://hypem.com/serve/source/<track_id>/<track['key']>
+     - Uses _download_json with header Content-Type: application/json
+     - The response contains a 'url' field which is the final MP3 URL.
+  6. Return an info dict with:
+     - id: track_id
+     - url: final_mp3_url
+     - ext: 'mp3'
+     - title: title
+     - uploader: track.get('artist')
+     - duration: int_or_none(track.get('time'))
+     - timestamp: int_or_none(track.get('ts'))
+     - track: title
+
+- Important implementation notes:
+  - Uses _html_search_regex to extract the JSON blob from the HTML.
+  - Uses _parse_json to parse the JSON and selects tracks[0].
+  - Uses int_or_none to safely convert numeric fields to integers.
+  - The final URL is fetched from Hypem’s serve/source endpoint, requiring the track id and a key from the initial JSON data.
+
+- Overall functionality: Given a Hypem track page, fetches embedded metadata, resolves the direct MP3 URL via Hypem’s API, and returns standard metadata suitable for downloading and listing in YouTube-DL.

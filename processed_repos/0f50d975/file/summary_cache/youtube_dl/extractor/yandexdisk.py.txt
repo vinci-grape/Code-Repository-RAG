@@ -1,0 +1,80 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/yandexdisk.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (YandexDiskIE) for public videos stored on Yandex Disk. It parses Yandex Disk public pages, retrieves metadata, and builds a list of available video formats (MP4 and HLS) along with uploader/view information.
+
+- Key class
+  - YandexDiskIE (subclass of InfoExtractor)
+
+- URL pattern and tests
+  - _VALID_URL matches public Yandex Disk links, including yadi.sk and various disk.yandex.* domains, for resources identified by an id (hash).
+  - _TESTS contains three tests:
+    - A typical public URL with expected metadata (id, title, duration, uploader, uploader_id, view_count, md5).
+    - Two additional entries marked only_matching to ensure URL matching works for other formats.
+
+- Main workflow (_real_extract)
+  1. Parse domain and initial video_id from the URL using _VALID_URL.
+  2. Download the page HTML.
+  3. Extract a JSON object from a script tag with id="store-prefetch" and parse it as store.
+  4. Resolve resource = store['resources'][store['rootResourceId']].
+  5. Set title and meta information from the resource. If meta.short_url exists, update video_id from that URL.
+  6. Attempt to obtain a direct download URL (source_url) via:
+     - cloud API: https://cloud-api.yandex.net/v1/disk/public/resources/download with public_key=url (the public page URL).
+     - Fallbacks: use public API actions (download-url and get-video-streams) via a helper call_api() when necessary (requires sk and yandexuid from store environment).
+     - If source_url or video_streams are already present, these API calls may be skipped.
+  7. Gather video streams:
+     - video_streams = resource.get('videoStreams') or {}
+     - video_hash = resource.get('hash') or url
+     - environment keys sk and yandexuid are used to fetch more data if needed.
+     - If sk and yandexuid exist and both source_url and video_streams are missing, set a cookie for yandexuid and call public API endpoints to fetch:
+       - download-url (for source_url)
+       - get-video-streams (for video_streams)
+  8. Build formats list:
+     - If source_url exists, add a “source” format with:
+       - url = source_url
+       - ext determined from title, meta ext, or mime_type (default mp4)
+       - filesize from meta.size
+       - quality = 1
+     - For each video in video_streams['videos']:
+       - If video['url'] is missing, skip.
+       - If video['dimension'] == 'adaptive':
+         - Use _extract_m3u8_formats to fetch HLS formats (m3u8_native) with m3u8_id='hls'.
+       - Else (non-adaptive MP4):
+         - Compute height = int_or_none(size.height)
+         - format_id = 'hls' or 'hls-<height>p' if height exists
+         - Add format with ext 'mp4', protocol 'm3u8_native', url, width, height.
+  9. Sort formats via self._sort_formats(formats).
+ 10. Determine uploader information:
+     - uid = resource.get('uid')
+     - display_name = try_get(store, lambda x: x['users'][uid]['displayName'])
+ 11. Build final info dict:
+     - id: video_id
+     - title: title
+     - duration: float_or_none(video_streams.get('duration'), 1000)  (duration handling may involve a scale factor; test expects 168.6)
+     - uploader: display_name
+     - uploader_id: uid
+     - view_count: int_or_none(meta.get('views_counter'))
+     - formats: list of gathered formats
+
+- Important implementation details
+  - Uses a two-stage data source: page-stored store JSON (store-prefetch) and the public disk API endpoints (download-url, get-video-streams) when needed (requires sk and yandexuid from environment).
+  - Handles both adaptive (HLS) and direct MP4 formats:
+    - Adaptive: uses _extract_m3u8_formats to parse HLS streams.
+    - Non-adaptive: adds direct MP4 formats with proper height/width metadata.
+  - Ext resolution for format: determines extension from title, meta ext, or mime_type; defaults to mp4.
+  - Safe data extraction with try_get and int_or_none/float_or_none helpers.
+  - Sets yandexuid cookie when necessary to access protected API endpoints.
+  - Builds uploader information from store JSON: navigates store['users'][uid]['displayName'].
+  - Uses a robust approach to obtain source_url and video streams, with fallbacks and non-fatal API calls (fatal=False) to avoid aborting on partial failures.
+
+- Key utilities used
+  - determine_ext, mimetype2ext to infer file extensions
+  - int_or_none, float_or_none for numeric fields
+  - try_get for safe nested lookups
+  - urljoin to compose API URLs
+  - _download_webpage, _download_json for HTTP requests
+  - _search_regex to extract embedded JSON
+  - _extract_m3u8_formats to parse HLS streams
+  - _set_cookie to manage cookies
+
+Overall, this extractor retrieves Yandex Disk public video metadata, resolves a direct download URL when possible, fetches video streams via the public API when needed, and assembles a comprehensive set of video formats along with uploader and view count information.

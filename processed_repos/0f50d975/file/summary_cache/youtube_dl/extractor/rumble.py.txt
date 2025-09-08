@@ -1,0 +1,73 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/rumble.py:
+
+- Purpose
+  - Implement an information extractor (InfoExtractor) for Rumble embed pages. It fetches video metadata via Rumble’s embedJS API and builds a list of playable formats along with associated metadata (title, timestamps, thumbnails, channel info, etc.).
+
+- Key class
+  - RumbleEmbedIE (subclass of InfoExtractor)
+
+- URL validation and tests
+  - _VALID_URL regex:
+    - Matches rumble.com embed pages of the form:
+      - https://rumble.com/embed/{id}
+      - with an optional subcomponent like a version (e.g., embed/v5pv5f or embed/ufe9n.v5pv5f)
+  - _TESTS:
+    - Test 1: embeds/v5pv5f, expects mp4 format, specific title, timestamp, and upload_date.
+    - Test 2: a similar URL with a dot-based variant, marked only_matching for regex verification.
+
+- Core functionality (_real_extract)
+  - video_id extraction:
+    - video_id = self._match_id(url)
+  - Data retrieval:
+    - Fetch video metadata via https://rumble.com/embedJS/ with query parameters:
+      - request = 'video'
+      - v = video_id
+    - Uses self._download_json(...) to obtain a JSON object (video)
+  - Title:
+    - title = video['title']
+  - Formats construction:
+    - Initialize formats = []
+    - Iterate over video.get('ua') (or {} to avoid None):
+      - For each height, ua (where height is the key and ua is a dict with URLs and bitrates):
+        - For i in range(2) (two potential URLs per height):
+          - f_url = ua[i] (safe access with try_get)
+          - If f_url exists:
+            - ext = determine_ext(f_url)
+            - f format dict:
+              - 'ext': ext
+              - 'format_id': "{ext}-{height}p" (e.g., "mp4-720p")
+              - 'height': int_or_none(height)
+              - 'url': f_url
+            - bitrate = ua[i + 2]['bitrate'] if present (safely via try_get)
+            - If bitrate exists, set f['tbr'] = int_or_none(bitrate)
+            - Append f to formats
+    - self._sort_formats(formats) to order formats by quality/bitrate
+  - Additional metadata:
+    - author = video.get('author') or {}
+    - thumbnail = video.get('i')
+    - timestamp = parse_iso8601(video.get('pubDate'))
+    - channel = author.get('name')
+    - channel_url = author.get('url')
+    - duration = int_or_none(video.get('duration'))
+  - Return dictionary:
+    - id: video_id
+    - title: title
+    - formats: formats
+    - thumbnail: thumbnail
+    - timestamp: timestamp
+    - channel: channel
+    - channel_url: channel_url
+    - duration: duration
+
+- Important implementation details
+  - Uses embedJS API with parameters: request=video, v=video_id to obtain a structured JSON containing available formats.
+  - Formats are built from the video['ua'] mapping, which appears to provide two URLs per height and corresponding bitrates located at indices i+2.
+  - Safe access patterns (try_get) and helper utilities (determine_ext, int_or_none, parse_iso8601) are used to robustly extract and normalize data.
+  - The format_id convention is ext-height with a trailing 'p' (e.g., mp4-720p).
+  - Handles potential absence of video data gracefully with defaults (e.g., video.get('ua') or {}).
+
+- Output structure
+  - A dict containing:
+    - id, title, formats (list), thumbnail, timestamp (seconds since epoch), channel, channel_url, duration (seconds)
+
+This extractor focuses on converting Rumble embed metadata into a standard YouTube-dl compatible format list, including multiple video formats and associated metadata.

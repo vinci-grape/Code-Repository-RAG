@@ -1,0 +1,92 @@
+Below is a concise yet comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/motherless.py.
+
+Overview
+- This file implements two information extractors for the Motherless site:
+  - MotherlessIE: extracts metadata and video URL for individual video pages.
+  - MotherlessGroupIE: extracts a playlist (collection) of videos from a group page.
+
+Key Classes
+- MotherlessIE (InfoExtractor)
+  - Purpose: Fetch and parse a single Motherless video page to produce a standard video info dictionary.
+  - URL pattern: _VALID_URL = r'https?://(?:www\.)?motherless\.com/(?:g/[a-z0-9_]+/)?(?P<id>[A-Z0-9]+)'
+    - Supports URLs like http://motherless.com/AC3FFE1 or http://motherless.com/g/slug/633979F
+
+- MotherlessGroupIE (InfoExtractor)
+  - Purpose: Build a playlist of videos from a Motherless group page.
+  - URL pattern: _VALID_URL = r'https?://(?:www\.)?motherless\.com/gv?/(?P<id>[a-z0-9_]+)'
+  - A group page can be /g/<group> or /gv/<group>.
+
+Main Functionalities
+- Video extraction (MotherlessIE._real_extract)
+  - Fetch page HTML and validate existence:
+    - If 404-like content is present, raise ExtractorError with expected=True.
+    - If the content is for friends only, raise ExtractorError with expected=True.
+  - Metadata extraction:
+    - Title: via multiple regex patterns targeting the media title area.
+    - Video URL: try to extract the direct video URL from JavaScript patterns (file URL or fileurl) and fall back to a default CDN URL if not found.
+    - Age limit: parsed via _rta_search (likely returns 18 or None).
+    - View/like counts: extracted via regex searches; converted to integers with str_to_int (fatal=False).
+    - Upload date: parsed via unified_strdate from a date-like string, or inferred from “uploaded X ago” expressions (e.g., 3d ago) by calculating the date from UTC now.
+    - Comment count: counted by finding specific HTML classes denoting comments.
+    - Uploader ID: extracted from username spans or member links.
+    - Categories: extracted from the keywords meta tag and split into a list if present.
+    - Thumbnail: obtained via _og_search_thumbnail.
+  - Output fields:
+    - id, title, upload_date, uploader_id, thumbnail, categories, view_count, like_count, comment_count, age_limit, url
+  - Notes:
+    - If the page includes an explicit video URL, it is used; otherwise a CDN-backed URL is formed using the video_id.
+    - Handles various page layouts robustly with multiple regex options.
+
+- Playlist extraction (MotherlessGroupIE._real_extract and _extract_entries)
+  - Fetch group page and extract:
+    - Title from the page title tag (before a hyphen).
+    - Description from meta description.
+    - Page count (for pagination) by scanning for pagination controls; if not found, reports a warning and assumes at least one page.
+  - Pagination:
+    - PAGE_SIZE is set to 80 entries per page.
+    - Uses an inner function _get_page(idx) to download each paginated page on demand and yield entries.
+    - Uses InAdvancePagedList to provide a lazily-evaluated, paginated list of video entries across pages.
+  - Entry extraction (_extract_entries):
+    - Primary approach: scan for anchor tags with hrefs and optional title hints from image alt attributes. For each match:
+      - Build the absolute video URL.
+      - If the URL is not a valid Motherless video page, skip.
+      - Determine video_id and title; create a Youtube-dl compatible entry using url_result with ie=MotherlessIE and video_title.
+    - Fallback approach: if no entries found, extract data-codename values from the page to form a basic list of entries by constructing URLs and using video_id as the codename.
+  - Output:
+    - A playlist dictionary: { '_type': 'playlist', 'id': group_id, 'title': ..., 'description': ..., 'entries': playlist }
+  - Notes:
+    - The suitable() method ensures the group extractor is not selected for URLs that belong to the individual video extractor.
+    - The code includes robust handling for pages with no videos (warnings) and provides a sane default page_count.
+
+Important Implementation Details
+- URL utilities:
+  - Uses compat_urlparse.urljoin to resolve relative links to absolute URLs.
+- Helper methods used:
+  - _download_webpage: fetches page HTML.
+  - _html_search_regex, _search_regex: flexible regex searches with fallbacks.
+  - _html_search_meta: read metadata like keywords or description.
+  - _og_search_thumbnail: extract Open Graph thumbnail.
+  - _rta_search: extract age-restriction (likely “restricted to adults”).
+  - unified_strdate: normalize date strings into YYYYMMDD format.
+  - str_to_int: convert strings to integers with safe defaults.
+  - InAdvancePagedList: provide a paginated, lazy-evaluated list of entries.
+  - orderedSet: deduplicate results when falling back to codename extraction.
+- Edge cases handled:
+  - 404-like pages and “for friends only” content raise ExtractorError with expected flag.
+  - Missing keywords or categories are allowed; categories can be None.
+  - Upload date may be explicit or inferred from “X ago” expressions (hours/days).
+  - Graceful fallback for video URLs if the primary extraction pattern fails (CDN URL pattern using video_id).
+  - Group pages with no videos trigger a warning and default to a single page behavior.
+
+Tests
+- The _TESTS array includes several representative scenarios:
+  - Typical video pages with expected md5, metadata fields, and thumbnail patterns.
+  - A 404-like page test (skip).
+  - A page with no keywords (only_matching test).
+  - A recent videos page using “ago” date format with skip_download in params for metadata only extraction.
+
+Summary
+- This module adds support for Motherless video and group pages to youtube-dl.
+- It extracts comprehensive metadata for individual videos (title, dates, uploader, counts, categories, etc.) and resolves direct video URLs.
+- It also builds group playlists by crawling group pages, handling pagination, and producing a list of video entries linked to the video extractor.
+- The implementation includes multiple robust fallbacks, careful error handling, and tests to validate expected behavior.

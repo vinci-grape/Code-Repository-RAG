@@ -1,0 +1,59 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/ustudio.py
+
+Purpose
+- Implements two YouTube-DL extractors for ustudio:
+  - UstudioIE: extracts data for a standard ustudio video page.
+  - UstudioEmbedIE: extracts data from ustudio embedded video URLs.
+
+Key classes and responsibilities
+- UstudioIE (InfoExtractor)
+  - URL pattern: matches video pages like http(s)://(www|v1).ustudio.com/video/{id}/{display_id}
+  - Main work happens in _real_extract:
+    - Extracts video_id and display_id from URL.
+    - Downloads configuration XML from http://v1.ustudio.com/embed/{video_id}/ustudio/config.xml.
+    - Builds video formats by reading qualities/quality/{video} entries in the XML.
+    - Downloads the page HTML to extract title, upload date, uploader, and description (via Open Graph helpers and regex fallbacks).
+    - Also extracts image thumbnails via the same config XML (image entries).
+    - Returns a dictionary with id, display_id, title, description, thumbnails, upload_date, uploader, and formats.
+- UstudioEmbedIE (InfoExtractor)
+  - URL pattern: matches embed URLs like http(s)://(app|embed).ustudio.com/embed/{uid}/{id}
+  - Main work happens in _real_extract:
+    - Extracts uploader_id and video_id from URL.
+    - Downloads JSON from http://app.ustudio.com/embed/{uploader_id}/{video_id}/config.json.
+    - Reads the first video entry from video['videos'] to obtain video_data.
+    - Title is video_data['name'].
+    - Builds formats from video_data['transcodes'], iterating extensions and their quality entries. Each quality entry with a 'url' becomes a format with:
+      - format_id: either "ext-heightp" (e.g., mp4-720p) or just "ext" if height is unavailable.
+      - url: quality URL
+      - width: from quality['width'] (if present)
+      - height: from quality['height'] (if present)
+    - Sorts formats.
+    - Builds thumbnails from video_data['images'] (list of {url: ...}).
+    - Returns a dictionary with id (video_id), title, description, duration, uploader_id, tags, thumbnails, and formats.
+    
+Important implementation details
+- XML/JSON data sources:
+  - UstudioIE uses an XML endpoint: http://v1.ustudio.com/embed/{video_id}/ustudio/config.xml
+  - UstudioEmbedIE uses a JSON endpoint: http://app.ustudio.com/embed/{uid}/{id}/config.json
+- Format extraction:
+  - Helper function extract(kind) inside UstudioIE reads config XML under ./qualities/quality/{kind} and collects dicts with url, width, height. It uses unescapeHTML on the URL and int_or_none for numeric fields.
+  - For the embed extractor, formats are built from transcodes[ext] arrays, with each quality providing a URL and optional height/width. format_id includes height when available (e.g., mp4-720p).
+- Metadata extraction:
+  - Title for standard pages is taken from Open Graph data (_og_search_title) with a fallback to webpage parsing for upload date and uploader via regex.
+  - Description and thumbnails for the standard extractor come from Open Graph metadata and the XML-derived image data.
+- Thumbnails:
+  - UstudioIE obtains image thumbnails from the config XML (image entries) via the same extract('image') process used for video formats.
+  - UstudioEmbedIE collects thumbnails from video_data['images'].
+- Robustness:
+  - Uses int_or_none to gracefully handle missing numeric attributes.
+  - Uses fatal=False in some regex searches to avoid failing when metadata is absent.
+- Test cases:
+  - Each extractor includes a _TEST dictionary with expected URL, MD5, and info_dict content to validate correct extraction during tests.
+
+Returned data shape
+- UstudioIE:
+  - id, display_id, title, description, thumbnails, upload_date, uploader, formats
+- UstudioEmbedIE:
+  - id, title, description, duration, uploader_id, tags, thumbnails, formats
+
+In short, the file provides two extractors for ustudio: one for standard video pages and one for embedded videos. Both gather streaming formats and metadata (title, description, thumbnails, uploader), but they source data from different endpoints (XML config vs. JSON config) and organize formats accordingly.

@@ -1,0 +1,40 @@
+Concise summary of ./youtube-dl/devscripts/show-downloads-statistics.py
+
+Purpose
+- Fetches GitHub releases for the youtube-dl project, iterating through paginated API results.
+- Prints details for specific assets (filtered by name patterns) and totals up the overall download traffic across all assets.
+
+Main functionality
+- Uses GitHub Releases API to gather all releases page by page until an empty page is returned.
+- For each release:
+  - Prints the release name.
+  - Iterates over assets, updates a running total of traffic as downloads_count * size for every asset.
+  - Filters assets to print only those whose names match one of these patterns:
+    - ^youtube-dl$
+    - ^youtube-dl-\d{4}\.\d{2}\.\d{2}(?:\.\d+)?\.tar\.gz$
+    - ^youtube-dl\.exe$
+  - For assets that pass the filter, prints: " asset_name size: <formatted size> downloads: <count>"
+
+Key functions and components
+- format_size(bytes)
+  - Wrapper around format_bytes from youtube_dl.utils, returning "<human-readable> (<bytes> bytes)".
+- total_bytes (global accumulator)
+  - Accumulates asset['download_count'] * asset['size'] for all assets across all releases.
+- Main loop
+  - page loop: for page in itertools.count(1)
+  - Fetches JSON from https://api.github.com/repos/ytdl-org/youtube-dl/releases?page=<page>
+  - Breaks when the releases list is empty.
+  - Prints each release['name'] and details for selected assets.
+
+Important implementation details
+- Libraries and compatibility:
+  - Uses compat_print and compat_urllib_request for Python compatibility within youtube-dl’s environment.
+  - Adjusts sys.path to include the repository root for local imports.
+- Asset filtering logic:
+  - Prints an asset only if its name matches at least one of the three patterns above.
+  - Implemented via: if all(not re.match(p, asset_name) for p in patterns): continue
+- Total vs. printed assets:
+  - total_bytes includes every asset’s traffic (download_count * size), even assets that are filtered out from printing.
+- Output:
+  - Prints release names and qualifying asset lines to stdout.
+  - Final line shows total download traffic, formatted with the human-readable size plus bytes count.

@@ -1,0 +1,77 @@
+Here is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/umg.py:
+
+Purpose
+- Implement a YouTube-DL extractor for Universal Music Germany (UMG De) videos.
+- Retrieve video metadata and available formats via a GraphQL endpoint and build a list of playable formats (including HLS) and thumbnails.
+
+Key class
+- UMGDeIE (inherits from InfoExtractor)
+  - IE_NAME: 'umg:de'
+  - IE_DESC: 'Universal Music Deutschland'
+  - _VALID_URL: regex that matches UMG Germany video URLs of the form:
+    https://www.universal-music.de/.../videos/....-<id>
+  - _TEST: provides a sample URL, expected MD5, and an info_dict with id, ext, title, timestamp, upload_date.
+
+Main functionality (_real_extract)
+- Extract video_id from URL using _match_id.
+- Retrieve video data via a GraphQL query to https://graphql.universal-music.de/:
+  - Query asks for universalMusic(channel:16) -> video(id: <id>) with fields:
+    headline, formats (formatId, url, type, width, height, mimeType, fileSize), duration, createdDate.
+  - Video data is parsed from the JSON response at data.universalMusic.video.
+
+- Title:
+  - title = video_data['headline']
+
+- HLS URL template:
+  - Builds a base template for HLS playlists:
+    http://mediadelivery.universal-music-services.de/vod/mp4:autofill/storage/<video_id_as_path>/content/%s/file/playlist.m3u8
+  - The video_id is transformed into a path by inserting slashes between its digits: '/'.join(list(video_id)).
+
+- Helpers:
+  - add_m3u8_format(format_id): Extends formats with formats extracted from the corresponding HLS playlist using _extract_m3u8_formats with:
+    - base URL: hls_url_template % format_id
+    - video_id as id
+    - ext 'mp4'
+    - protocol 'm3u8_native'
+    - m3u8_id set to 'hls'
+    - fatal=False so missing playlists don’t fail extraction
+
+- Processing formats (video_data.get('formats', [])):
+  - Skip entries with no URL or mimeType 'application/mxf' (unwanted format).
+  - Build a format dict (fmt) with:
+    - url
+    - width (int or None)
+    - height (int or None)
+    - filesize (parsed from fileSize via parse_filesize)
+  - If format type is 'Image': treat as a thumbnail and add to thumbnails.
+  - If format type is 'Video':
+    - If there is a formatId, attach it to fmt as 'format_id'.
+    - If mimeType is 'video/mp4', also try to add corresponding HLS formats via add_m3u8_format(format_id).
+    - Validate availability of f_url by requesting the page (_request_webpage). If accessible, read the first byte:
+      - If first byte is not 'F' or 0x00, skip this format (invalid/unplayable).
+      - Otherwise, append fmt to formats.
+
+- Fallbacks:
+  - If no formats were collected, attempt to populate HLS formats for a default set of format_ids: 867, 836, 940 via add_m3u8_format.
+
+- Sorting:
+  - Sort formats by width, height, filesize, and tbr with _sort_formats(formats, ('width', 'height', 'filesize', 'tbr')).
+
+- Return structure:
+  - id: video_id
+  - title: as extracted
+  - duration: int_or_none(video_data.get('duration'))
+  - timestamp: parsed from createdDate using parse_iso8601 with a space as separator
+  - thumbnails: list of thumbnail formats collected from 'Image' entries
+  - formats: list of format dictionaries built during processing (and augmented with HLS formats where applicable)
+
+Implementation details and notes
+- Uses a GraphQL endpoint to fetch video data (headlines, formats, duration, creation date).
+- Formats handling discriminates between Images (thumbnails) and Videos (playable formats).
+- When a Video has a formatId and MP4 mime type, it proactively fetches corresponding HLS playlists for more adaptive streaming options.
+- Validates f_url accessibility by performing a lightweight HTTP request and inspecting the first byte to avoid including broken/unavailable formats.
+- Provides a safe fallback to HLS formats if no direct formats could be collected.
+- Dates are parsed from createdDate with parse_iso8601, accommodating potential non-ISO spaces.
+- The code uses helper functions from youtube-dl’s utils for robust parsing (int_or_none, parse_filesize, parse_iso8601).
+
+Overall, the extractor comprehensively gathers UMG video information and a robust set of formats (including HLS) while collecting thumbnails and metadata, with sensible fallbacks and validation to ensure usable outputs.

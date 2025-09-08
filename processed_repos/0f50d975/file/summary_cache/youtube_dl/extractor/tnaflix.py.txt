@@ -1,0 +1,76 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/tnaflix.py
+
+- Purpose
+  - YouTube-dl extractor module for TNAFlix family sites (tnaflix.com, empflix.com, moviefap.com) and their embedded players. It retrieves video metadata and formats from various page/config formats and normalizes them for downstream use.
+
+- Key classes
+  - TNAFlixNetworkBaseIE (InfoExtractor)
+    - Core shared logic for extracting video metadata and formats from TNAFlix-family sites.
+    - Constants/regexes:
+      - _CONFIG_REGEX: multiple patterns to locate the config URL (flashvars.config, input[name=config], config= URL).
+      - _HOST, _VKEY_SUFFIX: host-specific URL construction knobs (override in descendants).
+      - _TITLE_REGEX, _DESCRIPTION_REGEX, _UPLOADER_REGEX: fields for title, description, uploader.
+      - _VIEW_COUNT_REGEX, _COMMENT_COUNT_REGEX, _AVERAGE_RATING_REGEX: metrics (default None, overridden by descendants if needed).
+      - _CATEGORIES_REGEX: pattern to extract categories.
+    - _extract_thumbnails(self, flix_xml):
+      - Parses an XML timeline structure to assemble a list of thumbnail entries.
+      - Uses imagePattern, imageFirst/Last, imageWidth/Height; builds a sequence of thumbnail URLs by substituting the # placeholder with sequence numbers.
+    - _real_extract(self, url):
+      - Main extraction workflow:
+        - Determine video_id and display_id from URL and page.
+        - Download the video webpage.
+        - Resolve cfg_url via _CONFIG_REGEX; if not found, construct a fid-based URL using hidden inputs (vkey/nkey) and host suffixes.
+        - Download cfg_xml and parse formats:
+          - First possible videoLink URL (single-format).
+          - Then iterate through quality/item nodes to collect multiple formats, extracting height from the res field when available.
+          - Normalize URLs with _proto_relative_url and unescape HTML in video links.
+        - Sort formats with _sort_formats.
+        - Build thumbnail and thumbnails via _extract_thumbnails and the startThumb in cfg_xml.
+        - Determine title (regex first, fallback to og:title), age_limit (rta, default 18), duration (parse_duration on meta), description/uploader/view_count/comment_count/average_rating/categories via field extraction helpers.
+        - Return a dict with id, display_id, title, description, thumbnail, thumbnails, duration, age_limit, uploader, view_count, comment_count, average_rating, categories, formats.
+  - TNAFlixNetworkEmbedIE(TNAFlixNetworkBaseIE)
+    - For embedded video players.
+    - _VALID_URL matches embed URLs like player.tnaflix.com/video/{id} or player.empflix.com/video/{id}.
+    - _TITLE_REGEX overrides to capture a simple <title>...</title>.
+    - _extract_urls(webpage): static method to pull embed URLs from iframes on a page.
+  - TNAFlixIE(TNAEMPFlixBaseIE)
+    - Main extractor for tnaflix.com video pages.
+    - _VALID_URL matches tnaflix video pages with display_id and id.
+    - _TITLE_REGEX extracts titles with a specific format.
+    - _DESCRIPTION_REGEX, _UPLOADER_REGEX, _CATEGORIES_REGEX overridden from TNAFlixNetworkBaseIE via TNAEMPFlixBaseIE to fit empflix/tnaflix variations.
+    - _TESTS: examples for tnaflix pages (two test cases showing metadata like id, display_id, title, duration, uploader, categories, etc.).
+  - EMPFlixIE(TNAEMPFlixBaseIE)
+    - Specific extractor for empflix.com.
+    - _VALID_URL matches empflix video URLs (two path patterns).
+    - _HOST override to 'emp' and _VKEY_SUFFIX = '-1' to adjust key generation.
+    - _TESTS: examples with metadata including description, duration, uploader, categories, etc.
+  - MovieFapIE(TNAFlixNetworkBaseIE)
+    - Extractor for moviefap.com videos.
+    - _VALID_URL matches moviefap video pages with id and display_id.
+    - Regexes for view_count, comment_count, average_rating, and categories extraction tailored to moviefap’s HTML structure.
+    - _TESTS: examples including multi-format video and a quirky single-format case where the extension is fid but the actual video is flv.
+
+- Important implementation details
+  - Robust config URL resolution:
+    - Tries several patterns to find the config URL (flashvars.config, input config fields, or constructs a fid-like URL using vkey/nkey from the page).
+    - Uses fix_xml_ampersands when parsing XML config to handle ampersand escaping.
+  - Formats extraction:
+    - Supports both a direct videoLink and multiple quality/item blocks.
+    - Builds a formats list with:
+      - url (properly unescaped and relative-safe with _proto_relative_url)
+      - format_id, height (parsed from res like "720p")
+    - Uses _sort_formats to order formats by quality/bitrate.
+  - Thumbnails handling:
+    - Extracts a nested thumbnail timeline (timeline/rolloverBarImage/pattern) from XML.
+    - Generates a list of thumbnail dicts with url, width, height by substituting a range into the pattern (# replaced by sequence index).
+  - Metadata extraction:
+    - Title: primary via _TITLE_REGEX, fallback to og:title.
+    - Description, uploader, categories, duration, age_limit, view_count, comment_count, average_rating extracted via specific regexes or HTML parsing helpers.
+    - Categories are split by comma and stripped.
+  - Compatibility and structure:
+    - Inherits common helpers from InfoExtractor (e.g., _download_webpage, _download_xml, _html_search_regex, _og_search_title, _rta_search, _html_search_meta, _search_regex, _hidden_inputs, _proto_relative_url, _extract_thumbnails, _sort_formats).
+  - Tests:
+    - Each extractor variant includes _TESTS with expected info_dict shapes and sample URLs to validate extraction logic (e.g., id, display_id, ext, title, thumbnail, duration, age_limit, uploader, categories).
+
+- Overall
+  - The module provides a cohesive set of extractors for TNAFlix network sites, handling both direct pages and embedded players, with flexible config URL resolution, multi-format video support, thumbnail extraction from XML, and robust metadata collection across site variations (tnaflix, empflix, moviefap).

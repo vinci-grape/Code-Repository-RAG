@@ -1,0 +1,83 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/heise.py.
+
+What this file does
+- Implements an InfoExtractor for Heise video pages. It handles multiple embedding/hosting scenarios on Heise domains and extracts video metadata and formats accordingly.
+
+Key class
+- HeiseIE (subclass of InfoExtractor)
+  - _VALID_URL: Regex that matches Heise video article URLs ending with -<digits>.html and captures the numeric id.
+  - _TESTS: Several test cases covering:
+    - Kaltura embeds
+    - YouTube embeds
+    - Direct JW Player feed (video out feed)
+    - Some non-matching URLs (only_matching)
+
+Main extraction logic (_real_extract)
+1) Initial setup
+   - video_id = matched ID from URL
+   - webpage = downloaded HTML of the page
+
+2) Title extraction helper
+   - extract_title(default=NO_DEFAULT): tries multiple sources for a title
+     - HTML meta: fulltitle or title
+     - If not found or too generic (“c't”), looks for data-title in a JW Player element
+     - Falls back to an h1 with class "article_page_title"
+   - Title is retrieved with default handling to support missing values gracefully.
+
+3) Description
+   - Tries Open Graph description first, then a standard meta description as fallback.
+
+4) Kaltura integration (first priority)
+   - _make_kaltura_result(kaltura_url): returns a url_transparent result wrapping a Kaltura URL, preserving the original page URL as source_url via smuggle_url. Uses KalturaIE.ie_key() for the proper extractor.
+   - kaltura_url = KalturaIE._extract_url(webpage): if found, return a Kaltura result.
+   - If not, tries to extract a Kaltura entry-id via regex entry-id=(["'])(id)\1. If found, constructs a Kaltura URL with that id and returns a Kaltura result.
+   - Rationale: Heise pages may embed Kaltura videos directly or via an entry-id; both are supported.
+
+5) YouTube embeds (secondary priority)
+   - yt_urls = YoutubeIE._extract_urls(webpage): collects any YouTube embed URLs on the page.
+   - If found, returns a playlist created from those YouTube URLs using YoutubeIE’s extractor key. The playlist is built with video_id and the (possibly) discovered title and description.
+
+6) JW Player feed (fallback path)
+   - After failing Kaltura and YouTube paths, re-fetch the title (to ensure accuracy for the JW path).
+   - container_id: extracted from the JW Player container div data-container attribute.
+   - sequenz_id: extracted from the JW Player container div data-sequenz attribute.
+   - doc: download the JW Player feed XML from http://www.heise.de/videout/feed with query parameters container and sequenz.
+   - Parse the feed for <source> entries under the JW feed namespace:
+     - label: the human-friendly format label (e.g., “720p”)
+     - height: parsed as an integer from the label if it ends with a number followed by “p”
+     - video_url: value of the file attribute
+     - ext: determined from the URL (using determine_ext)
+     - Build format entries with keys: url, format_note (the label), format_id (ext_label), height
+   - Sort formats with _sort_formats.
+
+7) Final metadata
+   - id: video_id
+   - title: the final extracted title
+   - description: description determined earlier
+   - thumbnail: first tries the feed image from the JW feed; if not available, falls back to OG thumbnail on the page
+   - timestamp: parsed from the page’s date meta via parse_iso8601
+   - formats: the list of formats built from the JW feed (or earlier paths)
+
+Implementation details and helpers
+- Uses:
+  - _download_webpage, _download_xml to fetch HTML/XML
+  - _html_search_meta, _og_search_description, _og_search_thumbnail for metadata
+  - _search_regex for extracting IDs and attributes
+  - int_or_none, determine_ext for format handling
+  - parse_iso8601 to convert date strings to epoch timestamps
+  - smuggle_url to preserve the original URL as source_url for Kaltura proxies
+  - xpath_text as a fallback to read the feed image from the XML
+- Kaltura integration relies on KalturaIE:
+  - _extract_url(webpage) to find direct Kaltura embeds
+  - KalturaIE.ie_key() to set the appropriate extractor
+- YouTube integration uses YoutubeIE:
+  - _extract_urls(webpage) to gather any YouTube embeds
+  - playlist_from_matches to assemble a playable playlist from those URLs
+- The JW Player feed path builds a robust set of video formats by parsing the feed’s source entries, deriving height from labels like “720p” or “1080p”, and attaching helpful format notes.
+
+Overall behavior
+- The extractor is designed to handle Heise video pages with:
+  - Kaltura embeds (direct or via entry-id)
+  - YouTube embeds
+  - JW Player feeds (the primary fallback for actual video formats)
+- It prioritizes Kaltura, then YouTube, and finally JW Player to obtain the best available video formats and metadata, while robustly extracting title, description, and timestamps from multiple possible sources.

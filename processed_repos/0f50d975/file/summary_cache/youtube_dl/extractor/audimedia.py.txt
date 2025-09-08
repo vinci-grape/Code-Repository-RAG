@@ -1,0 +1,77 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/audimedia.py
+
+What it is
+- A YouTube-DL extractor named AudiMediaIE for Audi Media Center’s audimediatv video pages.
+- It fetches video metadata and formats from Audi’s API and returns a structured info dict compatible with YouTube-DL’s extraction framework.
+
+Key components
+- Class: AudiMediaIE(InfoExtractor)
+- URL pattern: _VALID_URL matches https://www.audi-mediacenter.com/(en|de)/audimediatv/(video/)?<id>
+  - Supports both /audimediatv/video/ and /audimediatv/<id> styles.
+- Tests: _TESTS contains a primary test with expected metadata (id, title, description, timestamps, duration, view_count, etc.) and a second test for URL matching only.
+
+Main extraction flow (_real_extract)
+1) Determine display_id and fetch page
+- display_id = self._match_id(url)
+- webpage = self._download_webpage(url, display_id)
+
+2) Locate a raw payload that encodes the video identifier
+- Uses multiple regex patterns to find an element with class or id containing an emtved payload: 'amtv-embed' with an id like (alphanumeric and dashes).
+- raw_payload is captured group content that looks like something with hyphens.
+
+3) Parse payload to get stage_mode and video_id
+- _, stage_mode, video_id, _ = raw_payload.split('-')
+- If stage_mode is not in ('s', 'e'), proceed to fetch metadata via Audi API.
+  - This conditional indicates a TODO for handling live streams (stage_mode 's' or 'e' are not currently processed beyond the present logic).
+
+4) Fetch video metadata and thumbnail information (non-live case)
+- Call API: https://www.audimedia.tv/api/video/v1/videos/{video_id}
+  - Query parameters: embed[] = ['video_versions', 'thumbnail_image']
+  - Response -> video_data = response['results']
+
+5) Build formats
+- Initialize formats = [].
+- HLS formats:
+  - stream_url_hls = video_data.get('stream_url_hls')
+  - If present, extend formats with _extract_m3u8_formats(stream_url_hls, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False)
+- HDS formats:
+  - stream_url_hds = video_data.get('stream_url_hds')
+  - If present, extend formats with _extract_f4m_formats(stream_url_hds + '?hdcore=3.4.0', video_id, f4m_id='hds', fatal=False)
+- Progressive/video versions:
+  - Iterate over video_versions in video_data.get('video_versions', [])
+  - For each version, select a URL from 'download_url' or 'stream_url'
+  - Build a format dict f:
+    - url: video_version_url
+    - width: int_or_none(video_version.get('width'))
+    - height: int_or_none(video_version.get('height'))
+    - abr: int_or_none(video_version.get('audio_bitrate'))
+    - vbr: int_or_none(video_version.get('video_bitrate'))
+  - Try to infer a format_id from the URL’s bitrate: if a match for (\d+)k exists in video_version_url, set format_id to "http-<bitrate>"
+  - Append f to formats
+- Sort the formats with self._sort_formats(formats)
+
+6) Return metadata payload
+- id: video_id
+- title: video_data['title']
+- description: video_data.get('subtitle')
+- thumbnail: video_data.get('thumbnail_image', {}).get('file')
+- timestamp: parse_iso8601(video_data.get('publication_date'))
+- duration: int_or_none(video_data.get('duration'))
+- view_count: int_or_none(video_data.get('view_count'))
+- formats: the assembled list of formats
+
+Important implementation details
+- Robust HTML parsing for the payload: several regex alternatives are used to locate the embedded video ID in the page, accommodating variations in markup.
+- API-driven format discovery: uses Audi’s API to fetch video_versions and thumbnail information, enabling multiple formats (HLS, HDS, and direct HTTP versions).
+- Format metadata: Each video_version contributes width, height, audio bit rate (abr), and video bit rate (vbr) when available.
+- Format_id inference: if a bitrate is present in the version URL, a format_id like http-128k is attached to help distinguish formats.
+- Time and numeric helpers: uses parse_iso8601 for timestamps and int_or_none for numeric fields to handle missing values gracefully.
+- Live streams limitation: stage_mode 's' and 'e' (live or ended streams) are not currently implemented; the code path for these cases is marked TODO and would skip returning data.
+
+What to know when using or extending
+- This extractor targets Audi’s Audimediatv pages and relies on the API at audimedia.tv to obtain video metadata and formats.
+- If live stream handling is needed, you’d need to implement the logic for stage_mode in ('s', 'e') and adapt how metadata is retrieved and formatted.
+- The provided _TESTS help validate the extraction logic, ensuring fields like id, title, duration, and formats are populated as expected.
+
+Overall
+- The extractor provides a practical integration with Audi Media Center’s audimediatv pages by parsing the page for a video embed reference, resolving the Audi API for video data, assembling a flexible set of video formats, and returning a complete metadata payload suitable for download.

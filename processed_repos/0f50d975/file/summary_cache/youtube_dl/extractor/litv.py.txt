@@ -1,0 +1,43 @@
+- Purpose: LiTVIE is a YouTube-DL extractor for the LiTV streaming site. It handles both single VOD content and playlists (season episodes), including promo pages. It supports Taiwan georestriction messaging and respects the --no-playlist option.
+
+- Core class and URL patterns:
+  - Class: LiTVIE(InfoExtractor)
+  - _VALID_URL: matches LiTV VOD/promo pages with a content id in the query string.
+  - _URL_TEMPLATE: constructs per-episode URLs as https://www.litv.tv/vod/%s/content.do?id=%s
+  - _TESTS: includes examples for a playlist, a single video, and a promo page with expected IDs, titles, and metadata; georestricted cases are marked.
+
+- Main workflow (_real_extract):
+  - Unsmuggle data from the URL to support passing flags across recursions (noplaylist, force_noplaylist).
+  - Derive video_id from the URL.
+  - Determine whether to fetch a playlist or a single video, respecting --no-playlist and potential force_noplaylist flags.
+  - Download the page and extract program info from embedded JavaScript variable programInfo (JSON parsed from the page).
+  - If there is a seasonList, handle playlists:
+    - If not noplaylist, call _extract_playlist with season_list[0], program_info, and prompt flag.
+    - If noplaylist is active and prompting is enabled, print a message about downloading only the video.
+  - If embedded data lacks assetId, fetch program info via AJAX getProgramInfo (contentId parameter).
+  - Retrieve video data (HLS/M3U8) either from embedded data via uiHlsUrl/testBackendData(...) or by posting to getMainUrl with a payload containing assetId, watchDevices, and contentType.
+  - If video_data lacks fullpath, handle:
+    - vod.error.outsideregionerror → geo-restricted message (Taiwan only)
+    - other error messages → ExtractorError with the server’s message
+  - Build formats via _extract_m3u8_formats on the fullpath, using mp4 extension and m3u8_native protocol. Add a header Youtubedl-no-compression to each format (LiTV HLS segments don’t like compression).
+  - Compose metadata:
+    - title = program_info['title'] + program_info.get('secondaryMark', '')
+    - description = program_info.get('description')
+    - thumbnail = program_info.get('imageFile')
+    - categories = [item['name'] for item in program_info.get('category', [])]
+    - episode_number = int_or_none(program_info.get('episode'))
+  - Return a dict with id, formats, title, description, thumbnail, categories, and episode_number.
+
+- Key implementation details:
+  - Playlist extraction (_extract_playlist): builds per-episode URLs using program_info['contentType'] and each episode['contentId'], wraps them with force_noplaylist to avoid recursion, and returns a playlist_result with the season’s contentId as id and its title.
+  - Data sources:
+    - Embedded programInfo in page (via var programInfo)
+    - AJAX: /vod/ajax/getProgramInfo for missing embedded data
+    - Fallback: /vod/getMainUrl with a JSON payload if needed
+  - Error handling:
+    - geo-restriction detection via errorMessage == 'vod.error.outsideregionerror'
+    - Generic/other server messages raise ExtractorError with the server-provided text
+  - Compatibility: uses unsmuggle_url/smuggle_url to transport flags across re-entrancy when handling playlists
+  - Formats: uses m3u8 formats (HLS) with explicit handling for LiTV’s non-compressed streams
+
+- Summary: This extractor robustly handles LiTV’s VOD and promo pages, supports both single-video and playlist (season) extraction, manages geolocation restrictions, and fetches video URLs via embedded data or AJAX fallbacks. It constructs a clean set of video formats and metadata suitable for downstream consumption.

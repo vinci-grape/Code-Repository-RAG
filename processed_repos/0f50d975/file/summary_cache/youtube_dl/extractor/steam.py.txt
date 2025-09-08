@@ -1,0 +1,70 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/steam.py
+
+- Purpose
+  - Implement an InfoExtractor for Steam content, handling both Steam video pages and Steam Workshop/shared video items, to produce downloadable entries or a playlist of videos.
+
+- Main class
+  - SteamIE(InfoExtractor): Core extractor with URL validation, page parsing, and result construction.
+
+- URL patterns and templates
+  - _VALID_URL: Complex regex to match:
+    - Steam store video or app/game pages with optional age-check and either:
+      - urltype = video or app, with gameID, optional videoID, or
+      - Steam Workshop file details page with fileID.
+  - _VIDEO_PAGE_TEMPLATE: http://store.steampowered.com/video/%s/
+  - _AGECHECK_TEMPLATE: age-check URL to bypass birth-date gate for videos.
+  - _TESTS: Includes two test cases:
+    - A video page (http://store.steampowered.com/video/105600/) yielding a playlist of two videos (YouTube IDs).
+    - A Workshop/sharedfiles page with a single video entry (mp4) and metadata like upload_date, uploader, etc.
+
+- Key methods and functionality
+  - _real_extract(self, url):
+    - Match URL against _VALID_URL to extract IDs (fileID or gameID).
+    - If fileID exists:
+      - Treat as a video page; videourl is the original URL; playlist_id is the fileID.
+    - Else (app/game page):
+      - playlist_id is gameID; videourl is the Steam video page URL constructed via _VIDEO_PAGE_TEMPLATE.
+    - Set mature_content cookie for steampowered.com to bypass general age gating.
+    - Download the target webpage.
+    - If birth-date gate detected, switch to age-check URL using _AGECHECK_TEMPLATE and call report_age_confirmation(), then re-download the page.
+    - Extract RGMovieFlashvars JSON from the page:
+      - flash_vars = self._parse_json(self._search_regex(r'(?s)rgMovieFlashvars\s*=\s*({.+?});', webpage, 'flash vars'), playlist_id, js_to_json)
+    - Initialize playlist_title and entries list.
+    - If fileID (video page):
+      - Set playlist_title from element with class 'workshopItemTitle'.
+      - Iterate through flash_vars values; for each with a YouTube ID (YOUTUBE_VIDEO_ID), append an entry that defers to YouTube:
+        - {'_type': 'url', 'url': youtube_id, 'ie_key': 'Youtube'}
+    - If no fileID (app/game page):
+      - Set playlist_title from element with class 'apphub_AppName'.
+      - Iterate over flash_vars items; for each movie entry:
+        - Extract video_id from key (movie_(\d+)).
+        - Title from MOVIE_NAME, skip if missing.
+        - Build an entry: {'id': video_id, 'title': title with '+' replaced by ' '}.
+        - Build formats:
+          - Start with FLV URL from FILENAME if present.
+          - Try to locate a highlight element (div with id="highlight_movie_<video_id>") in the page.
+          - If found, extract attributes via extract_attributes and set entry['thumbnail'] from data-poster.
+          - Collect additional formats from data attributes like data-webm-source and data-mp4-source for both standard and hd variations (data-webm-source, data-mp4-source for '' and '-hd').
+        - If no formats found for a movie, skip it.
+        - Attach formats to the entry and append to entries.
+    - If no entries found, raise ExtractorError('Could not find any videos').
+    - Return playlist_result(entries, playlist_id, playlist_title) to build a playlist with proper index and title.
+
+- Important implementation details
+  - Uses cookies via _set_cookie to handle mature/age gating.
+  - Handles two modes: page with direct video(s) (fileID) and page with multiple embedded movies (game/app page).
+  - For fileID mode, delegates to YouTube for actual video retrieval by creating entries with _type 'url' and ie_key 'Youtube'.
+  - For app/game mode, supports multiple formats per video (FLV, WebM/MP4 variations) and extracts thumbnails from the highlight element when available.
+  - Uses helper utilities:
+    - extract_attributes to parse element attributes like data-poster.
+    - get_element_by_class to get title elements.
+    - js_to_json to convert JS-like JSON to Python structures.
+    - _search_regex and _parse_json to extract and parse flash variables.
+  - Error handling: raises ExtractorError if no videos are found.
+
+- Overall flow
+  - Determine target (video page vs app/game page) from URL.
+  - Bypass age gate if needed.
+  - Parse embedded flashvars data to obtain a list of movie entries.
+  - Build either YouTube-based entries (for video pages) or internal format entries (for app/game pages) with available formats and metadata.
+  - Return a playlist_result containing all discovered videos with titles and IDs.

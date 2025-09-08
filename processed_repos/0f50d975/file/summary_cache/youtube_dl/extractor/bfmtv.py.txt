@@ -1,0 +1,66 @@
+Here's a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/bfmtv.py
+
+Purpose
+- Implement YouTube-DL extractors for BFMTV content, including standard videos, live streams, and article pages that may contain multiple videos.
+- All actual video playback is handled via Brightcove players; this module builds the appropriate Brightcove URLs from BFMTV page data.
+
+Key classes and their roles
+- BFMTVBaseIE (InfoExtractor)
+  - Provides common URL patterns and a helper to build Brightcove results.
+  - Core data:
+    - _VALID_URL_BASE: base BFMTV URL pattern.
+    - _VALID_URL_TMPL: template used by several concrete IEs to validate/construct URLs; expects a suffix like _V-<12-digit-id>.html or _A-<12-digit-id>.html.
+    - _VIDEO_BLOCK_REGEX: regex to locate <div class="video_block" ...> blocks in HTML.
+    - BRIGHTCOVE_URL_TEMPLATE: Brightcove player URL template: http://players.brightcove.net/{account}/{player}_default/index.html?videoId={video_id}
+  - _brightcove_url_result(video_id, video_block)
+    - Reads accountid and playerid attributes from the video_block HTML (with fallbacks to 876450612001 and I2qBTln4u).
+    - Returns a YouTube-DL URL result pointing to the BrightcoveNew extractor with the computed URL and given video_id.
+
+- BFMTVIE (Video extractor for BFMTV videos)
+  - IE_NAME: 'bfmtv'
+  - _VALID_URL: BFMTVBaseIE._VALID_URL_TMPL % 'V' (standard BFMTV video pages)
+  - _TESTS: example BFMTV video page and expected metadata.
+  - _real_extract(url)
+    - Extracts the BFMTV id from the URL.
+    - Downloads the page HTML.
+    - Locates the video_block element using _VIDEO_BLOCK_REGEX and parses its attributes with extract_attributes.
+    - Retrieves videoid from the video_block and returns the Brightcove result via _brightcove_url_result.
+
+- BFMTVLiveIE (Live BFMTV streams)
+  - IE_NAME: 'bfmtv:live'
+  - _VALID_URL: BFMTVBaseIE._VALID_URL_BASE + '(?P<id>(?:[^/]+/)?en-direct)'
+  - _TESTS: includes an example live page and a second path flagged as only_matching.
+  - Inherits _real_extract from BFMTVIE (i.e., live pages are processed the same way as standard BFMTV pages, using video_block extraction). The URL pattern simply targets en-direct pages.
+
+- BFMTVArticleIE (BFMTV articles containing multiple videos)
+  - IE_NAME: 'bfmtv:article'
+  - _VALID_URL: BFMTVBaseIE._VALID_URL_TMPL % 'A' (article pages)
+  - _TESTS: includes an article URL expected to yield a playlist with multiple items; other URLs marked as only_matching.
+  - _real_extract(url)
+    - Extracts the BFMTV id from the URL.
+    - Downloads the article page.
+    - Iterates over all video_block elements found by _VIDEO_BLOCK_REGEX.
+    - For each, extracts attributes and gets videoid; if present, appends a Brightcove URL result via _brightcove_url_result to a list of entries.
+    - Returns a playlist_result with:
+      - entries: list of Brightcove video entries
+      - id: BFMTV article id
+      - title: derived from og:title on the page (if available)
+      - description: taken from og:description or description meta tag
+
+Important implementation details
+- Data extraction:
+  - Uses extract_attributes to convert HTML fragments of video_block elements into Python dicts for easy access (videoid, accountid, playerid, etc.).
+  - _search_regex with _VIDEO_BLOCK_REGEX is used to locate a video block within the page for BFMTVIE.
+- Brightcove integration:
+  - All actual video playback URLs are Brightcove pages constructed via BRIGHTCOVE_URL_TEMPLATE.
+  - accountid and playerid can be overridden by attributes on the video_block; defaults are provided.
+  - The final result type uses 'BrightcoveNew' as the extractor type.
+- URL matching:
+  - BFMTVBaseIE defines a generic structure to BFMTV video/article URLs and a specific video block pattern, allowing derived IEs to reuse logic.
+  - Concrete IEs only differ in URL validation and how they assemble the playlist (single video vs. multiple videos in an article).
+- Output structure:
+  - BFMTVIE returns a single Brightcove video result.
+  - BFMTVLiveIE relies on inherited behavior (live pages are treated like standard BFMTV videos).
+  - BFMTVArticleIE returns a playlist consisting of multiple Brightcove video entries with metadata (title/description) derived from the article page.
+
+In short, this module parses BFMTV pages to locate BFMTV video blocks, extracts Brightcove video IDs and optional account/player IDs, and constructs Brightcove URLs to fetch the actual video content. It supports individual BFMTV videos, live pages, and articles containing multiple videos as playlists.

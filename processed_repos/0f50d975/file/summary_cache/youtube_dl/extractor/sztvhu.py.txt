@@ -1,0 +1,30 @@
+- Purpose: Implement a YouTube-DL extractor for Sztv.hu (and tvszombathely.hu) video pages. It fetches the direct video URL and metadata (title, description, thumbnail).
+
+- Key class:
+  - SztvHuIE(InfoExtractor): Inherits from YouTube-DL's InfoExtractor.
+
+- URL matching:
+  - _VALID_URL: r'https?://(?:(?:www\.)?sztv\.hu|www\.tvszombathely\.hu)/(?:[^/]+)/.+-(?P<id>[0-9]+)'
+  - Extracts an article/video id from the URL (named group 'id') to be used as video_id.
+
+- Test case:
+  - _TEST provides a sample URL, expected MD5 for the MP4, and an info_dict with id, ext, title, and description for unit testing.
+
+- Main extraction flow (_real_extract):
+  - video_id = self._match_id(url): derive the id from the URL.
+  - webpage = self._download_webpage(url, video_id): fetch the page HTML.
+  - video_file = self._search_regex(r'file: "...:(.*?)",', webpage, 'video file'): locate the video file name from a JavaScript-like snippet in the page.
+  - title = self._html_search_regex(r'<meta name="title" content="([^"]*?) - [^-]*? - [^-]*?"', webpage, 'video title'): parse the page’s meta title tag and extract the actual video title using a pattern that strips trailing segments.
+  - description = self._html_search_regex(r'<meta name="description" content="([^"]*)"/>', webpage, 'video description', fatal=False): optionally extract the description; not fatal if missing.
+  - thumbnail = self._og_search_thumbnail(webpage): obtain Open Graph thumbnail from the page.
+  - video_url = 'http://media.sztv.hu/vod/' + video_file: construct the direct video URL from a base host and the extracted file name.
+
+- Returned information:
+  - A dict with id, url, title, description, thumbnail. The file extension (ext) is inferred from the final URL (e.g., mp4) rather than being hard-coded in code.
+
+- Implementation details and notes:
+  - The video file is discovered by scanning the page for a pattern like file: "...:(filename)", which is then used to build the final video URL at http://media.sztv.hu/vod/{filename}.
+  - Title extraction relies on a specific meta tag format: the regex targets a content value that ends with " - ... - ...", returning the leading portion as the video title.
+  - Description is optional (fatal=False) to tolerate pages without meta description.
+  - Thumbnail is sourced via Open Graph parsing.
+  - The code does not explicitly set an ext field; it relies on the constructed URL’s extension (e.g., mp4) to determine the file type.

@@ -1,0 +1,62 @@
+- Purpose: Implement a YouTube-dl extractor for Vube videos, enabling download of Vube-hosted content by constructing available video formats and extracting metadata.
+
+- Class and configuration:
+  - Class: VubeIE(InfoExtractor)
+  - Name/description: IE_NAME = 'vube', IE_DESC = 'Vube.com'
+  - URL pattern: _VALID_URL matches URLs like https://vube.com/.../VIDEOID where VIDEOID is a 10-character alphanumeric string. Uses a grouped id for extraction.
+
+- Tests: _TESTS contains four sample URLs with expected metadata (id, ext, title, description md5, thumbnail regex, uploader, timestamps, duration, like/dislike/comment counts, categories). Some entries are skipped due to external constraints (e.g., DMCA removal or CI access).
+
+- Core extraction flow (_real_extract):
+  - Extract video_id from the URL using the _VALID_URL regex.
+  - Download video metadata JSON from http://vube.com/t-api/v1/video/<video_id> via _download_json.
+  - Retrieve public_id from the video metadata for URL construction.
+
+  - Build formats:
+    - Iterate over video['media']['video'] and video['media']['audio'] entries.
+    - Only include items with transcoding_status == 'processed'.
+    - For each media item, construct the video URL:
+      http://video.thestaticvube.com/video/<media_resolution_id>/<public_id>.mp4
+    - Include:
+      - abr (audio bitrate) from media['audio_bitrate']
+      - format_id from media['media_resolution_id'] (converted to string with compat_str)
+    - If video_bitrate is present (vbr), add:
+      - vbr and height (from media['height'])
+    - Collect all formats and sort them with _sort_formats.
+
+  - DMCA removal handling:
+    - If no formats were produced and video.get('vst') == 'dmca', raise ExtractorError with a user-friendly DMCA removal message (expected=True).
+
+  - Metadata extraction:
+    - title: video['title']
+    - description: video.get('description')
+    - thumbnail: convert thumbnail_src to an absolute URL via _proto_relative_url (scheme http:)
+    - uploader: video.get('user_alias') or video.get('channel')
+    - timestamp: int_or_none(video.get('upload_time'))
+    - duration: video['duration']
+    - view_count: video.get('raw_view_count')
+    - like_count: video.get('total_likes')
+    - dislike_count: video.get('total_hates')
+
+  - Comment count:
+    - If video['comments'] is present: comment_count = len(comments)
+    - If not present: attempt to fetch comment data from http://vube.com/api/video/<video_id>/comment with fatal=False; if data returned, set comment_count = int(data.get('total'))
+
+  - Categories: extract text from video['tags'] as a list of strings.
+
+  - Return a dict with:
+    - id: video_id
+    - formats: list of constructed formats
+    - title, description, thumbnail, uploader, timestamp, duration
+    - view_count, like_count, dislike_count, comment_count
+    - categories
+
+- Key implementation details:
+  - Uses two endpoints: t-api/v1/video for core video metadata and api/video/<id>/comment for comment count when not included in the main payload.
+  - Video formats are built from both video and audio media entries and are constrained to transcoded (processed) items.
+  - Video URLs are external hosts (thestaticvube.com) constructed from media_resolution_id and public_id.
+  - Handles DMCA-removed videos gracefully by raising an ExtractorError with a clear message and expected=True.
+  - Utilizes helper utilities int_or_none, compat_str, and _proto_relative_url for robust type handling and URL normalization.
+  - Metadata handling accounts for potential missing fields and uses sensible fallbacks (e.g., uploader from user_alias or channel).
+
+Overall, the extractor retrieves video metadata and available formats from Vube’s API, builds mp4 format entries, handles edge cases like DMCA removals, and compiles a comprehensive metadata dictionary suitable for download by youtube-dl.

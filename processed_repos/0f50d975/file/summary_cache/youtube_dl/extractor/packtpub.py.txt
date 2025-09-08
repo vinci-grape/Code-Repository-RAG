@@ -1,0 +1,89 @@
+Concise summary of packtpub extractor (youtube-dl/youtube_dl/extractor/packtpub.py)
+
+Overview
+- Provides two extractors for PacktPub:
+  - PacktPubIE: extracts a single video URL and basic info.
+  - PacktPubCourseIE: builds a playlist of all videos in a course by aggregating chapters/sections and delegating video lookups to PacktPubIE via url_transparent entries.
+- Uses PacktPub REST endpoints and a login/token mechanism to access protected content.
+
+Key classes and main functionality
+- PacktPubBaseIE
+  - Base class for PacktPub extractors.
+  - Defines _STATIC_PRODUCTS_BASE = 'https://static.packt-cdn.com/products/' for static product APIs.
+
+- PacktPubIE (single video extractor)
+  - URL pattern: matches PacktPub video pages with course_id, chapter_id, video_id, and optional display_id.
+  - _real_initialize:
+    - Reads login credentials (username/password) via _get_login_info.
+    - If provided, requests an access token from https://services.packtpub.com/auth-v1/users/tokens using a POST with JSON body containing username and password.
+    - Stores the token in self._TOKEN for subsequent requests.
+    - Robust error handling: if the token request returns 400/401/404, parses the server message and raises an ExtractorError with the message (marked as expected).
+  - _real_extract(url):
+    - Extracts course_id, chapter_id, video_id, display_id from the URL.
+    - If a token is available, sets Authorization: Bearer <token> in headers.
+    - Requests JSON from https://services.packtpub.com/products-v1/products/{course_id}/{chapter_id}/{video_id}, expecting a data field with the direct video URL.
+    - If the request returns 400, raises a login-required error (This video is locked).
+    - Returns a dict with:
+      - id: video_id
+      - url: direct video URL
+      - title: display_id if present, else video_id
+      - (Note: thumbnail, timestamp, etc. are in comments / not currently used)
+  - Important details:
+    - Uses _TOKEN for Bearer authentication when available.
+    - Handles specific HTTP errors to provide clearer messages for locked content or login requirements.
+    - Commented sections show potential metadata usage (title, timestamp, thumbnail) that are not currently active.
+
+- PacktPubCourseIE (course/playlist extractor)
+  - URL pattern: matches course pages for packs like /mapt/video/.../<id>.
+  - suitable(url):
+    - Returns False if PacktPubIE.suitable(url) is True (i.e., if the URL is a video page, delegate to PacktPubIE).
+    - Otherwise, treats the URL as a course page.
+  - _real_extract(url):
+    - Parses course_id from the URL.
+    - Fetches the course table of contents: _STATIC_PRODUCTS_BASE + '{course_id}/toc'
+    - Fetches course metadata/summary: _STATIC_PRODUCTS_BASE + '{course_id}/summary' (fatal=False, so it’s optional)
+    - Iterates over chapters and their sections:
+      - Skips chapters without an id or sections that aren’t a list.
+      - For each section with contentType == 'video' and a valid id:
+        - Creates an entry with:
+          - _type: 'url_transparent'
+          - url: a relative path combining the base course URL, chapter_id, and section_id
+          - title: section title
+          - description: cleaned section summary
+          - thumbnail: from course metadata coverImage
+          - timestamp: from course metadata publicationDate
+          - ie_key: PacktPubIE.ie_key() to ensure downstream extraction uses PacktPubIE
+          - plus per-entry chapter info (chapter, chapter_number, chapter_id)
+    - Returns a playlist_result with:
+      - entries
+      - course_id as the playlist id
+      - course title from metadata
+      - about/description from cleaned metadata
+
+Important implementation details and behavior
+- Authentication and token usage
+  - Token-based authentication is optional. If credentials are supplied (via netrc or other means), PacktPubIE retrieves a token and uses it in the Authorization header for video requests.
+  - If the token request fails due to client errors (400/401/404), the extractor surfaces the server-provided message to the user.
+  - If a video is protected and returns 400, the extractor prompts for login with a login-required message.
+
+- REST endpoints leveraged
+  - Token retrieval: POST to https://services.packtpub.com/auth-v1/users/tokens
+  - Video URL: GET to https://services.packtpub.com/products-v1/products/{course_id}/{chapter_id}/{video_id}
+  - Course content: GET to https://static.packt-cdn.com/products/{course_id}/toc
+  - Course summary: GET to https://static.packt-cdn.com/products/{course_id}/summary
+
+- Data handling and helpers
+  - Uses helper utilities: clean_html, strip_or_none, str_or_none, unified_timestamp.
+  - Builds url_transparent entries to defer actual video extraction to PacktPubIE, enabling a clean, reusable pipeline.
+  - For course extraction, aggregates per-chapter metadata into each video entry, providing richer playlist items.
+
+- Tests included
+  - PacktPubIE tests a public-looking video URL with expected id, title, and timestamp, plus a thumbnail pattern.
+  - Some URLs are marked only_matching to verify proper URL patterns without full extraction.
+  - PacktPubCourseIE tests verify course-level extraction, including title and description, and a playlist_count.
+
+- Netrc and credentials
+  - _NETRC_MACHINE = 'packtpub' enables reading credentials from a .netrc file if present.
+
+In summary
+- The module implements two extractors for PacktPub: an individual video extractor that can authenticate and fetch direct video URLs, and a course extractor that compiles a playlist of all videos in a course by querying public/static APIs and producing url_transparent entries for PacktPubIE to resolve each video. It includes careful error handling for authentication and content access, and uses a token-based approach to access protected videos when credentials are provided.

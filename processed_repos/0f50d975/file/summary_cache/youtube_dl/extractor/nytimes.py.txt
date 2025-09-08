@@ -1,0 +1,92 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/nytimes.py
+
+Overview
+- This file implements NYTimes-related extractors for youtube-dl:
+  - NYTimesBaseIE: shared logic to fetch and parse NYTimes video data, including authorization, formats, thumbnails, and metadata.
+  - NYTimesIE: handles NYTimes video pages (standard video embeds).
+  - NYTimesArticleIE: handles NYTimes article pages that may contain either a video or a podcast.
+  - NYTimesCookingIE: handles NYTimes Cooking site video content.
+
+Key classes and main functionality
+- NYTimesBaseIE
+  - _SECRET: A hard-coded secret key used to generate an authorization signature.
+  - _extract_video_from_id(video_id):
+    - Builds a request path /svc/video/api/v3/video/{video_id}.
+    - Generates an HMAC-SHA512 signature using the secret over "path:vhs" and hex-digests it.
+    - Sends a request to http://www.nytimes.com{path} with headers:
+      - Authorization: NYTV base64(hmac_signature)
+      - X-NYTV: vhs
+    - If the v3 endpoint fails (fatal=False), falls back to http://www.nytimes.com/svc/video/api/v2/video/{video_id}.
+    - Parses video_data to extract:
+      - title (video_data['headline']), description (video_data.get('summary')), uploader (video_data.get('byline')), and publication_date.
+      - formats: iterates over video_data['renditions']:
+        - Skips thumbnails and duplicates.
+        - Determines extension via mimetype or URL.
+        - If m3u8: uses _extract_m3u8_formats to build formats (mp4 container, m3u8_native, with m3u8_id).
+        - If mpd: currently skipped (commented out in code).
+        - Otherwise: builds a format dict with url, format_id, vcodec, width, height, filesize, tbr, ext.
+      - Sorts formats by height, width, filesize, tbr, fps, and format_id.
+      - thumbnails: builds list from video_data['images'], prefixing image URLs with http://www.nytimes.com/.
+      - timestamp: derived from publication_date via parse_iso8601(publication_date[:-8]) to strip timezone.
+    - Returns a dict with id, title, description, timestamp, uploader, duration (float seconds), formats, and thumbnails.
+  - Important notes:
+    - Handles both v3 and v2 NYTimes video APIs, with a robust fallback.
+    - Supports HLS (m3u8) formats and direct file formats; mpd support is present but not active (commented).
+
+- NYTimesIE (video extractor)
+  - _VALID_URL: Accepts NYTimes video URLs and graphics embed URLs (with videoId parameter).
+  - _TESTS: Includes sample NYTimes video page and a non-matching URL.
+  - _real_extract(url): extracts video_id via _match_id and delegates to _extract_video_from_id(video_id) from NYTimesBaseIE.
+
+- NYTimesArticleIE (article page extractor)
+  - _VALID_URL: Broad pattern for NYTimes article URLs, excluding direct video paths.
+  - _TESTS: Covers videos embedded in NYTimes articles and podcast pages.
+  - _extract_podcast_from_json(self, json, page_id, webpage):
+    - Parses a JSON blob (embedded in the page) into a Python dict.
+    - Extracts track and episode information:
+      - episode_title, video_url (track['source']).
+      - description: track['description'] or og/twitter meta descriptions.
+      - podcast_title (podcast title if present) and constructs a combined title.
+      - episode, episode_number (extracted via regex on episode text).
+      - duration (track['duration']).
+    - Returns a dict with id, url, title, description, creator, series, episode, episode_number, duration.
+  - _real_extract(url):
+    - Downloads the page and tries to locate a video_id in data-videoid attribute; if found, uses _extract_video_from_id.
+    - Otherwise, extracts a podcast JSON object embedded in the page via patterns that match NYTD.FlexTypes.push({ ... }) scripts.
+    - Delegates to _extract_podcast_from_json for the final InfoDict.
+
+- NYTimesCookingIE (Cooking site)
+  - _VALID_URL: Matches NYTimes Cooking recipe pages (recipes and guides) using cooking.nytimes.com.
+  - _TESTS: Includes two sample cooking URLs with expected metadata.
+  - _real_extract(url):
+    - Extracts video_id from data-video-id in the page.
+    - Delegates to _extract_video_from_id(video_id) (shared logic from NYTimesBaseIE).
+
+Key implementation details
+- Authorization/signature
+  - The NYTimes video API requires a signed Authorization header derived from HMAC-SHA512 over the path and a fixed suffix. The code mirrors reverse-engineered logic from NYTimes’ signer.
+  - First tries v3 endpoint; on failure, falls back to v2 endpoint to maximize compatibility.
+
+- Formats extraction
+  - For each rendition, the code builds a format entry:
+    - Direct video URLs include metadata like vcodec, width, height, filesize, tbr (bitrate), and extension.
+    - m3u8 (HLS) URLs are expanded with _extract_m3u8_formats, using 'mp4' as the container and m3u8_native handling.
+    - mpd (DASH) is present but currently not added to formats (commented-out code).
+  - Formats are sorted by multiple keys to present the best quality first.
+
+- Thumbnails and metadata
+  - Thumbnails are gathered from video_data['images'] and prefixed with the NYTimes domain.
+  - Publication date is parsed to a UNIX timestamp with parse_iso8601; the code trims timezone information as publication_date[:-8].
+
+- Podcast extraction from article pages
+  - The code handles NYT podcast data embedded in article pages via a JSON blob in a script tag (NYTD.FlexTypes.push(...)).
+  - It uses _parse_json with js_to_json to safely convert the embedded JavaScript-like JSON into Python data.
+  - It assembles a comprehensive InfoDict including id, title, description, series, episode, episode_number, duration, and creator.
+
+- Robust URL matching and tests
+  - Each extractor defines _VALID_URL patterns for its targets and includes _TESTS with sample URLs and expected metadata to validate behavior.
+
+Summary
+- This file provides NYTimes video/article/podcast extraction logic for youtube-dl, centered around a shared NYTimesBaseIE for authenticated video data retrieval and format parsing.
+- It supports NYTimes video pages, NYTimes article pages with podcasts or videos, and NYTimes Cooking video pages.
+- The implementation includes a sophisticated authorization mechanism, versatile format extraction (including HLS), metadata handling (timestamps, descriptions, uploader/creator), and podcast data parsing from embedded JSON, with tests to verify functionality.

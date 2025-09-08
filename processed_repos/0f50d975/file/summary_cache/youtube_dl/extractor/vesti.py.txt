@@ -1,0 +1,35 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/vesti.py
+
+Purpose
+- Implement a YouTube-DL extractor for Vestis.ru (Вести.Rу) videos.
+- It does not decode the video itself; instead, it locates the Vestis page, tries to identify an underlying RU TV (RUTV) video, and delegates extraction to the RUTV extractor.
+
+Key classes / functions
+- VestiIE (InfoExtractor)
+  - Inherits from InfoExtractor
+  - IE_DESC: "Вести.Rу"
+  - _VALID_URL: matches Vestis.ru pages and captures the portion after vesti.ru/ as id
+  - _TESTS: A set of example URLs and expected results (titles, durations, IDs, etc.) with skip_download for m3u8 or blocked translations. Includes various Vestis URL patterns (videos, docs, only_video, hitech subdomain, live pages) and a blocked/translation-finished case.
+  - _real_extract(self, url): Core extraction logic
+    - Extracts initial video_id from URL using _VALID_URL
+    - Downloads the page content
+    - Attempts to locate an og:video meta tag with content pointing to a specific SWF host URL containing an id (vid=digits)
+    - If found, uses that id to fetch an alternate video page from http://www.vesti.ru/only_video.html?vid=<id>
+    - Calls RUTVIE._extract_url(page) to see if the page contains a RU TV video
+    - If a RU TV URL is found, returns it via self.url_result(rutv_url, 'RUTV') to delegate to the RUTV extractor
+    - If no video is found, raises ExtractorError('No video found', expected=True)
+
+Important implementation details
+- Delegation to RUTV extractor:
+  - The extractor does not download or parse Vestis video data directly. It uses RUTVIE._extract_url(page) to detect a RU TV embed and then returns a URL result with type 'RUTV', effectively handing off to the RUTV extractor for actual video retrieval.
+- Robust handling of Vestis pages:
+  - Starts with the original Vestis page URL, but if the page embeds the video via a SWF host (og:video tag), it switches to an auxiliary page at http://www.vesti.ru/only_video.html?vid=<id> to get the real content.
+- Detection of RU TV embeds:
+  - Uses a specific regex to find an og:video meta tag containing content with flvplayer_videoHost.swf?vid=<digits>. This is the cue to switch to the alternate page.
+- Error handling:
+  - If no RU TV URL can be extracted from the Vestis page (or alternate page), raises ExtractorError('No video found', expected=True) to indicate the absence of a playable video rather than an actual crash.
+- Test coverage notes:
+  - Tests cover various Vestis URL formats, expected video IDs, titles, and durations, and scenarios with geo-blocks or translation status (which may be skipped by the framework).
+
+Overall functionality
+- The VestiIE extractor acts as a gateway: it translates Vestis.ru video pages into underlying RU TV video content by locating a RU TV embed and converting the extraction into a call to the RUTV extractor, ensuring consistent video retrieval across Vestis.ru’s different page structures.

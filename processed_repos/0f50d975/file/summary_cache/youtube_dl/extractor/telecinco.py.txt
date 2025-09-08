@@ -1,0 +1,79 @@
+Overview
+- A Telecinco extractor for youtube-dl that handles Telecinco, Cuatro, and Mediaset.es article pages. It can extract either a single video or a playlist of videos embedded in an article.
+
+Key components
+- Class TelecincoIE(InfoExtractor)
+  - IE_DESC: "telecinco.es, cuatro.com and mediaset.es"
+  - _VALID_URL: Regex matching URLs from telecinco.es, cuatro.com, or mediaset.es that end with an HTML page and capture an id.
+  - _TESTS: Several test cases covering single videos, playlists, and some non-video pages (or only_matching cases).
+
+Core functionality
+- _real_extract(self, url)
+  - Downloads the article page and extracts the embedded React state using the pattern window.$REACTBASE_STATE.article or article_multisite.
+  - article = parsed JSON's 'article' object.
+  - title = article.get('title')
+  - description = clean_html(article.get('leadParagraph')) or ''
+
+  - If editorialType != 'VID':
+    - Treat as a multi-video article (playlist).
+    - Build description from opening and body content paragraphs.
+    - For each element in body that represents a video, call _parse_content(content, url) to obtain video info and collect into entries.
+    - Return a playlist_result(entries, id, title, description).
+
+  - If editorialType == 'VID':
+    - Treat as a single-video page.
+    - content = article['opening']['content']
+    - info = _parse_content(content, url)
+    - info.update({'description': description})
+    - Return info
+
+_parse_content(self, content, url)
+- Given a content dict for a video, performs the end-to-end fetch and format extraction:
+  - video_id = content['dataMediaId']
+  - config = _download_json(content['dataConfig'], video_id, 'Downloading config JSON')
+  - title = config['info']['title']
+  - services = config['services']
+  - caronte = _download_json(services['caronte'], video_id)
+  - stream = caronte['dls'][0]['stream']  (base HLS URL)
+
+  - Prepare geo headers for token requests:
+    - headers = self.geo_verification_headers()
+    - Add Content-Type and Origin (Origin derived from the input URL domain)
+
+  - Retrieve CDN token:
+    - cdn = _download_json(
+        caronte['cerbero'], video_id,
+        data=json.dumps({'bbx': caronte['bbx'], 'gbx': _download_json(services['gbx'], video_id)['gbx']}).encode(),
+        headers=headers
+      )['tokens']['1']['cdn']
+
+  - Build formats:
+    - formats = self._extract_m3u8_formats(stream + '?' + cdn, video_id, 'mp4', 'm3u8_native', m3u8_id='hls')
+    - self._sort_formats(formats)
+
+  - Return a dict:
+    - id: video_id
+    - title: title
+    - formats: formats
+    - thumbnail: content.get('dataPoster') or config.get('poster', {}).get('imageUrl')
+    - duration: int_or_none(content.get('dataDuration'))
+
+Implementation details and notes
+- Data flow and endpoints:
+  - Video configuration is stored in content['dataConfig'] and requires fetching JSON.
+  - Caronte service provides the video streams and is fetched from services['caronte'].
+  - A CDN token is obtained from caronte['cerbero'] using data including bbx and gbx from services['gbx'].
+  - The final HLS URL is stream + '?' + cdn.
+- Headers and anti-scraping:
+  - geo_verification_headers() is used to comply with geolocation restrictions and then augmented with Origin and Content-Type for the cerbero request.
+- Robust content parsing:
+  - For article pages that are not direct videos (editorialType != 'VID'), the code traverses opening and body content to collect all embedded video entries.
+  - For video pages, the content is taken directly from article['opening']['content'].
+  - Description is assembled from leadParagraph and any paragraph-type content in the article body.
+- Thumbnail logic:
+  - Uses dataPoster if available; otherwise falls back to config.poster.imageUrl.
+- Duration extraction:
+  - Uses int_or_none on dataDuration for the video duration.
+
+Purpose and scope
+- This extractor enables retrieving video formats (primarily HLS) from Telecinco and related Mediaset sites, handling both single videos and multi-video playlists embedded in articles. It is designed to work with the site’s internal React-driven article state and token-based CDN access.

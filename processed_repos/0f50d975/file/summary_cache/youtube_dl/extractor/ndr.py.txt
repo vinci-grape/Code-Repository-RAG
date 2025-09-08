@@ -1,0 +1,103 @@
+Summary of ./youtube-dl/youtube_dl/extractor/ndr.py
+
+Purpose
+- Implement extractors for NDR (Norddeutscher Rundfunk) content, including:
+  - NDR main site pages (NDRIE)
+  - N-JOY pages (NJoyIE) that embed NDR content
+  - NDREmbedBaseIE and its derived extractors to fetch actual video formats from a JSON playlist
+  - NDREmbedIE and NJoyEmbedIE for embed pages that proxy to the NDREmbedBase
+
+Key classes and their roles
+- NDRBaseIE (InfoExtractor)
+  - Lightweight base for NDR-related extractors.
+  - _real_extract(url): matches the URL, derives a display_id, downloads the page, and delegates to _extract_embed(webpage, display_id, url).
+
+- NDRIE (NDR main site extractor)
+  - Inherits NDRBaseIE.
+  - _VALID_URL: matches NDR article/video pages with a path segment and an id, ending in ,<hash>.html.
+  - _extract_embed(webpage, display_id, url): 
+    - Extracts an embed URL via meta/embed fields or sophoraID patterns.
+    - If the value looks like a sophora short id (e.g., 'hafengeburtstag988'), it derives the real embed URL by:
+      - locating a path portion from the page URL
+      - finding the actual NDR id (ndr_id) from the page
+      - or falling back to an info-player URL template
+    - If no embed URL can be found, raises ExtractorError.
+    - Extracts description and timestamp from HTML meta/open graph or date fields.
+    - Loads JSON-LD data if present.
+    - Returns a url_transparent result with fields: _type, url (embed URL or ndr:<id>), display_id, description, timestamp, merged with JSON-LD data.
+
+- NJoyIE (N-JOY extractor)
+  - Inherits NDRBaseIE.
+  - _VALID_URL: matches N-JOY pages, with optional display_id in the URL.
+  - _extract_embed(webpage, display_id, url): 
+    - Locates the real NDR video id from either:
+      - the src attribute pointing to the video, or
+      - an iframe with id "pp_<id>"
+    - Pulls a description from meta or a specific description block.
+    - Returns a url_transparent result with:
+      - url = 'ndr:<video_id>'
+      - display_id, description, and a title derived from display_id.
+
+- NDREmbedBaseIE (Core NDREmbed extractor)
+  - Inherits InfoExtractor.
+  - _VALID_URL: matches either the internal ndR id (ndr:<id>) or an NDR ppjson URL for a video id.
+  - _real_extract(url):
+    - Determines video_id from the URL (either from the ndR id or from the JSON URL).
+    - Downloads the JSON ppjson from http://www.ndr.de/<video_id>-ppjson.json.
+    - Iterates through the playlist data to build a list of formats:
+      - If format src ends with f4m: use _extract_f4m_formats (HD/HDCore) with fatal=False.
+      - If format src ends with m3u8: use _extract_m3u8_formats (HLS) with fatal=False.
+      - Otherwise, add a direct format with:
+        - url, format_id (prefer f['quality'] or the key), and a computed 'quality' score.
+        - If the format is audio (type starts with 'audio'), set vcodec='none' and ext accordingly (mp3 by default).
+    - Sorts formats via _sort_formats.
+    - Reads config for title, duration, poster (thumbnails), and tracks (subtitles).
+    - Handles live streams (streamType) and adjusts the title with _live_title when live.
+    - Builds thumbnails from poster dictionary, attaching id and a per-thumbnail quality preference.
+    - Builds subtitles from tracks (ttml) with proper language keys.
+    - Returns a full info dictionary: id, title, is_live, uploader, upload_date, duration, thumbnails, formats, subtitles.
+
+- NDREmbedIE (NDREmbed embed pages)
+  - Inherits NDREmbedBaseIE.
+  - _VALID_URL: matches embed pages like ...-player.html or ...-externalPlayer.html
+  - _TESTS: several embed-page tests with md5 results and metadata; some pages are no longer available.
+  - Uses the NDREmbedBaseIE machinery by delegating to the NDREmbedBase for actual format extraction, with a standard info dict that includes id, ext, title, description, etc.
+
+- NJoyEmbedIE (N-JOY embed pages)
+  - Inherits NDREmbedBaseIE.
+  - _VALID_URL: matches N-JOY embed pages ending in -player_*.html or -externalPlayer_*.html
+  - _TESTS: tests for N-JOY embed pages (video, audio, live) and some only_matching cases.
+  - Delegates to NDREmbedBaseIE for actual format extraction, returning an info dict suitable for a ndR embed base.
+
+Important implementation details
+- URL handling and id extraction
+  - Uses _VALID_URL patterns tailored to each site (NDR, N-JOY, and their embed formats).
+  - NDRIE includes a sophisticated fallback for sophoraID: if only an ID like "hafengeburtstag988" is found, it derives a real embed URL by:
+    - parsing the page URL path to locate a related section
+    - extracting the real NDR id (ndr_id) from the page
+    - constructing the final embed URL or falling back to a standard player URL template
+- Description and timestamp extraction
+  - Description is obtained from HTML description tag or Open Graph description as fallback.
+  - Timestamps are parsed from datePublished/uploadDate meta fields or from a JavaScript variable pattern (pdt) when available.
+- JSON-LD and metadata
+  - NDREmbedBaseIE merges JSON-LD data (self._search_json_ld) with basic info (title, etc.) for a richer result.
+- Format extraction and handling
+  - NDREmbedBaseIE supports multiple formats:
+    - f4m (HDS): extracted with _extract_f4m_formats; non-fatal if not available.
+    - m3u8 (HLS): extracted with _extract_m3u8_formats; non-fatal if not available.
+    - Direct file formats: regular HTTP(S) URLs with format_id and a computed quality score from a predefined order ('xs', 's', 'm', 'l', 'xl').
+  - Audio streams are marked with vcodec='none' and the proper extension (default mp3 if not specified).
+  - Thumbnails are built from poster data, with URL resolution via urljoin and a per-thumbnail quality preference.
+  - Subtitles are collected from tracks and emitted as TTML with language keys (default 'de').
+- Live streams
+  - Live streams are detected via playlist.config.streamType being 'httpVideoLive' or 'httpAudioLive'.
+  - Titles are adjusted for live streams using _live_title.
+- Transparent delegations
+  - NDRIE and NJoyIE expose videos as url_transparent pointing to an internal embed URL (ndr:<id>) or an NDR info URL, delegating actual format extraction to NDREmbedBaseIE or its embedded logic.
+  - This design allows reusing the NDREmbedBaseIE for consistent format handling across multiple NDR-related pages.
+
+Tests
+- The file includes extensive _TESTS for NDR, N-JOY, and embed variants, including expected metadata, md5 hashes for sample videos, skip_download flags, and expected warnings for unavailable manifests.
+
+Overall
+- The module provides a robust, multi-layered extraction flow for NDR content: initial page parsing to identify embedded video/player identifiers, handling of sophora-based IDs, and a central NDREmbedBaseIE backend that enumerates and sorts all available formats, along with thumbnails and subtitles. It also covers N-JOY variants and their embed pages, translating them into ndR-based internal URLs for unified processing.

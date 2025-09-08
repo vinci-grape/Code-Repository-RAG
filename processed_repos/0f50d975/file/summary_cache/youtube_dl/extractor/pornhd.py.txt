@@ -1,0 +1,63 @@
+Summary of pornhd.py (YouTube-DL extractor)
+
+- Purpose
+  - Implement an InfoExtractor for pornhd.com video pages. It fetches page data, discovers video formats, and extracts metadata (title, description, thumbnail, view/like counts, age limit).
+
+- Key class
+  - PornHdIE(InfoExtractor)
+    - _VALID_URL: Matches pornhd.com video URLs, with optional language path and an optional display_id slug:
+      https://.../videos/<id> or .../videos/<id>/<display_id>
+    - _TESTS: Two real page tests with expected metadata and formats, plus a 404 skip test.
+
+- Main workflow in _real_extract(url)
+  1) Parse IDs
+     - Extract video_id and optional display_id from URL using _VALID_URL groups.
+  2) Download page
+     - Download the HTML web page for the video.
+  3) Title extraction
+     - Try two patterns:
+       - A span with class "video-name"
+       - The <title> tag containing something like "… - PornHD…"
+     - Use _html_search_regex to obtain the title.
+  4) Source discovery (preferred)
+     - Look for a JavaScript-like JSON object named sources via a regex.
+     - Convert to proper JSON with js_to_json and parse with _parse_json.
+     - If sources exist, build formats from this dict.
+  5) Fallback: HTML5 entries if no sources
+     - If sources is empty, attempt to parse HTML5 media entries with _parse_html5_media_entries.
+     - If found, use the first entry as the video info.
+  6) Error handling if no video content
+     - If neither sources nor HTML5 entries are found, try to extract a user-facing error message from a div/p with class "no-video" and raise ExtractorError with that message.
+  7) Formats construction
+     - Iterate over sources items: (format_id, video_url)
+       - Resolve video_url with urljoin.
+       - Skip empty URLs.
+       - Determine height from the format_id if it ends with a number followed by 'p' (e.g., "720p").
+       - Build a format dict:
+         - url: resolved video URL
+         - ext: determined by determine_ext(video_url, 'mp4')
+         - format_id: the key from sources
+         - height: parsed height (or None)
+     - If any formats exist, assign to info['formats'] and sort with _sort_formats.
+  8) Metadata extraction
+     - Description: try multiple patterns to extract a long description from:
+       - section with class "video-description"
+       - div/p with class "description"
+       - Fallback to meta description or OG description
+     - view_count: extract integer before "views" if present
+     - thumbnail: extract from a poster field in the page (regex looking for poster: "URL" style)
+     - like_count: several patterns to capture the number of likes
+  9) Return value
+     - Merge gathered data with a dict containing:
+       - id, display_id, title, description, thumbnail, view_count, like_count, formats, age_limit (set to 18)
+     - Uses merge_dicts to combine with any existing info (e.g., from HTML5 fallback).
+
+- Important implementation details
+  - Resilience: Handles both a JavaScript-embedded sources object and a HTML5 fallback, increasing robustness to page structure changes.
+  - JSON handling: Uses js_to_json to convert JS-like JSON to parseable JSON, then _parse_json to obtain a Python dict.
+  - Format extraction: Derives video format entries from the sources dict, normalizes URLs with urljoin, and determines extension with determine_ext (default mp4). Height is inferred from format_id like "720p".
+  - Metadata extraction: Multiple fallbacks for title, description, and thumbnail. Attempts to parse a human-readable error message when content is unavailable.
+  - Error handling: Raises ExtractorError with a user-friendly message if the page indicates no video content.
+  - Utilities used from base class and helpers: _download_webpage, _html_search_regex, _search_regex, _parse_json, _parse_html5_media_entries, _ogs, _og_search_description, int_or_none, urljoin, determine_ext, merge_dicts, _sort_formats.
+
+Overall, PornHdIE is a robust extractor for pornhd.com that prioritizes embedded JSON sources for formats but gracefully falls back to HTML5 entries and page metadata to provide a complete set of video formats and descriptive information.

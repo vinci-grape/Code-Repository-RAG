@@ -1,0 +1,34 @@
+Concise summary of the code in youtube_dl/extractor/commonprotocols.py
+
+What it does:
+- Implements two simple extractors for non-HTTP streaming protocols (RTMP and MMS). Each extractor provides basic metadata (id and title) derived from the URL and exposes the stream URL in a minimal format object (for RTMP) or as a direct URL entry (for MMS).
+
+Key classes and responsibilities:
+- RtmpIE (InfoExtractor)
+  - Purpose: Handle RTMP(..) URLs.
+  - _VALID_URL: Matches RTMP and variants (rtmp, rtmpe, rtmpt, etc.).
+  - IE_DESC: False (not listed in the extractor index).
+  - _TESTS: Two tests using only_matching to verify URL recognition.
+  - _real_extract(url):
+    - Derives video_id via _generic_id(url) and title via _generic_title(url).
+    - Returns a dict with id, title, and a single-format list:
+      - format contains the original URL, ext 'flv', and format_id equal to the URL scheme (e.g., 'rtmp', 'rtmpe').
+    - Uses compat_urlparse to extract the scheme for format_id.
+
+- MmsIE (InfoExtractor)
+  - Purpose: Handle MMS URLs.
+  - _VALID_URL: Matches MMS URLs.
+  - IE_DESC: False (not listed in the extractor index).
+  - _TEST: Direct MMS link with expected id, ext, and title derived from the URL; skip_download is indicated (since MMSRTSP/RTMP may require external players).
+  - _real_extract(url):
+    - Derives video_id via _generic_id(url) and title via _generic_title(url).
+    - Returns a dict with id, title, and the raw 'url' field (no separate formats list).
+
+Important implementation details:
+- Both extractors disable listing in the main extractor index via IE_DESC = False.
+- Metadata extraction relies on the inherited _generic_id and _generic_title to derive id/title from the URL.
+- RTMP extractor formats the output as a single format with ext 'flv' and uses the URL scheme as format_id (via compat_urlparse.urlparse(url).scheme).
+- MMS extractor returns a simple dict with the direct MMS URL (no separate formats list).
+- The file imports unicode_literals for compatibility, and uses compat_urlparse for parsing the RTMP URL scheme.
+
+Overall, this module provides lightweight support for RTMP and MMS streams by exposing the given URL(s) with minimal derived metadata, without implementing full streaming negotiation.

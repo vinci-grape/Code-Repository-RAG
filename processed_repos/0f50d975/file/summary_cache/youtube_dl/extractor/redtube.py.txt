@@ -1,0 +1,71 @@
+Summary of ./youtube-dl/youtube_dl/extractor/redtube.py
+
+Purpose
+- Implements a YouTube-dl extractor for RedTube videos (class RedTubeIE), capable of extracting metadata and video formats from redtube.com pages and embedded players.
+
+Key components
+- RedTubeIE(InfoExtractor): Main extractor class.
+- _VALID_URL: Regular expression to identify RedTube video pages and embedded URLs. Captures video id as group "id".
+- _TESTS: Sample test cases to validate extraction and embedding behavior (including public video, embedded URL, and subdomain variations).
+- _extract_urls(webpage): Static method to find embed URLs within a page (iframe-based) pointing to embed.redtube.com with a video id.
+- _real_extract(url): Core extraction workflow for a given video page.
+
+Main functionality and flow
+- Video identification
+  - Extracts video_id from the URL using _match_id.
+  - Loads the page at http://www.redtube.com/<video_id> via _download_webpage.
+
+- Error handling
+  - Predefined ERRORS patterns detect:
+    - Deleted videos: “video-deleted-info” / “This video has been removed”
+    - Private videos: “private_video_text” / “This video is private” / “Send a friend request to its owner to be able to view it”
+  - If matched, raises ExtractorError with a message like "Video <id> has been removed/private".
+
+- Metadata extraction
+  - info = self._search_json_ld(webpage, video_id, default={}) to grab JSON-LD data if present.
+  - Title fallback: if info lacks a title, tries multiple HTML patterns to extract the title (including video_title classes, videoTitle, or video title blocks), and finally falls back to Open Graph title via _og_search_title(webpage).
+
+- Formats extraction (primary logic)
+  - Sources-based formats:
+    - Looks for a JSON-like sources object via regex 'sources\s*:\s*({.+?})', parses it with _parse_json, and for each entry adds a format with:
+      - url: the source URL
+      - format_id: the key in the sources dict
+      - height: derived from format_id (int)
+  - Media definitions (additional formats):
+    - Looks for a mediaDefinition array via regex 'mediaDefinition["\']?\s*:\s*(\[.+?}\s*\])', parses with _parse_json.
+    - For each media entry:
+      - Extracts format_url from media['videoUrl'].
+      - If format is 'hls' or extension is 'm3u8', uses _extract_m3u8_formats to fetch HLS formats (entry_protocol 'm3u8_native', m3u8_id 'hls').
+      - Otherwise, uses media['quality'] as format_id and adds a format with url and height derived from format_id.
+  - Fallback: If no formats collected, attempts a simple MP4 source via HTML: <source src="..." type="video/mp4"> and adds that as a format.
+  - Sorts formats with _sort_formats.
+
+- Additional media data
+  - thumbnail: extracted via _og_search_thumbnail(webpage).
+  - upload_date: parsed with a regex for patterns like “ADDED” or “Published on” and normalized via unified_strdate.
+  - duration: tries OpenGraph video:duration first, else falls back to a videoDuration regex pattern.
+  - view_count: parsed with several patterns to capture numeric view counts, converted via str_to_int.
+  - age_limit: hardcoded to 18 (site self-labeling noted as 18+ in code).
+
+- Final output
+  - Returns a merged dictionary combining JSON-LD data (info) with extracted fields:
+    - id (video_id)
+    - ext ('mp4')
+    - thumbnail
+    - upload_date
+    - duration
+    - view_count
+    - age_limit
+    - formats (list of video formats)
+
+Implementation details of interest
+- Robust title extraction: uses multiple fallbacks (JSON-LD -> HTML patterns -> Open Graph) to ensure a title is captured.
+- Flexible formats extraction:
+  - Accepts both a "sources" dictionary and a "mediaDefinition" array to populate formats.
+  - Supports both direct MP4 URLs and HLS (m3u8) streams, with appropriate handling for HLS via _extract_m3u8_formats.
+- Error handling for unavailable content is explicit and user-friendly.
+- Uses common helper utilities provided by youtube-dl (e.g., _parse_json, _search_json_ld, _og_search_title, _html_search_regex, _og_search_property, _extract_m3u8_formats, and _sort_formats) to robustly parse data from the page.
+
+Notes
+- The extractor also includes a method to extract potential embed URLs from pages, aiding discovery of related videos embedded from RedTube.
+- The default extension is mp4, and the code attempts multiple sources to maximize compatibility with RedTube’s varying page structures.

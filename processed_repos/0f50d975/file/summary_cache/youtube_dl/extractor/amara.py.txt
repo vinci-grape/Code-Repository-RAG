@@ -1,0 +1,49 @@
+concisely explains the Amara extractor in youtube-dl
+
+- Purpose
+  - AmaraIE extracts video metadata from Amara video pages and, when applicable, delegates to underlying hosts (YouTube or Vimeo) via a transparent URL.
+
+- Class and URL pattern
+  - Class: AmaraIE(InfoExtractor)
+  - _VALID_URL: matches Amara video pages like https://amara.org/.../videos/{id}
+  - _TESTS: three scenarios
+    - Youtube on Amara: returns YouTube video data via transparent URL
+    - Vimeo on Amara: returns Vimeo video data via transparent URL
+    - Direct link: Amara-hosted direct video file (mp4)
+
+- Main functionality (_real_extract)
+  - Extract video_id from URL using _match_id.
+  - Fetch video metadata from Amara API: https://amara.org/api/videos/{video_id}/ with query format=json.
+  - Obtain title = meta['title'] and primary video URL = meta['all_urls'][0].
+  - Build subtitles:
+    - Iterate over meta['languages'] (or empty if missing).
+    - For each language with a subtitles_uri and published flag, create a subtitles entry under the language code (fall back to 'en' if code is missing).
+    - For each subtitle format in ['json', 'srt', 'vtt'], append a dict with 'ext' and 'url' updated by update_url_query(subtitles_uri, {'format': f}).
+  - Assemble info dictionary:
+    - 'url': video_url
+    - 'id': video_id
+    - 'subtitles': subtitles (constructed above)
+    - 'title': title
+    - 'description': meta.get('description')
+    - 'thumbnail': meta.get('thumbnail')
+    - 'duration': int_or_none(meta.get('duration'))
+    - 'timestamp': parse_iso8601(meta.get('created'))
+  - Platform delegation:
+    - For each extractor in (YoutubeIE, VimeoIE), check if ie.suitable(video_url) is true.
+    - If suitable, set info['_type'] = 'url_transparent' and 'ie_key' = ie.ie_key(), then stop checking.
+    - This makes Amara act as a wrapper that defers to the actual host when the video points to YouTube or Vimeo.
+  - Return the assembled info dict (either direct Amara data or a transparent URL to YouTube/Vimeo).
+
+- Key implementation details
+  - Uses Amara API endpoint /api/videos/{video_id}/ with format=json to obtain metadata.
+  - Subtitles are dynamically built from languages, guarded for missing data, and support multiple formats (json, srt, vtt) via URLs with appropriate format query parameters.
+  - Timestamps are parsed with parse_iso8601; durations converted with int_or_none to handle missing or non-integer values.
+  - The decision to set _type to url_transparent allows the extractor to delegate to the actual video host while preserving Amara metadata (title, description, thumbnail, etc.).
+
+- Important fields in output
+  - id, title, description, thumbnail, duration, timestamp
+  - url (direct video URL or the host URL provided by Amara)
+  - subtitles (language-specific tracks with formats json/srt/vtt)
+  - Potentially _type and ie_key when delegating to YoutubeIE or VimeoIE
+
+In short, AmaraIE fetches Amara video metadata, constructs subtitle tracks, and either returns a direct video entry or defers to YouTube/Vimeo when the video URL points to those platforms.

@@ -1,0 +1,53 @@
+Concise summary of code in youtube-dl/youtube_dl/extractor/playfm.py
+
+Purpose
+- Implement a YouTube-DL extractor for Play.fm that retrieves metadata and the actual audio URL for a given Play.fm recording page.
+
+Main class and structure
+- Class: PlayFMIE(InfoExtractor)
+  - IE_NAME: 'play.fm'
+  - _VALID_URL: Regex to match Play.fm record pages. Captures:
+    - slug: the path portion excluding the domain, including the final id segment
+    - id: the final segment (used as an initial video_id)
+  - _TEST: Provides a sample URL and expected extracted data (id, title, duration, timestamps, uploader, counts, etc.)
+
+Key functionality (core method)
+- _real_extract(self, url)
+  - Parses the URL with the _VALID_URL regex to obtain:
+    - video_id: the final path segment (mobj.group('id'))
+    - slug: the full slug path (mobj.group('slug'))
+  - Downloads JSON metadata from Play.fm API:
+    - API URL: http://v2api.play.fm/recordings/slug/<slug>
+    - Uses self._download_json and passes video_id as the HTTP error context.
+  - Error handling:
+    - If the API response contains an 'error' and it is a dict, raise ExtractorError with the provided message.
+  - Data extraction and normalization:
+    - audio_url: recordings['audio'] (direct URL to audio file)
+    - video_id: use recordings.get('id') if present, otherwise fall back to the initial video_id; coerced to string via compat_str
+    - title: recordings['title']
+    - description: recordings.get('description')
+    - duration: int_or_none(recordings.get('recordingDuration'))
+    - timestamp: parse_iso8601(recordings.get('created_at'))
+    - uploader: recordings.get('page', {}).get('title')
+    - uploader_id: compat_str(recordings.get('page', {}).get('id'))
+    - view_count: int_or_none(recordings.get('playCount'))
+    - comment_count: int_or_none(recordings.get('commentCount'))
+    - categories: list of tag names, extracted as [tag['name'] for tag in recordings.get('tags', []) if tag.get('name')]
+  - Returns a dict with:
+    - id, url, title, description, duration, timestamp, uploader, uploader_id, view_count, comment_count, categories
+
+Key implementation details
+- Utilities used:
+  - int_or_none: safely convert values to int or None
+  - parse_iso8601: parse ISO 8601 timestamps
+  - compat_str: ensure string type compatibility
+  - ExtractorError: raise user-friendly error on API-reported errors
+- Network/data flow:
+  - The extractor relies on a secondary API (v2api.play.fm) to fetch structured metadata and the direct audio URL.
+- Error handling:
+  - If the API returns an error dictionary, the extractor raises a descriptive ExtractorError with the message from the API.
+- Data shape:
+  - Returns a standard YouTube-DL info dict with common fields like id, url, title, description, duration, timestamp, uploader, etc., plus view_count, comment_count, and categories for richer metadata.
+
+Overall
+- The code provides a focused integration with Play.fm’s API to retrieve a recording’s audio URL and associated metadata, with robust error handling and normalization to YouTube-DL’s expected info dict format.

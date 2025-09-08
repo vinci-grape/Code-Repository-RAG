@@ -1,0 +1,110 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/nba.py
+
+Purpose
+- Implement YouTube-DL extractors for NBA content across multiple endpoints: NBA Watch (including embed), NBA video pages, team channels, and collections list. Supports CVP (content video player) assets and various hosting sources (M3U8/HLS, Akamai, direct MP4).
+
+Main components (classes and core responsibilities)
+- NBACVPBaseIE
+  - Base helper for CVP (Turner) content.
+  - _extract_nba_cvp_info(path, video_id, fatal) wraps _extract_cvp_info with NBA-specific base URL and media_src mappings for default and m3u8 sources.
+
+- NBAWatchBaseIE
+  - Base for NBA Watch-related extractors.
+  - _VALID_URL_BASE matches NBA watch/watch.nba.com endpoints.
+  - _extract_video(filter_key, filter_value)
+    - Queries an index API to get video metadata (pid, name, image, description, etc.).
+    - Looks up a publishing point (m3u8) URL; if found, builds M3U8 formats via _extract_m3u8_formats and also HTTP fallbacks (http variants derived from HLS).
+    - Assembles video info (id, title, thumbnail, description, duration, timestamp, tags).
+    - If seoName is present and looks like a date-based path, fetches CVP info via NBACVPBaseIE and merges its formats, subtitles, and info.
+    - Sorts and returns the final info including formats.
+
+- NBAWatchEmbedIE
+  - Inherits NBAWatchBaseIE.
+  - IENAME 'nba:watch:embed'.
+  - _VALID_URL matches embed URLs with a pid.
+  - _real_extract(url): extracts video_id (pid) and delegates to _extract_video('pid', video_id).
+
+- NBAWatchIE
+  - Inherits NBAWatchBaseIE.
+  - IENAME 'nba:watch'.
+  - _VALID_URL matches NBA watch video pages (with or without /nba/video prefix).
+  - _real_extract(url)
+    - If URL contains collection query parameter, optionally routes to NBAWatchCollectionIE as a playlist (unless --no-playlist is used).
+    - Otherwise, extracts a single video via _extract_video('seoName', display_id).
+
+- NBAWatchCollectionIE
+  - Inherits NBAWatchBaseIE.
+  - IENAME 'nba:watch:collection'.
+  - _VALID_URL matches list/collection endpoints.
+  - _PAGE_SIZE = 100
+  - _fetch_page(collection_id, page)
+    - Fetches collection metadata from content-api-prod, paginates by page/size, yields per-video entries as minimal URL items pointing to individual watch/video URLs.
+  - _real_extract(url)
+    - Uses OnDemandPagedList to fetch pages and produce a playlist of videos for the collection.
+
+- NBABaseIE
+  - Base for NBA domain content (teams).
+  - _VALID_URL_BASE matches NBA team pages (e.g., nba.com/BULLS, etc.).
+  - _CHANNEL_PATH_REGEX = 'video/channel|series'
+  - _embed_url_result(team, content_id)
+    - Builds an embed URL (iframe HTML) via secure NBA asset endpoint and returns a URL result to NBAEmbedIE.
+  - _call_api(team, content_id, query, resource)
+    - Calls NBA API (https://api.nba.net/2/{team}/video,imported_video,wsc/) with a hardcoded internal access token, obtaining 'response'->'result'.
+  - _extract_video(video, team, extract_all=True)
+    - Core extractor for a single video dict returned by NBA API.
+    - Builds basic info: id (nid), title (title/headline/shortHeadline), description, timestamp (published).
+    - Subtitles from videoCaptions.sidecars.
+    - Formats:
+      - Always include mp4 URL if present.
+      - If extract_all:
+        - Include source URL (videoSource) as a preferred format if valid and not an s3 URL.
+        - Include m3u8 formats (Akamai vs generic) depending on URL pattern.
+        - If contentXml present with a team, fetch CVP info (CVP formats, subtitles, and merged info) via _extract_nba_cvp_info.
+        - Sort formats after collecting.
+      - If not extract_all: fall back to embed approach using _embed_url_result(team, video['videoId']).
+    - Returns a dict with id, title, description, timestamp, formats, subtitles (and merged CVP data if present).
+  - _real_extract(url)
+    - Parses team and display_id from the URL using _VALID_URL.
+    - If URL contains a play path with video ID in path, handles decode for display_id; otherwise fetches page, extracts videoID from page content.
+    - Delegates to _extract_url_results(team, display_id) to build the final result.
+
+- NBAEmbedIE
+  - Inherits NBABaseIE.
+  - IENAME 'nba:embed'.
+  - _VALID_URL for embed iframe URLs with contentId.
+  - _real_extract(url)
+    - Parses contentId and team from query string.
+    - If no team, redirects to a standard watch video page.
+    - Otherwise fetches video via NBA API (_call_api) and uses _extract_video on first video result.
+
+- NBAIE
+  - Inherits NBABaseIE.
+  - IENAME 'nba'.
+  - _VALID_URL matches NBA video pages (excluding channel path), using NBABaseIE._CHANNEL_PATH_REGEX to avoid channel URLs.
+  - _CONTENT_ID_REGEX = 'videoID' (extracted from page HTML).
+  - _extract_url_results(team, content_id)
+    - Returns an embed URL result for the given team/content_id.
+
+- NBAChannelIE
+  - Inherits NBABaseIE.
+  - IENAME 'nba:channel'.
+  - _VALID_URL matches team channel/series pages.
+  - _CONTENT_ID_REGEX = 'videoSubCategory'
+  - _PAGE_SIZE = 100
+  - _fetch_page(team, channel, page)
+    - Calls NBA API to fetch page results for a channel, iterates through videos and yields per-video results with proper embedded URLs and metadata.
+  - _extract_url_results(team, content_id)
+    - Builds a paginated playlist using OnDemandPagedList over _fetch_page.
+
+Key implementation details and behavior
+- CVP integration: CVP info (formats, subtitles, metadata) can be fetched and merged when contentXml is present or when seoName indicates CVP content. Uses NBACVPBaseIE constructor to resolve CVP formats with both default and m3u8 media sources.
+- M3U8 handling: For watch endpoints, m3u8 URLs are converted to multiple formats using _extract_m3u8_formats; special handling for Akamai sources via _extract_akamai_formats when needed. HTTP variants are generated as fallbacks by cloning and adapting HLS formats.
+- Subtitles: Extracted from videoCaptions.sidecars, merged with CVP subtitles when CVP data is included.
+- Embedding vs direct extraction: NBABaseIE supports embedding via an iframe URL when not extracting all formats, otherwise directly extracts video formats from NBA API.
+- Pagination: Channels and collections use OnDemandPagedList to fetch and yield items page-by-page, enabling playlist creation with large numbers of videos.
+- URL patterns and id extraction: Extensive use of regex-based matching to identify team pages, video IDs, channels, collections, and embedded content. Content IDs are extracted from either page HTML (via _CONTENT_ID_REGEX) or URLs (videoId/videoID).
+- Robustness: Handles various URL forms (www vs non-www, with/without /play# path, collection query params). Includes fallbacks to single video extraction when collections are not requested.
+- Tests: Several _TESTS blocks demonstrate usage for specific URLs, including expected IDs, titles, durations, timestamps, and whether certain URLs should be matched or treated as playlists.
+
+In short
+- The file provides a comprehensive set of extractors for NBA-related content in YouTube-DL: direct NBA Watch videos (and embed variants), channel-based content, individual NBA videos, and collections. It combines multiple sources (CVP, Akamai/HLS, direct MP4) with careful handling of metadata, subtitles, and CVP integrations, all while supporting pagination for collections and channels.

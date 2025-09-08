@@ -1,0 +1,34 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/bellmedia.py
+
+Purpose
+- Implement an InfoExtractor for Bell Media pages (Canadian networks like CTV, TSN, BNN, Comedy Network, etc.).
+- Redirect extraction to the NineCNineMedia extractor by constructing a specific 9c9media URL.
+
+Main functionality
+- _real_extract(url):
+  - Uses a comprehensive _VALID_URL regex to capture:
+    - The Bell Media domain (e.g., ctv, tsn, bnn, thecomedynetwork, discovery, animalplanet, etalk, etc., or much.com / cp24.com).
+    - A video id consisting of 6 or more digits, extracted from patterns like vid, clipId, -vid, ~, or similar URL fragments.
+  - After matching, it isolates the domain subcomponent (before the first dot) and trims to the left of the dot (domain = domain.split('.')[0]).
+  - Maps the domain to a NineCNineMedia code using the _DOMAINS dict. If the domain isn’t listed, it uses the domain as-is.
+  - Returns a dict indicating a transparent redirect to NineCNineMedia:
+    - _type: 'url_transparent'
+    - id: the extracted video_id
+    - url: '9c9media:<mapped_code>_web:<video_id>'
+    - ie_key: 'NineCNineMedia'
+  - This delegates actual video metadata extraction to the NineCNineMedia extractor with the correctly mapped site code.
+
+Key components
+- _VALID_URL: A verbose regular expression (with (?x)) that matches Bell Media video pages and extracts a numeric video id (6+ digits). Supports multiple domains and common URL fragments that indicate a video.
+- _DOMAINS: A mapping from specific Bell Media subdomains to internal NineCNineMedia site codes (e.g., thecomedynetwork -> comedy, discoveryvelocity -> discvel, etc.). If a domain isn’t in the mapping, the raw domain is used.
+- _real_extract: Core logic to parse the URL, compute the NineCNineMedia code, and emit a url_transparent result pointing to NineCNineMedia with the proper id.
+- _TESTS: Includes a test case for a sample Bell Media URL that should extract to id '1403070' with metadata, plus several “only_matching” tests to ensure various Bell Media URLs are recognized by the extractor without performing full extraction.
+
+Implementation details
+- Inherits from InfoExtractor, indicating standard youtube-dl extractor behavior.
+- Uses re.match(self._VALID_URL, url).groups() to obtain domain and video_id.
+- Uses '9c9media:%s_web:%s' formatting to construct the downstream URL for NineCNineMedia.
+- Keeps compatibility with existing NineCNineMedia infrastructure by using ie_key 'NineCNineMedia' and _type 'url_transparent'.
+
+Overall
+- This extractor doesn’t fetch video data itself; it detects Bell Media video pages, extracts the video id, maps the domain to NineCNineMedia’s internal code, and forwards extraction to the NineCNineMedia backend.

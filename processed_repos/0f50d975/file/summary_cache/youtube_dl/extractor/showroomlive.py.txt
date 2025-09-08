@@ -1,0 +1,82 @@
+concise summary of the code
+
+- Purpose
+  - Implement a YouTube-dl extractor for ShowRoom Live streams. It detects a broadcaster’s live room page, checks if it’s online, fetches available streaming URLs (HLS and RTMP), builds a list of formats, and returns metadata about the live stream.
+
+- Main class
+  - ShowRoomLiveIE (inherits from InfoExtractor)
+
+- URL matching
+  - _VALID_URL: Regular expression that matches ShowRoom Live room pages, excluding certain sections (onlive, timetable, event, campaign, news, ranking, room). Captures the broadcaster id as the id.
+
+- Test
+  - _TEST: Includes a single test URL and only_matching flag to verify URL matching.
+
+- Core extraction flow (_real_extract)
+  - Extract broadcaster_id from URL using _match_id.
+  - Download the page HTML: _download_webpage(url, broadcaster_id).
+  - Locate room_id in the page via one of two patterns:
+    - SrGlobal.roomId = <digits>
+    - (profile|room)?room_id=<digits>
+    - If not found, extraction would fail (not shown, but implied by _search_regex).
+  - Retrieve room/profile data: _download_json(urljoin(url, '/api/room/profile?room_id=%s' % room_id), broadcaster_id)
+  - Check live status: is_live = room.get('is_onlive'); if is_live is not True, raise ExtractorError indicating the broadcaster is offline (expected=True).
+  - Metadata
+    - uploader: room.get('performer_name') or broadcaster_id
+    - title: room.get('room_name') or room.get('main_name') or uploader
+  - Get streaming URLs: _download_json(urljoin(url, '/api/live/streaming_url?room_id=%s' % room_id), broadcaster_id)['streaming_url_list']
+  - Build formats list:
+    - For each stream in streaming_url_list:
+      - stream_url = stream.get('url'); skip if missing
+      - stream_type:
+        - 'hls':
+          - Use _extract_m3u8_formats(stream_url, broadcaster_id, ext='mp4', m3u8_id='hls', live=True)
+          - For each HLS format, set 'quality' to int_or_none(stream.get('quality', 100))
+          - Append to formats
+        - 'rtmp':
+          - stream_name = stream.get('stream_name'); skip if missing
+          - Build a dictionary format with:
+            - url: stream_url
+            - play_path: stream_name
+            - page_url: url
+            - player_url: 'https://www.showroom-live.com/assets/swf/v3/ShowRoomLive.swf'
+            - rtmp_live: True
+            - ext: 'flv'
+            - format_id: 'rtmp'
+            - format_note: stream.get('label')
+            - quality: int_or_none(stream.get('quality', 100))
+          - Append to formats
+  - Sort formats: _sort_formats(formats)
+  - Return metadata dictionary:
+    - id: compat_str(room.get('live_id') or broadcaster_id)
+    - title: self._live_title(title)
+    - description: room.get('description')
+    - timestamp: int_or_none(room.get('current_live_started_at'))
+    - uploader: uploader
+    - uploader_id: broadcaster_id
+    - view_count: int_or_none(room.get('view_num'))
+    - formats: formats
+    - is_live: True
+
+- Key implementation details
+  - Robust room_id extraction from the page using multiple regex patterns.
+  - API-driven data gathering:
+    - /api/room/profile?room_id= for room metadata
+    - /api/live/streaming_url?room_id= for available streaming URLs
+  - Offline handling: explicitly raises an ExtractorError when is_onlive is not True, with expected=True (so the extractor can be skipped gracefully).
+  - Supports two streaming protocols:
+    - HLS (extracts multiple formats via _extract_m3u8_formats, marks as live)
+    - RTMP (constructs explicit RTMP FLV format with play_path and player URL)
+  - Format handling:
+    - HLS formats inherit quality from the API (default 100 if not provided)
+    - RTMP formats carry label as format_note and quality as per API (default 100)
+  - Metadata completeness:
+    - Uses room/performer data for title, description, uploader, and IDs
+    - Returns is_live set to True when live
+
+- Utilities and helpers used
+  - _download_webpage, _download_json, _extract_m3u8_formats, _sort_formats, _live_title, _match_id, _search_regex
+  - urljoin, int_or_none, compat_str for safe handling and normalization
+
+- Overall behavior
+  - This extractor provides live ShowRoom streams by querying the site’s internal APIs, assembling both HLS and RTMP formats, and returning a comprehensive live-stream metadata payload suitable for playback in youtube-dl.

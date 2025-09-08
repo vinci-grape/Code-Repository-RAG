@@ -1,0 +1,32 @@
+- Purpose: A youtube-dl extractor for videos on defense.gouv.fr.
+
+- Class and inheritance:
+  - DefenseGouvFrIE inherits from InfoExtractor.
+  - IE_NAME: 'defense.gouv.fr'.
+
+- URL matching:
+  - _VALID_URL matches pages under defense.gouv.fr with the path /layout/set/ligthboxvideo/base-de-medias/webtv/ followed by an id slug.
+  - The id captured by the URL is used as the video title/key.
+
+- Testing:
+  - _TEST provides a sample URL, the expected md5 of the downloaded mp4, and the expected info_dict (id, ext, title).
+
+- Extraction workflow (_real_extract):
+  - Derives title from the URL using _match_id(url) (the slug after the last slash).
+  - Downloads the webpage content.
+  - Extracts a numeric video_id from the page via regex: flashvars.pvg_id="(\d+)".
+  - Constructs a JSON config URL:
+    http://static.videos.gouv.fr/brightcovehub/export/json/{video_id}
+  - Downloads the JSON configuration.
+  - Reads the first rendition URL from info['renditions'][0]['url'].
+  - Returns an info dict with:
+    - id: video_id
+    - ext: 'mp4'
+    - url: video_url (from the JSON renditions)
+    - title: title (the slug from the URL)
+
+- Key implementation details:
+  - Uses standard InfoExtractor helpers: _download_webpage, _search_regex, _download_json.
+  - Assumes the video URL is the first rendition in the JSON config.
+  - Uses HTTP endpoints (no HTTPS in json URL).
+  - Title is derived from the URL slug, not from the page content.

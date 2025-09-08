@@ -1,0 +1,66 @@
+Overview
+- This is a youtube-dl extractor for DrTuber videos (DrTuberIE).
+- It handles video and embed URLs (including mobile) and extracts video formats and metadata from DrTuber pages and a JSON config endpoint.
+
+Key components
+- Class DrTuberIE(InfoExtractor)
+  - _VALID_URL: Regex matching DrTuber video or embed URLs and capturing:
+    - id: numeric video id
+    - display_id: optional human-friendly id (fallback to video id)
+  - _TESTS: Includes a full video URL test (expects mp4 format and metadata), and tests for embed/mobile URLs (only_matching)
+
+- _extract_urls(webpage) (staticmethod)
+  - Scans a webpage for iframe embed sources pointing to DrTuber embeds
+  - Returns a list of embed URLs found in iframes
+
+- _real_extract(self, url)
+  - Parse id and display_id from the URL using _VALID_URL
+  - Download the main video page HTML:
+    - webpage = _download_webpage('http://www.drtuber.com/video/%s' % video_id, display_id)
+  - Fetch JSON configuration via the player_config_json endpoint:
+    - video_data = _download_json('http://www.drtuber.com/player_config_json/', video_id, query={ vid, embed, aid, domain_id })
+  - Build formats:
+    - Iterate over video_data['files'].items()
+    - For each non-empty URL, append a format dict with:
+      - format_id: key from files (e.g., 'hq')
+      - quality: 2 if format_id == 'hq' else 1
+      - url: video URL
+    - Sort formats with _sort_formats(formats)
+  - Duration:
+    - duration = int_or_none(video_data.get('duration')) or parse_duration(video_data.get('duration_format'))
+  - Title extraction:
+    - Use _html_search_regex with multiple fallback patterns to robustly extract the title from the page
+  - Thumbnail extraction:
+    - thumbnail = _html_search_regex(r'poster="([^"]+)"', webpage, 'thumbnail', fatal=False)
+  - Engagement counts (likes, dislikes, comments):
+    - Helper extract_count(id_, name, default=NO_DEFAULT) uses a regex to pull numbers from a span with id/class matching the provided id_
+    - like_count = extract_count('rate_likes', 'like')
+    - dislike_count = extract_count('rate_dislikes', 'dislike', default=None)
+    - comment_count = extract_count('comments_count', 'comment')
+  - Categories:
+    - cats_str = _search_regex(r'<div[^>]+class="categories_list">(.+?)</div>', webpage, 'categories', fatal=False)
+    - categories = [] if not cats_str else re.findall(r'<a title="([^"]+)"', cats_str)
+  - Age restriction:
+    - age_limit = self._rta_search(webpage)  (likely returns 18 for adult content)
+  - Assemble and return the info dict with:
+    - id, display_id, formats, title, thumbnail, like_count, dislike_count, comment_count, categories, age_limit, duration
+
+Important implementation details
+- Uses a dedicated JSON endpoint (player_config_json) to obtain a dict of available video formats in video_data['files'], enabling multiple quality choices (e.g., 'hq' mapped to higher quality).
+- Formats are given simple metadata: format_id, URL, and a basic quality heuristic (hq gets higher quality).
+- Robust title extraction via multiple regex patterns to handle different page structures.
+- Thumbnail extracted from a poster attribute if present; not fatal if missing.
+- Engagement metrics (likes, dislikes, comments) are parsed from spans with ids/classes that match known DrTuber HTML structure.
+- Categories parsed from a categories_list container by extracting titles of anchor elements.
+- Age restriction derived from page content via _rta_search, enabling enforcement of 18+ restrictions when appropriate.
+- _extract_urls helps extract potential embed URLs from a page for further processing or crawling.
+
+Usage outcome
+- The extractor returns a structured dictionary with all relevant information for a DrTuber video:
+  - Formats (with direct video URLs)
+  - Metadata: id, display_id, title, thumbnail
+  - Engagement counts: like_count, dislike_count, comment_count
+  - Categories and age_limit
+  - Duration
+
+This implementation enables downloading DrTuber videos with multiple formats and rich metadata extraction.

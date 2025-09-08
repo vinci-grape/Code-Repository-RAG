@@ -1,0 +1,95 @@
+Here's a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/puhutv.py.
+
+Purpose
+- Implement two extractors for PuhuTV:
+  - PuhuTVIE: extracts individual videos (films/episodes) from puhutv.com
+  - PuhuTVSerieIE: extracts series playlists by enumerating seasons/episodes and yielding per-episode video URLs
+
+Key classes
+- PuhuTVIE (InfoExtractor)
+  - _VALID_URL: matches film/episode pages like http(s)://puhutv.com/<slug>-izle
+  - _TESTS: includes a film test, a geo-restricted episode (tips about geo proxy), and a 4K with subtitles test
+  - _SUBTITLE_LANGS: mapping of certain language names to ISO codes (English=en, Deutsch=de, عربى=ar)
+
+  Core workflow in _real_extract:
+  - Determine display_id from URL.
+  - Fetch base video metadata from /api/slug/{display_id}-izle and extract data (video_id, title, description, etc.).
+  - Fetch available video sources via /api/assets/{video_id}/videos. If the request yields a 403, trigger geo-restriction handling.
+  - Build a list of formats by iterating through videos:
+    - Skip duplicates and missing URLs.
+    - If a video is a playlist with HLS or if the URL contains playlist.m3u8, extract formats via _extract_m3u8_formats (m3u8_native) and continue.
+    - Otherwise, determine format type:
+      - If stream is HLS (video_format == 'hls' or URL hints) and not a playlist, mark as HLS (format_id 'hls', protocol m3u8_native).
+      - If video_format == 'mp4', mark as HTTP ('http').
+      - Otherwise skip.
+    - Append height/quality as part of format_id when available (e.g., hls or http-720p, etc.).
+  - Sort formats with _sort_formats.
+
+  Metadata and extras:
+  - creator: try to extract from show.producer.name
+  - content/images: extract wide images and convert to thumbnails with resolutions
+  - tags: extract genre names from show.genres
+  - subtitles: build per-language subtitle entries using _SUBTITLE_LANGS mapping; fallback to lang if not mapped
+  - duration: from content.duration_in_ms converted to seconds
+  - timestamp / upload_date: derived from info.created_at using unified_timestamp
+  - release_year, view_count, season/episode data, and other fields are included when available
+  - Returns a single video entry dict with id, display_id, title, description, timestamps, creator, view_count, duration, tags, thumbnails, subtitles, and formats
+
+  Important implementation details:
+  - Geo restriction handling: if fetching video JSON raises 403, raises geo restriction error (self.raise_geo_restricted()).
+  - Formats logic discriminates between HLS and non-HLS sources, supports 4K and other qualities, and handles playlist contexts differently from single-file streams.
+  - Thumbnails are built from content.images.wide with resolution parsing via parse_resolution.
+  - Subtitles dictionary uses language code mapping; subtitles are per-language lists containing a URL entry.
+
+- PuhuTVSerieIE (InfoExtractor)
+  - _VALID_URL: matches series detail pages like http(s)://puhutv.com/<slug>-detay
+  - _TESTS: includes a sample series with min playlist count and a film detail URL served by the same path (only_matching)
+  - IE_NAME: 'puhutv:serie'
+
+  Helper method _extract_entries(self, seasons):
+  - Iterates over each season in seasons
+  - For each season, pages through an API at https://galadriel.puhutv.com/seasons/{season_id}
+    - Uses pagination: page, per (40) per page
+  - For each episode entry:
+    - Extract slugPath and id
+    - Yield a url_result pointing to the episode page: https://puhutv.com/<slugPath>-izle
+    - video_id passed as the episode id (if available)
+    - video_title from episode name or eventLabel
+
+  Core workflow in _real_extract:
+  - Determine playlist_id from URL and fetch metadata from /api/slug/{playlist_id}-detay
+  - If seasons are present:
+    - Return a playlist_result built from entries produced by _extract_entries(seasons)
+    - Playlist title is info.get('name')
+  - If no seasons (i.e., a film detail that shares the URL with a series page):
+    - Compute video_id as info.get('slug') or info['assets'][0]['slug']
+    - Redirect to the film page by returning a url_result for https://puhutv.com/{video_id}-izle
+      - Uses PuhuTVIE.ie_key() for the embedded video extractor
+
+Implementation details and data handling
+- API endpoints:
+  - Film/episode data: /api/slug/{slug}-izle
+  - Video sources: https://puhutv.com/api/assets/{video_id}/videos
+  - Series pages: https://galadriel.puhutv.com/seasons/{season_id}
+- Formats handling:
+  - Supports both HLS (m3u8) and direct MP4 formats
+  - Detects HLS via stream_type, url patterns, or explicit video_format values
+  - Uses m3u8_native for HLS formats and provides a descriptive format_id (e.g., hls, hls-1080p)
+- Subtitles:
+  - Language mapping via _SUBTITLE_LANGS; unrecognized languages fall back to their given code
+- Thumbnails:
+  - Built from content.images.wide; ensures URLs are absolute and associates each with a parsed resolution and id
+- Metadata:
+  - Timestamps and upload dates parsed with unified_timestamp
+  - Release year, season/episode numbers, and creator (producer) parsed when available
+  - Tags derived from show.genres
+  - Duration derived from content.duration_in_ms and converted to seconds
+- Geo-restriction handling:
+  - If the video asset request returns 403, raises a geo-restricted error to indicate content is not accessible from the current location
+- Robustness:
+  - Uses try_get for safe nested lookups
+  - Skips invalid or duplicate video URLs
+  - Accepts both dict-like and list-like structures for certain fields (with type checks)
+
+In short
+- This file provides a comprehensive extractor for PuhuTV content, including individual videos and series. It handles multiple source formats (HLS and MP4), subtitles, thumbnails, and metadata, with geo-restriction support and a two-tier series navigation (season/episode) that yields per-episode video entries.

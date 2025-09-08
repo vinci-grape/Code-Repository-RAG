@@ -1,0 +1,54 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/mitele.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for MiTele (mitele.es) video pages. It leverages the Telecinco-based extraction flow to obtain video formats and metadata from MiTele’s player.
+
+- Key class
+  - MiTeleIE(TelecincoIE): Subclasses the TelecincoIE extractor to reuse common logic for Telecinco-based streams.
+
+- Important constants
+  - IE_DESC = 'mitele.es'
+  - _VALID_URL: Regular expression matching MiTele URLs that end with /player and capturing the video id from the path. Pattern: r'https?://(?:www\.)?mitele\.es/(?:[^/]+/)+(?P<id>[^/]+)/player'
+  - _TESTS: A set of tests verifying extraction:
+    - Test 1: Full metadata for a page with a proper title, description, series, season, episode details, duration, age_limit, timestamp, and upload_date. Expects ext 'mp4' and a specific id.
+    - Test 2: Similar, with skip_download=True in params, to just verify metadata extraction without downloading the video.
+    - Additional tests to check matching behavior for other URLs (only_matching).
+
+- Main functionality (core method)
+  - _real_extract(self, url):
+    - display_id = self._match_id(url): extracts the id portion from the URL using the _VALID_URL pattern.
+    - webpage = self._download_webpage(url, display_id): fetches the page HTML.
+    - pre_player = self._parse_json(self._search_regex(r'window\.\$REACTBASE_STATE\.prePlayer_mtweb\s*=\s*({.+})', webpage, 'Pre Player'), display_id)['prePlayer']:
+      - Locates a JSON blob embedded in a JavaScript variable window.$REACTBASE_STATE.prePlayer_mtweb, and parses it to get the prePlayer structure.
+    - title = pre_player['title']: top-level title from the prePlayer state.
+    - video_info = self._parse_content(pre_player['video'], url): delegates to the base Telecinco logic to parse the actual video streams/formats.
+    - content = pre_player.get('content') or {}
+    - info = content.get('info') or {}
+    - Merge and enrich video_info with metadata:
+      - 'title': title
+      - 'description': info.get('synopsis')
+      - 'series': content.get('title')
+      - 'season_number': int_or_none(info.get('season_number'))
+      - 'episode': content.get('subtitle')
+      - 'episode_number': int_or_none(info.get('episode_number'))
+      - 'duration': int_or_none(info.get('duration'))
+      - 'age_limit': int_or_none(info.get('rating'))
+      - 'timestamp': parse_iso8601(pre_player.get('publishedTime'))
+    - Return video_info containing both the parsed video formats and the enriched metadata.
+
+- Implementation details
+  - Parsing helpers:
+    - _parse_json used to convert the JSON-like string extracted from the page into a Python dict.
+    - _search_regex used to locate the embedded JSON in the page content.
+    - int_or_none converts strings to integers safely (or returns None if not parseable).
+    - parse_iso8601 converts an ISO8601 timestamp string to a Unix timestamp.
+  - Data flow relies on the structure of MiTele’s React-based prePlayer state, particularly the prePlayer object containing title, video, content, and publishedTime.
+  - The code builds a comprehensive info dictionary by combining video data from _parse_content with rich metadata from the prePlayer state.
+
+- Key implementation details
+  - Designed to work with page structures where the video data is exposed in a JavaScript object assigned to window.$REACTBASE_STATE.prePlayer_mtweb.
+  - Uses TelecincoIE’s _parse_content to handle actual media extraction, ensuring compatibility with Telecinco’s delivery formats.
+  - Handles missing nested dictionaries gracefully by using .get(..., {}) and defaulting to None where appropriate.
+  - Focuses on extracting and normalizing metadata (season/episode numbers, duration, timestamps) to match the standard youtube-dl info_dict schema.
+
+Overall, the module provides a MiTele-specific extractor by parsing the prePlayer state from the page, leveraging the Telecinco base extractor for the actual video formats, and enriching the result with structured metadata like series, season/episode, duration, and timestamps.

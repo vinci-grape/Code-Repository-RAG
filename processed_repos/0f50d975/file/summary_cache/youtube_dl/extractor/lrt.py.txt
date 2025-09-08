@@ -1,0 +1,52 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/lrt.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor for Lithuanian Public Radio (LRT) media pages (lrt.lt), enabling retrieval of video/audio metadata and streams from the LRT “mediateka/irasas” pages.
+
+- Core class
+  - LRTIE(InfoExtractor)
+    - IE_NAME = 'lrt.lt'
+    - _VALID_URL: Regular expression to match LRT media URLs, capturing:
+      - path: the part like /mediateka/irasas/...
+      - id: numeric video ID
+    - _TESTS: Two test cases
+      - Test 1: m3u8/MP4 download example with id 2000127261, asserting fields like ext, title, description, duration, timestamp, and upload_date.
+      - Test 2: direct MP3 download example with id 1013074524, asserting fields including ext, title, description, duration, and placeholder int types for view_count and like_count.
+
+- Helper method
+  - _extract_js_var(self, webpage, var_name, default)
+    - Extracts a JavaScript variable value from the page using a regex.
+    - Pattern: var_name = "value" or var_name = 'value'
+    - Returns the inner string value (group=2) or the provided default if not found.
+    - Used to fetch dynamic data embedded in the page (e.g., main_url, media_info_url).
+
+- Main extraction flow
+  - _real_extract(self, url)
+    - Parses path and video_id from the URL via the _VALID_URL regex.
+    - Downloads the webpage content.
+    - media_url = value of JS variable main_url; if not present, defaults to path.
+    - media_info_url = value of JS variable media_info_url; if not present, defaults to 'https://www.lrt.lt/servisai/stream_url/vod/media_info/'.
+    - Fetches JSON from the media_info_url with a query parameter {'url': media_url}.
+      - This returns a media dictionary containing 'playlist_item' and other metadata.
+    - jw_data = _parse_jwplayer_data(media['playlist_item'], video_id, base_url=url)
+      - Parses JWPlayer data to extract stream formats and related metadata.
+    - json_ld_data = _search_json_ld(webpage, video_id)
+      - Extracts metadata from JSON-LD data embedded in the page.
+    - Tags extraction:
+      - Iterates over media.get('tags') (or []) and collects tag['name'] values, skipping any with no name.
+    - clean_info:
+      - description: clean_html(media.get('content'))
+      - tags: list of tag names
+    - Returns merge_dicts(clean_info, jw_data, json_ld_data)
+      - Combines description and tags with JWPlayer-derived data and JSON-LD data. Later dictionaries override earlier ones on key conflicts.
+
+- Important implementation details
+  - Uses _download_webpage to fetch the HTML page.
+  - Uses _download_json to fetch structured media data from the media info URL, with a query parameter url=media_url.
+  - Relies on _parse_jwplayer_data to interpret JWPlayer playlist information.
+  - Uses _search_json_ld to augment metadata via JSON-LD.
+  - Cleans description text with clean_html.
+  - Handles missing tags gracefully by defaulting to an empty list.
+  - Merges multiple sources of metadata using merge_dicts to produce the final information dictionary for the media item.
+
+In short, the extractor discovers the media URL and a companion media-info URL from the page’s JavaScript variables, fetches JWPlayer playlist data and JSON-LD metadata, collects tags and a cleaned description, and then merges all sources into a final metadata dictionary with the appropriate file extension and IDs as demonstrated in the tests.

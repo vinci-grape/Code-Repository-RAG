@@ -1,0 +1,53 @@
+Here is a concise, comprehensive summary of the code in youtube-dl/setup.py:
+
+Overview
+- A setup script for the youtube-dl project that supports both traditional source/distribution packaging and Windows executable packaging via py2exe.
+- It gracefully handles environments with or without setuptools and adapts to whether py2exe is requested.
+
+Main functionality
+- Detects packaging backend availability:
+  - Tries to import setuptools; if unavailable, falls back to distutils and notes setuptools_available = False.
+  - Attempts to import py2exe; if missing and the user requested py2exe on the command line, it prints an error and exits.
+- Version handling:
+  - Loads the package version by executing youtube_dl/version.py (without importing the package) to obtain __version__.
+- py2exe packaging path:
+  - Defines py2exe_options (bundle_files, compression, optimization, dist_dir, and dll_excludes).
+  - Sets up py2exe_console with the executable entry using youtube_dl/__main__.py, including version, description, and product details.
+  - If the command is py2exe, uses py2exe_params to configure packaging as a Windows executable.
+- Standard packaging path (non-py2exe):
+  - Prepares data_files for distribution (bash completion, fish completion, README, man page) if those files exist.
+  - If any of the data files are missing, issues a warning but continues packaging.
+  - Builds a data_files structure mapping directories to present files.
+  - If setuptools is available, adds an entry_points entry for console_scripts: youtube-dl = youtube_dl:main.
+  - If setuptools is not available, falls back to using scripts: bin/youtube-dl.
+- Custom build step:
+  - Defines a custom distutils Command named build_lazy_extractors.
+  - When run, it executes devscripts/make_lazy_extractors.py to generate youtube_dl/extractor/lazy_extractors.py. This is used to lazily load extractors.
+- Setup invocation:
+  - Metadata: name, version, description, long_description, URL, author/maintainer details, and license (Unlicense).
+  - Packages included: youtube_dl, youtube_dl.extractor, youtube_dl.downloader, youtube_dl.postprocessor.
+  - Classifiers enumerate broad Python version compatibility (Python 2.x up to 3.x, and multiple implementations) and other metadata like topic and environment.
+  - cmdclass includes the custom build_lazy_extractors command.
+  - Composed parameters (**params) come from either the py2exe path or the standard packaging path (data_files or console_scripts entry_points, plus possibly scripts).
+
+Key implementation details
+- Version retrieval:
+  - Uses exec(compile(open('youtube_dl/version.py').read(), 'youtube_dl/version.py', 'exec')) to populate __version__ without importing the package.
+- py2exe specifics:
+  - py2exe_options includes bundling, compression, optimization, and excludes certain DLLs (w9xpopen.exe, crypt32.dll).
+  - py2exe_console points to youtube_dl/__main__.py as the entry script with descriptive fields (description, comments, product_name, product_version).
+  - When building with py2exe, the setup uses py2exe_params; otherwise, the normal packaging path is used.
+- Data files handling:
+  - Checks for the existence of files before including them; missing files trigger warnings suggesting running make to build generated files.
+  - Data files are grouped under etc/bash_completion.d, etc/fish/completions, share/doc/youtube_dl, and share/man/man1.
+- Entry points vs scripts:
+  - If setuptools is available, uses console_scripts entry point so youtube-dl can be executed as a Python script installed by packaging.
+  - If setuptools is not available, uses a scripts entry pointing to bin/youtube-dl, maintaining compatibility with older tooling.
+- Custom build_lazy_extractors:
+  - A dedicated command to prebuild the extractor lazy loading module, executed via Python during the setup process with spawn (ensuring it respects dry_run).
+- Package scope:
+  - Includes core module and subpackages: youtube_dl, youtube_dl.extractor, youtube_dl.downloader, youtube_dl.postprocessor.
+- Licensing and metadata:
+  - License set to Unlicense, with authorship and maintainership details included in the setup metadata.
+
+In short, setup.py configures both Windows executable packaging (py2exe) and standard Python packaging, dynamically determines version, conditionally includes data files or console entry points, and adds a custom command to prebuild lazy extractors, all while maintaining compatibility across multiple Python versions and packaging backends.

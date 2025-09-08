@@ -1,0 +1,49 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/xminus.py
+
+- Purpose
+  - A YouTube-DL extractor for tracks on the x-minus.org site. It parses the track page to produce metadata and a direct download URL for the MP3.
+
+- Class and URL pattern
+  - Class: XMinusIE(InfoExtractor)
+  - _VALID_URL: matches URLs like http(s)://(www.)x-minus.org/track/{id}
+  - _TEST: includes a sample URL and expected info_dict (id, ext, title, duration, tbr, filesize_approx, view_count, description) to verify functionality.
+
+- Core functionality (_real_extract)
+  - Extracts video_id from URL using _match_id and downloads the track page.
+  - Artist and title:
+    - artist: parsed from an anchor linking to /artist/\d+ via an HTML regex.
+    - title: constructed as "artist-title" by concatenating the artist with the track title extracted from a span element with class "minustrack-full-title".
+  - Duration:
+    - Parsed from a span with class "player-duration" (optional/fatal handling via fatal=False) and converted with parse_duration.
+  - Bitrate and filesize:
+    - Attempts to parse a div with class "dw-info" containing a bitrate (кбит/c) and filesize (мб). If found, sets:
+      - tbr = bitrate as float
+      - filesize_approx = filesize_in_mb * 1,000,000
+  - View count:
+    - Parsed from a span with class "icon-chart-bar" and converted to int (optional).
+  - Description:
+    - Optional lyrics/description extracted from a pre block with id "lyrics-original"; newline normalization performed if present.
+  - Download URL generation:
+    - Extracts an encoded data string k from a div with id "player-bottom" attribute data-k.
+    - Computes h = current_time_in_seconds / 3600 (hours since epoch).
+    - Computes a = sum of the Unicode code points of characters in k + int(video_id) + h.
+    - Builds a direct MP3 URL: http://x-minus.me/dl/minus?id={video_id}&tkn2={a}f{h}
+      - Note: the tkn2 parameter is formed by integer a, the literal character 'f', and the float hour h (formatted as %df%d in the code).
+  - Return values:
+    - id: video_id
+    - title: constructed title
+    - url: the computed download URL
+    - ext: 'mp3' (extension is not known until you fetch/download)
+    - duration: parsed duration (if available)
+    - filesize_approx: approximate filesize (if parsed)
+    - tbr: total bitrate (if parsed)
+    - view_count: view count (if parsed)
+    - description: lyrics/description (if present)
+
+- Key implementation details
+  - Uses targeted HTML regexes to extract artist, title, duration, view count, and lyrics.
+  - Handles optional fields (duration, filesize, view_count, description) gracefully with fatal=False and int_or_none.
+  - The download URL is generated dynamically using a time-based token (tkn2) derived from the page’s data-k value and the current time, which is a common anti-scraping measure on x-minus.
+  - The final info dict follows youtube-dl conventions, with ext set to 'mp3' as a placeholder until actual download is confirmed.
+
+Overall, this extractor focuses on assembling a meaningful track title, metadata (duration, bitrate, filesize, view count, description), and a time-dependent direct download URL from the x-minus track page.

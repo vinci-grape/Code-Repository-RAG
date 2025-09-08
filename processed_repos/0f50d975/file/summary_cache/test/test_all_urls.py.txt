@@ -1,0 +1,30 @@
+- Purpose: A unittest module that validates the URL matching logic of youtube-dl’s extractors. It ensures each URL maps to the correct extractor (IE_NAME), prevents duplicates, and covers a wide range of sites and URL patterns (YouTube, Facebook, Vimeo, Tumblr, PBS, SoundCloud, Tumblr, etc.).
+
+- Key components:
+  - TestAllURLsMatching (unittest.TestCase)
+    - setUp: Builds the list of all extractors via gen_extractors().
+    - matching_ies(url): Returns the IE_NAMEs of extractors for which suitable(url) is True, excluding the generic extractor.
+    - assertMatch(url, ie_list): Asserts that the URL matches exactly the given list of IE_NAMEs.
+  - Several test methods covering different domains and URL types:
+    - test_youtube_playlist_matching: Verifies YouTube playlist and tab extraction names for various playlist URLs, including top tracks and direct playlist IDs.
+    - test_youtube_matching: Checks general YouTube URL patterns (short URLs, embed, API endpoints, and a non-YouTube page) map to the correct extractor.
+    - test_youtube_channel_matching / test_youtube_user_matching: Ensure channel and user URLs map to youtube:tab.
+    - test_youtube_feeds: Verifies YouTube feeds map to youtube:tab.
+    - test_youtube_search_matching: Ensures search result URLs map to youtube:search_url.
+    - test_facebook_matching: Confirms Facebook photo URLs are matched by FacebookIE.
+    - test_no_duplicates: For every test case from test.helper.gettestcases(include_onlymatching=True), ensures only the intended extractor matches the URL; others should not.
+    - test_keywords: Validates keyword shortcuts like :ytsubs, :ytsubscriptions, :ythistory map to the appropriate YouTube extractors.
+    - test_vimeo_matching: Checks various Vimeo URL patterns map to the correct Vimeo extractors (channel, user, etc.).
+    - test_soundcloud_not_matching_sets: Ensures SoundCloud sets URL does not incorrectly match an unintended extractor.
+    - test_tumblr: Verifies Tumblr URLs map to Tumblr extractor.
+    - test_pbs: Checks PBS URLs map to the PBS extractor (regression test for a reported issue).
+    - test_no_duplicated_ie_names: Ensures IE_NAME values are unique across all extractors (case-insensitive).
+
+- Important implementation details:
+  - Uses gen_extractors() to instantiate all extractor classes dynamically.
+  - Leverages each extractor’s suitable(url) method to determine matching, then compares against expected IE_NAME(s).
+  - Special handling to exclude generic extractor when listing matches.
+  - Uses test.helper.gettestcases(include_onlymatching=True) to validate no duplicated or unintended matches against a suite of known test URLs.
+  - test_no_duplicated_ie_names builds a frequency map of IE_NAMEs (lowercased) to ensure each is unique across extractors.
+
+- Running: The module can be executed directly as a script; it calls unittest.main() when run as the main program.

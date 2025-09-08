@@ -1,0 +1,25 @@
+Summary:
+- This file defines a Youtube-dl extractor for FujiTV FOD Plus7 content.
+- Class: FujiTVFODPlus7IE(InfoExtractor)
+  - _VALID_URL: matches URLs of the form http(s)://i.fod.fujitv.co.jp/plus7/web/<4 alphanumeric>/<id>
+  - _BASE_URL: base domain used to construct full URLs for resources
+  - _BITRATE_MAP: maps known tbr (bitrate) values to corresponding video resolutions:
+    - 300 -> 320x180
+    - 800 -> 640x360
+    - 1200 -> 1280x720
+    - 2000 -> 1280x720
+- Core logic in _real_extract:
+  - Extracts video_id from URL using _match_id.
+  - Builds an m3u8 formats URL: BASE_URL + 'abr/pc_html5/{video_id}.m3u8' and fetches formats via _extract_m3u8_formats.
+  - Iterates through the retrieved formats; for each format, if its tbr (bitrate) matches one in _BITRATE_MAP, assigns the corresponding width and height (resolution) to the format.
+  - Sorts formats with _sort_formats for consistent ordering.
+  - Returns a dict with:
+    - id: video_id
+    - title: video_id (same as id)
+    - formats: list of available formats with resolution metadata added where applicable
+    - thumbnail: BASE_URL + 'pc/image/wbtn/wbtn_{video_id}.jpg'
+Implementation details:
+- Uses the base class helper _extract_m3u8_formats to parse the HLS/m3u8 stream and produce a list of format dictionaries.
+- Adds explicit width and height attributes to formats when certain standard bitrates are present, improving downstream presentation.
+- Thumbnail URL is constructed from the video_id with a specific path pattern.
+- Keeps compatibility with youtube-dl’s standard InfoExtractor workflow and is focused on extracting streaming formats and a thumbnail for FujiTV FOD Plus7 content.

@@ -1,0 +1,45 @@
+Summary of karrierevideos.py
+
+- Purpose: YouTube-dl extractor for karrierevideos.at. It resolves a video page into a playable RTMP FLV stream by parsing the page, extracting a video id, fetching a JWPlayer playlist XML, and building the final download info.
+
+- Main class:
+  - KarriereVideosIE(InfoExtractor)
+
+- URL pattern:
+  - _VALID_URL matches http/https URLs for karrierevideos.at and captures the last path component as id.
+  - Example: http://www.karrierevideos.at/berufsvideos/.../altenpflegerin
+
+- Key methods and flow:
+  - _real_extract(url):
+    - video_id = _match_id(url): initial id from the URL.
+    - webpage = _download_webpage(url, video_id): fetch page HTML.
+    - title extraction: try meta 'title' or fallback regex for <h1 class="title">.
+    - internal video id extraction: _search_regex('/config/video/(.+?)\.xml', webpage, 'video id') from the page.
+    - fetch playlist XML: GET http://www.karrierevideos.at/player-playlist.xml.php?p=<video_id>
+      - Uses transform_source=fix_xml_ampersands to fix malformed XML ampersands.
+      - Sets header Accept-Encoding: '*' to avoid gzipped results.
+    - XML namespace handling: defines NS_MAP with jwplayer namespace and a helper ns(path) to apply the namespace in XPath queries.
+    - Parse playlist:
+      - item = playlist.find('./tracklist/item')
+      - video_file = xpath_text(item, ns('./jwplayer:file'), 'video url', fatal=True)
+      - streamer = xpath_text(item, ns('./jwplayer:streamer'), 'streamer', fatal=True)
+      - uploader = xpath_text(item, ns('./jwplayer:author'), 'uploader')
+      - duration = float_or_none(xpath_text(item, ns('./jwplayer:duration'), 'duration'))
+    - description: extracted from the page HTML via regex (?s)<div class="leadtext">(.+?)</div>
+    - thumbnail: pulled from meta 'thumbnail' on the page, resolved to absolute URL if present.
+    - Return dict with:
+      - id: video_id from the XML
+      - url: streamer with 'rtmpt' replaced by 'rtmp' (ensures RTMP)
+      - play_path: 'mp4:<video_file>'
+      - ext: 'flv'
+      - title, description, thumbnail, uploader, duration
+
+- Important implementation details:
+  - Handles potentially malformed XML in the playlist via fix_xml_ampersands.
+  - Uses a specific JWPlayer XML namespace (jwplayer) to extract fields like file, streamer, author, and duration.
+  - Accept-Encoding header is forced to '*' to avoid gzipped XML responses that could break parsing.
+  - Description and thumbnail extraction are robust to missing data; thumbnail is converted to an absolute URL if present.
+  - The final media URL uses RTMP (streamer) and the play_path points to an MP4 file within the JWPlayer playlist.
+
+- Tests:
+  - _TESTS contains two sample URLs with expected info dicts (id, ext='flv', title, description md5, thumbnail pattern) and skip_download to only test metadata extraction and RTMP path construction.

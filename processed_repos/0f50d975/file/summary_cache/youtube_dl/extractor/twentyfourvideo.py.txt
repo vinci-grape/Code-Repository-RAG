@@ -1,0 +1,61 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/twentyfourvideo.py
+
+Purpose:
+- Implement an extractor for the 24video network (domains like 24video.net, .me, .xxx, .tube, etc.) to obtain video metadata and a direct video URL.
+
+Key class:
+- TwentyFourVideoIE (subclass of InfoExtractor)
+
+Main components:
+- _VALID_URL: Regular expression that matches 24video URLs and captures:
+  - host: supports various 24video domains (www or porno? prefix plus 24video.*).
+  - id: numeric video ID.
+  - URL patterns supported include /video/view/<id> and /player/new24_play.swf?id=<id>.
+
+- _TESTS: Example test cases for the extractor, ensuring it can parse the primary URL and extract metadata (title, description, thumbnail, uploader, duration, timestamp, etc.) and that other known URL patterns only match (without extracting).
+
+- _real_extract(self, url): Core extraction flow
+  1) Parse URL to obtain video_id and host.
+  2) Download the main video page:
+     - URL: http://<host>/video/view/<video_id>
+     - Use the downloaded page to extract metadata.
+  3) Metadata extraction from the webpage:
+     - title: from Open Graph data (og:title).
+     - description: from a tag with itemprop="description" (HTML regex, non-fatal if missing).
+     - thumbnail: Open Graph image (og:image).
+     - duration: from og:duration (converted to int, non-fatal if missing).
+     - timestamp: parsed from a <time datetime="..."> tag with itemprop="uploadDate" (via regex + parse_iso8601).
+     - uploader: parsed from a pattern containing class="video-uploaded" with a link containing the uploader name.
+     - view_count: numeric value extracted from a “video-views” span (Russian label looked for).
+     - comment_count: numeric from a tab-comments link (non-fatal, default None if missing).
+  4) Initialize cookies via an init XML request:
+     - GET http://<host>/video/xml/<video_id>?mode=init
+     - This prepares session state as required by the server.
+  5) Retrieve the video XML:
+     - GET http://<host>/video/xml/<video_id>?mode=play
+  6) Parse the video XML to extract the actual video formats:
+     - video element is located with xpath_element(video_xml, './/video', 'video', fatal=True)
+     - formats: a list with a single dict containing:
+       - url: from the video element’s url attribute (xpath_attr(video, '', 'url', 'video URL', fatal=True))
+     - like_count / dislike_count: from video attributes ratingPlus and ratingMinus
+     - age_limit: 18 if video attribute adult is 'true', else 0
+  7) Return a dictionary with:
+     - id: video_id
+     - title, description, thumbnail, uploader, duration, timestamp
+     - view_count, comment_count, like_count, dislike_count, age_limit
+     - formats: as assembled above
+
+Important implementation details:
+- Uses helper utilities from youtube_dl:
+  - parse_iso8601 to parse the upload timestamp
+  - int_or_none to safely convert numeric values
+  - xpath_attr and xpath_element to extract data from the XML/HTML
+- Metadata extraction relies on a mix of:
+  - Open Graph tags (title, image, duration)
+  - HTML regex searches for description, uploader, view/comment counts
+- The extractor explicitly fetches two XML endpoints to obtain the real video URL (init to set cookies, play to fetch the video data).
+- The code assumes a single format (the URL found in the <video> XML element). It does not enumerate multiple video qualities/formats.
+- Age restriction is derived from the XML attribute adult on the video element.
+- The _TESTS include several example URLs to ensure the primary URL is matched and that alternative hostnames/patterns are recognized as matches (but only the first URL yields actual extraction data in tests).
+
+In short, TwentyFourVideoIE fetches the 24video page to gather metadata, then activates session state via an init XML call, retrieves a play XML to obtain the direct video URL, and returns a complete information dictionary suitable for youtube-dl.

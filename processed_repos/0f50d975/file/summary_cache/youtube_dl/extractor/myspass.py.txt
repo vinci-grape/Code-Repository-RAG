@@ -1,0 +1,44 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/myspass.py
+
+- Purpose
+  - Implement an extractor for MySpass video pages to obtain metadata and a direct video URL for download.
+
+- Main class
+  - MySpassIE(InfoExtractor)
+
+- URL pattern and testing
+  - _VALID_URL: Matches MySpass video pages and captures the numeric video id at the end of the path.
+  - _TEST: Provides a sample URL, expected md5 of the video, and an info_dict with id, ext, title, description, and thumbnail for testing.
+
+- Core functionality (_real_extract)
+  - Extracts video_id from the URL using _match_id.
+  - Downloads metadata XML from:
+    http://www.myspass.de/myspass/includes/apps/video/getvideometadataxml.php?id=<video_id>
+  - Parses metadata XML to extract:
+    - title (fatal if missing)
+    - url_flv (video URL; attempts to fallback via 'download url' label and requires it present)
+    - imagePreview (thumbnail)
+    - description
+    - duration (parsed with parse_duration)
+    - format (used as series)
+    - season (converted to int for season_number)
+    - season_id
+    - episode (set to title)
+    - episode (number, parsed as int for episode_number)
+  - Post-processing of video URL to fix path segments:
+    - Looks for numeric groups in the URL matching the pattern /myspass2009/<digits>/<digits>/<digits>/
+    - Replaces any group that is greater than the numeric video_id with group_int // video_id_int (integer division)
+    - This is a workaround to normalize the URL’s path segments to obtain a valid direct video URL.
+  - Returns a dict with keys:
+    - id, url, title, thumbnail, description, duration, series, season_number, season_id, episode, episode_number
+  - The 'ext' key is inferred by youtube-dl from the final URL (as shown in the _TEST with ext 'mp4').
+
+- Key implementation details
+  - Uses existing utilities:
+    - xpath_text for extracting XML fields
+    - int_or_none to safely convert strings to integers
+    - parse_duration to convert duration strings to seconds
+  - Handles potential absence of certain XML fields gracefully (some fields are optional or have fallbacks).
+  - The URL normalization logic relies on integer division and string replacement to adjust path segments in the video URL.
+
+Overall, the extractor fetches MySpass video metadata, derives a direct video URL (with a specific URL-mending heuristic), and returns a structured metadata dictionary suitable for youtube-dl to download the video.

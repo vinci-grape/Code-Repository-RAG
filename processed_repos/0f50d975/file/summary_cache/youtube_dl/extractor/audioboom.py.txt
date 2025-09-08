@@ -1,0 +1,64 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/audioboom.py
+
+- Purpose
+  - Implement an InfoExtractor for AudioBoom, able to fetch audio information from AudioBoom posts or boos pages.
+
+- Key class
+  - AudioBoomIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL matches URLs like https://audioboom.com/posts/12345 or /boos/12345
+
+- Tests
+  - _TESTS contains two tests:
+    - A real post URL with expected id, title, description, duration, uploader, and uploader_url, plus an md5 for the downloaded audio.
+    - A URL with a time parameter, marked only_matching.
+
+- Main extraction logic (_real_extract)
+  - Derives video_id from URL using _match_id.
+  - Downloads the page via _download_webpage.
+  - Attempts to read a JSON blob from the page data-new-clip-store attribute:
+    - Uses a regex to locate data-new-clip-store and extract the JSON content.
+    - Parses the JSON with _parse_json (fatal=False) to avoid failing if not present.
+    - If a clip is found (clips[0] is a dict), stores it in clip.
+  - Helper function from_clip(field):
+    - If a clip exists, returns clip.get(field); otherwise None.
+
+- Data extraction with fallbacks
+  - audio_url:
+    - Primary: from_clip('clipURLPriorToLoading')
+    - Fallback: OpenGraph audio URL via _og_search_property('audio', webpage)
+  - title:
+    - Primary: from_clip('title')
+    - Fallback: meta tags og:title, og:audio:title, or audio_title via _html_search_meta
+  - description:
+    - Primary: from_clip('description')
+    - Fallback: cleaned from_clip('formattedDescription'), then OpenGraph description via _og_search_description
+  - duration:
+    - Primary: float_or_none(from_clip('duration'))
+    - Fallback: weibo:audio:duration meta via _html_search_meta
+  - uploader:
+    - Primary: from_clip('author')
+    - Fallback: og:audio:artist, twitter:audio:artist_name, or audio_artist via _html_search_meta
+  - uploader_url:
+    - Primary: from_clip('author_url')
+    - Fallback: audioboo:channel via _html_search_meta
+
+- Return value
+  - A dict containing:
+    - id: video_id
+    - url: audio_url
+    - title
+    - description
+    - duration
+    - uploader
+    - uploader_url
+
+- Implementation details
+  - Uses a two-layer data source: a clip store JSON embedded in the page (data-new-clip-store) with potential clip data, plus robust fallbacks to standard OpenGraph/meta tags.
+  - clean_html is used to sanitize the description.
+  - float_or_none is used to parse duration robustly.
+  - _parse_json is called with fatal=False to gracefully handle missing or malformed JSON.
+  - Fallbacks ensure extraction still works if the clip data is not available.
+
+Overall, this extractor prioritizes clip data from AudioBoom’s embedded clip store, with well-defined fallbacks to metadata, to obtain audio URL, title, description, duration, and uploader information.

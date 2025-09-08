@@ -1,0 +1,69 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/vice.py.
+
+High-level
+- Implements multiple extractors for Vice content: videos, shows, and articles. Uses a common base for API access and shared utilities for authentication and formatting.
+- Integrates with Adobe Pass for MVPD-authenticated (geoblocked/locked) content.
+- Handles various Vice content delivery paths (GraphQL API, preplay endpoints, m3u8 formats, and subtitles) and routes non-video pages to other known IEs (YouTube, Ooyala).
+
+Key classes
+1) ViceBaseIE (InfoExtractor)
+- Provides _call_api(resource, resource_key, resource_id, locale, fields, args='') to fetch data from Vice GraphQL API at https://video.vice.com/api/v1/graphql.
+- Constructs a dynamic GraphQL query and returns data[resource].
+
+2) ViceIE (Video extractor)
+- Inherits ViceBaseIE and AdobePassIE.
+- _VALID_URL matches Vice video pages and embed URLs, with locale and 24-char hex video id.
+- _real_extract(url):
+  - Fetches video metadata via _call_api('videos', 'id', video_id, locale, fields: body, locked, rating, thumbnail_url, title).
+  - If video is locked, obtains MVPD resource and acquires a tvetoken via _extract_mvpd_auth.
+  - Generates a signature for preplay requests: exp = current_time + 1440, sign = sha512(video_id:GET:exp). Uses skipadstitching, platform desktop, and a random rn.
+  - Requests preplay data from vms.vice.com, handling 400/401 errors gracefully by surfacing a helpful message.
+  - Extracts video_data, formats (via _extract_m3u8_formats on preplay['playURL']), subtitles, and metadata.
+  - Returns a dict with formats, id, title, description, thumbnail, duration, timestamp, age_limit, series, episode/season info, uploader details, and subtitles.
+- Key implementation details:
+  - Signature-based access for preplay streaming (reverse-engineered from Vice’s player).
+  - Supports AES-encrypted m3u8 and standard m3u8 formats.
+  - Subtitles gathered from preplay['subtitleURLs'] with language-code handling.
+  - Robust error handling for MVPD/authorization issues.
+
+3) ViceShowIE (Show extractor)
+- Inherits ViceBaseIE.
+- _VALID_URL matches shows on Vice (video.vice.com or viceland/vt URLs).
+- _fetch_page(locale, show_id, page): queries shows via GraphQL with paging (page, per_page) to retrieve video entries; yields url_result entries pointing to ViceIE for each video.
+- _real_extract(url):
+  - Fetches show metadata (slug -> id, title, dek) via _call_api('shows','slug', display_id, locale, fields).
+  - Builds a paged list (OnDemandPagedList) using _fetch_page and returns a playlist_result with show id, title, and dek.
+
+4) ViceArticleIE (Article extractor)
+- Inherits ViceBaseIE.
+- _VALID_URL matches articles on vice.com with locale and article id.
+- _real_extract(url):
+  - Retrieves article body and embed_code via GraphQL _call_api('articles','slug', display_id, locale, fields).
+  - Tries to locate a video URL in the article body in several ways:
+    - Vice video URLs via ViceIE._extract_url(body).
+    - Ooyala embed via embedCode in body -> returns as an Ooyala URL.
+    - YouTube URL via YouTubeIE._extract_url(body).
+    - data-video-url in embed_code for a direct Vice video URL.
+  - Returns a url_transparent entry for whichever embedding is found, with appropriate IE key (ViceIE, YoutubeIE, or Ooyala).
+
+Key implementation details and behaviors
+- GraphQL-based data access via ViceBaseIE._call_api, enabling retrieval of video/show/article metadata.
+- MVPD/protected content support via Adobe Pass (ViceIE) using _get_mvpd_resource and _extract_mvpd_auth.
+- Preplay authentication/signature mechanism:
+  - exp = current time + 1440 seconds.
+  - sign = sha512("<video_id>:GET:<exp>").
+  - Includes skipadstitching, platform, and a random rn value.
+- Error handling for preplay requests: surface user-friendly errors when API returns 400/401 with a descriptive message.
+- Format extraction:
+  - Uses _extract_m3u8_formats for the play URL, supports m3u8_native, and sorts formats.
+- Subtitles: collected from preplay subtitleURLs, grouped by language (falling back to 'en' if language not available).
+- Metadata mapping:
+  - title, description, thumbnail, duration, timestamp, age_limit (parsed from video rating or rating field).
+  - Show/episode/season metadata mapped to fields like series, episode_number, season_number, uploader, and uploader_id.
+- Article extraction intelligently proxies to other IEs (Vice video, YouTube, Ooyala) when articles embed media, via url_transparent results.
+
+Tests
+- Includes multiple _TESTS for Vice videos, shows, and articles to validate URLs, required fields, and fallback behaviors (e.g., skip_download for m3u8, embedding via different IEs).
+
+Overall
+- A multi-faceted extractor set for Vice content: direct video extraction with MVPD support and preplay handling, show-based playlists with paging, and article-based embedding detection that delegates to other IEs when appropriate.

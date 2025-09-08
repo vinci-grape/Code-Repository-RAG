@@ -1,0 +1,92 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/nova.py.
+
+Main purpose
+- Implement two InfoExtractors for the Nova.cz family of video pages:
+  - NovaEmbedIE: handles embedded players from media.cms.nova.cz embed URLs.
+  - NovaIE: main extractor for Nova.cz and its sister sites (TN, Prásk, Novaplus, FANDA, Krásná, Doma, etc.), including handling of direct pages and embedded players.
+
+Key classes and main functionality
+1) NovaEmbedIE (InfoExtractor)
+- Purpose: extract video formats from embedded Nova players (embed URLs).
+- URL pattern: http(s)://media.cms.nova.cz/embed/<id>
+- Extraction flow:
+  - Download the page and extract a Player.init(...) JSON-like object from the page using a regex.
+  - If the player data is found:
+    - Iterate over player['tracks'] to get available formats.
+    - Normalize each format entry to a dict and read:
+      - format URL (src), format type (type), and extension from URL.
+      - If type is HLS (application/x-mpegURL) or id is HLS or URL ends with m3u8: extract HLS formats via _extract_m3u8_formats.
+      - If type is DASH (application/dash+xml) or id is DASH or URL ends with mpd: extract DASH formats via _extract_mpd_formats.
+      - Otherwise, add a simple format with just 'url'.
+    - duration is read from player['duration'] if present.
+  - Else (fallback path, old/newer compatibility path as of 2020):
+    - Attempt to parse a legacy bitrates structure from the page (src or bitrates) and construct formats:
+      - Special handling for HLS (via _extract_m3u8_formats).
+      - For other URLs, attach quality metadata by inspecting substrings like lq/mq/hq/hd and assign a format_id and quality accordingly.
+  - Sort formats with _sort_formats.
+  - Extract title (OG title or regex), thumbnail (OG or poster), and duration (videoDuration).
+  - Return a dict with id, title, thumbnail, duration, and formats.
+
+2) NovaIE (InfoExtractor)
+- Purpose: primary extractor for Nova.cz group sites (TN, Prásk, Nova, Novaplus, FANDA, Krásná, Doma, etc.).
+- URL pattern: captures site (tvnoviny, tn, novaplus, vymena, fanda, krasna, doma, prask) and article/video id from Nova.cz URLs.
+- Tests cover TN.cz, FANDA, Novaplus embed, and a few “only_matching” examples.
+- Extraction flow:
+  - Download the page and derive description from OG description.
+  - Derive upload_date for some sites:
+    - novaplus: from display_id suffix (dd-mm-YYYY) via unified_strdate.
+    - fanda: from an internal date in the page via regex.
+    - Others: None.
+  - Check for novaplus embed:
+    - Look for an iframe with src pointing to //media.cms.nova.cz/embed/<embed_id>.
+    - If found, return a url_transparent pointing to NovaEmbedIE with:
+      - url = https://media.cms.nova.cz/embed/<embed_id>
+      - ie_key = NovaEmbedIE.ie_key()
+      - id = embed_id
+      - description and upload_date preserved
+  - Video id detection:
+    - Try multiple patterns: (media|video_id): '12345', media=12345, id="article_video_12345", id="player_12345".
+  - Config URL resolution:
+    - Primary: look for a config URL in the page via a regex pointing to bin/player/videojs/config.php with https://tn.nova.cz or https://api.nova.cz.
+    - If not found, try to parse a Player(...) JSON block in the page (transform JS to JSON) to extract configUrl and configParams.
+    - If still not found:
+      - Use a default site_id mapping for various sites, with a Fallback default_site_id = '23000'.
+      - Build a config URL at https://api.nova.cz/bin/player/videojs/config.php with query params site, media, quality, version.
+  - Download config JSON:
+    - Use _download_json with the built config URL and the collected query params.
+    - Transform the response to only keep the JSON portion (strip extraneous JS around the JSON).
+  - Build formats from config:
+    - mediafile.src gives the video URL.
+    - If the video URL matches an RTMP-like pattern (rtmp or rtmpe with app and playpath), construct a single FLV format dict including:
+      - url, app, play_path, player_path (SWF for video-js), ext='flv'
+    - Otherwise, create a simple format dict with the video URL.
+  - Sort formats with _sort_formats.
+  - Title: prefer mediafile.meta.title, else OG title.
+  - Thumbnail: config.poster (from config JSON).
+  - Return dict including id, display_id, title, description, upload_date, thumbnail, and formats.
+
+Important implementation details
+- Robust handling of multiple sources/formats:
+  - NovaEmbedIE pulls from embedded player track dictionaries, supporting HLS (m3u8) and DASH (mpd) as well as fallbacks to direct URLs.
+  - NovaIE can fetch config via:
+    - Direct config URL discovered in page.
+    - Player(...) embedded JSON (transformed via js_to_json).
+    - A site-wide default config endpoint with a site_id determined by site or fallback mapping.
+- Flexible ID extraction:
+  - NovaEmbedIE relies on a specific embed ID pattern.
+  - NovaIE supports multiple possible identifiers for video id extraction to accommodate different Nova.cz site structures.
+- Date handling:
+  - Uses unified_strdate to normalize dates for novaplus and fanda when present in display_id or page content.
+- Title/description extraction:
+  - Uses OG metadata when available; falls back to explicit page regex searches for title/description.
+- Embedding support:
+  - If a Nova page embeds a video via an iframe to media.cms.nova.cz, NovaIE returns a url_transparent to NovaEmbedIE, so the embedded content is extracted by NovaEmbedIE.
+- Error handling and compatibility:
+  - The code accounts for old/new paths and uses fatal=False in some searches to avoid failing when optional data is missing.
+  - The code uses try/except-like flows via default values to gracefully degrade when certain data isn’t found.
+- Tests:
+  - Includes tests for direct Nova pages, Novaplus embed, and an embedded player path, plus several “only_matching” examples to ensure proper URL matching.
+
+In short
+- NovaEmbedIE extracts video formats from Nova’s embedded players, supporting HLS, DASH, and legacy formats.
+- NovaIE extracts Nova.cz family pages, handles embeds by delegating to NovaEmbedIE, determines video config through multiple strategies, builds a list of formats (including RTMP/FLV when needed), and returns a structured video metadata payload (id, title, description, upload_date, thumbnail, formats).

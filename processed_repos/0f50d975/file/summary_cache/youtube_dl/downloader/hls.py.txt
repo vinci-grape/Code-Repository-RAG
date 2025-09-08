@@ -1,0 +1,73 @@
+Summary of code in ./youtube-dl/youtube_dl/downloader/hls.py
+
+Purpose
+- Implement a limited, native HLS (HTTP Live Streaming) downloader (HlsFD) that can download and decrypt AES-128 encrypted segments from an m3u8 manifest without requiring FFmpeg.
+- If the manifest contains features not supported by this native downloader, it gracefully falls back to an FFmpeg-based downloader (FFmpegFD).
+
+Main components
+- Class HlsFD(FragmentFD)
+  - FD_NAME: "hlsnative"
+  - Inherits fragment downloading utilities from FragmentFD and integrates AES-128 decryption when possible.
+
+Key methods and behavior
+- can_download(manifest, info_dict) (static)
+  - Checks the m3u8 manifest for unsupported features and capabilities:
+    - Rejects certain features via UNSUPPORTED_FEATURES (e.g., media initialization with #EXT-X-MAP:).
+    - Allows only if decryption is possible: either pycrypto is available (can_decrypt_frag) or the manifest is not AES-128 encrypted.
+    - If AES-128 is used, rejects when BYTERANGE is also present (not supported together here).
+    - Rejects live streams (requires not info_dict['is_live']).
+  - Returns True only if all checks pass; otherwise False.
+
+- real_download(self, filename, info_dict)
+  - Fetches the m3u8 manifest from the given URL.
+  - If can_download(manifest, info_dict) is False:
+    - If there is extra_param_to_segment_url or _decryption_key_url, reports an error about missing pycrypto and aborts.
+    - Otherwise, logs a warning and delegates the download to FFmpegFD, wiring progress hooks to preserve progress reporting.
+  - Detects ad fragments within the manifest to separate media fragments from ads.
+  - Builds a context dict (ctx) with filename, total_frags, and ad_frags, and starts fragment download processing via _prepare_and_start_frag_download(ctx).
+  - Iterates through the manifest lines to:
+    - Resolve fragment URLs (relative vs absolute) and apply any extra query parameters.
+    - Handle per-fragment HTTP headers (e.g., Range for BYTERANGE).
+    - Implement fragment retries with a configurable fragment_retries and skip_unavailable_fragments behavior.
+    - Decrypt AES-128 fragments when needed:
+      - Determines IV (either from manifest or derives from media_sequence).
+      - Retrieves the decryption key (via _decryption_key_url or URI) and caches it in decrypt_info['KEY'].
+      - Performs CBC decryption on frag_content unless in test mode.
+    - Append decrypted (or raw) fragment content via _append_fragment(ctx, frag_content).
+    - Support for test mode: only download the first fragment and stop.
+    - Update internal state for media_sequence and handle #EXT-X-KEY, #EXT-X-MEDIA-SEQUENCE, and #EXT-X-BYTERANGE directives.
+    - Manage ad fragment markers (#ANVATO-SEGMENTINFO and #UPLYNK-SEGMENT) to skip or count ad fragments as appropriate.
+  - Finishes by calling _finish_frag_download(ctx) and returns True on success.
+
+Important implementation details
+- Decryption
+  - Uses PyCrypto (Crypto.Cipher.AES) if available (can_decrypt_frag).
+  - AES-128 decryption is performed on the fly after a fragment is downloaded.
+  - IV handling: uses manifest-provided IV if present, otherwise derives IV from the media sequence index.
+  - Key retrieval: fetches the decryption key from the URI specified by #EXT-X-KEY (or _decryption_key_url if provided) and caches it in decrypt_info['KEY'].
+  - Test mode decryption is skipped intentionally to avoid needing valid ciphertext for tests.
+- URL handling and headers
+  - Relative fragment URLs are resolved against the manifest URL.
+  - Optional extra query strings can be applied to both fragment and key URIs.
+  - Byte-range support via #EXT-X-BYTERANGE results in setting Range header for the next fragment.
+- Fragment filtering and ads
+  - The manifest is parsed to count media fragments and ad fragments (to present a correct total and ad count in ctx).
+  - Ad fragments are skipped during the download loop, controlled by ad_frag_next state flag.
+- Fallback behavior
+  - If the manifest contains features not supported by the native HLS downloader, the code falls back to FFmpeg-based downloading, preserving progress hooks and allowing continued extraction with FFmpeg.
+- Error handling
+  - Robust retry logic for fragment downloads with per-fragment retry counts.
+  - If retries are exhausted and skipping is enabled, the downloader skips problematic fragments; otherwise it reports an error and aborts.
+  - If decryption is required but pycrypto is unavailable, an explicit error is reported and the process may fallback to FFmpeg or abort depending on context.
+
+Usage notes and limitations
+- This module provides a lightweight, dependency-light path for HLS downloads, suitable for common non-encrypted and AES-128 encrypted hls streams that do not rely on BYTERANGE or live-stream features.
+- For encrypted streams using BYTERANGE, or streams with features unsupported by this native path, a fallback to FFmpeg is used.
+- Live HLS streams are rejected by this native implementation and require a fallback path or external handling.
+
+Key interactions
+- Uses FragmentFD base methods for fragment download lifecycle management (_prepare_and_start_frag_download, _download_fragment, _append_fragment, _finish_frag_download).
+- Integrates with FFmpegFD as a fallback when necessary.
+- Relies on helper utilities parse_m3u8_attributes and update_url_query, along with compatibility helpers for URL and struct packing.
+
+Overall, the code provides a focused, self-contained HLS downloader with optional AES-128 decryption support and a safe fallback path to FFmpeg for unsupported scenarios.

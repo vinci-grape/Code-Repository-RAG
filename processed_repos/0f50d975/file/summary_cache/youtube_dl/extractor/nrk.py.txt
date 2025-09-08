@@ -1,0 +1,134 @@
+Below is a concise, implementation-focused summary of the code in ./youtube-dl/youtube_dl/extractor/nrk.py.
+
+Overview
+- This module implements multiple extractors for NRK (Norwegian Broadcasting Corporation) content, including NRK TV/Radio, NRK TV series/episodes, podcasts, and Skole (educational) content.
+- It centers around a common NRKBaseIE and a set of specialized extractors that build on it to fetch metadata, formats, subtitles, and playlist entries from NRK’s APIs and content delivery networks.
+
+Key classes and their roles
+- NRKBaseIE(InfoExtractor)
+  - Provides shared NRK utilities and constants.
+  - _GEO_COUNTRIES: ['NO'] to restrict geo-blocked content.
+  - _CDN_REPL_REGEX: regex used to detect NRK CDN endpoints that may need replacement for format retrieval.
+  - _extract_nrk_formats(asset_url, video_id): resolves formats from NRK assets.
+    - If the asset URL is Akamai i/ format, delegates to _extract_akamai_formats.
+    - Otherwise, cleans up URL parameters (bw_low/high, no_audio_only) and tries M3U8 formats via _extract_m3u8_formats.
+    - If that fails and the URL matches CDN replacement, tries a CDN replacement (random nrk-od-XX.akamaized.net) and retries.
+  - _raise_error(data): translates NRK API error payloads into ExtractorError messages.
+    - Handles geo-blocks with raise_geo_restricted for NO.
+  - _call_api(path, video_id, item=None, note=None, fatal=True, query=None): helper to fetch JSON from https://psapi.nrk.no/ with a descriptive message.
+
+- NRKIE( NRKBaseIE )
+  - Main NRK video extractor (video and metadata extraction).
+  - _VALID_URL: supports nrk: and various NRK video URLs (video/*, v8-psapi.nrk.no/mediaelement/*, etc.).
+  - _real_extract(url):
+    - Derives video_id from URL and builds a playback endpoint path 'playback/{video_id}/'.
+    - Calls playback API to obtain manifest; handles nonPlayable by invoking _raise_error.
+    - Iterates manifest['playable']['assets'] to build formats:
+      - Supports HLS/M3U8 assets via _extract_nrk_formats.
+      - Supports mp3 assets with no video (vcodec 'none').
+    - Sorts formats, fetches metadata via manifest API ('metadata').
+    - Extracts title, alt_title, description, duration, thumbnails (poster images), and subtitles (webVtt URLs, language and optional type).
+    - Reads legalAge and maps to age_limit (A -> 0, digits string -> int).
+    - Determines if content is a series; if so, fetches additional program metadata (series, season, episode) and enriches the info dict accordingly. Heuristics for season/episode numbers include:
+      - Parsing Sesong in description, episode title, and explicit episode fields when present.
+    - Returns a consolidated info dict with id, title, alt_title, description, duration, thumbnails, age_limit, formats, subtitles, plus series/season/episode fields if applicable.
+
+- NRKTVIE(InfoExtractor)
+  - Wrapper to expose NRKIE under NRK TV/Radio domain mappings.
+  - _VALID_URL: matches NRK TV/Radio URLs.
+  - _real_extract(url): delegates to NRKIE by returning a nrk:<video_id> URL result.
+
+- NRKTVEpisodeIE(InfoExtractor)
+  - Extractor for NRK TV episode pages.
+  - _VALID_URL matches tv.nrk.no/serie/.../sesong/.../episode/...
+  - _real_extract(url):
+    - Downloads page, extracts NRK ID via JSON-LD, HTML meta, or data-program-id.
+    - Returns a NRKIE-based NRK URL result (nrk:<nrk_id>) with season/episode numbers populated.
+
+- NRKTVSerieBaseIE(NRKBaseIE)
+  - Base for NRK TV series-like pages (series, podcasts).
+  - _extract_entries(entry_list): converts a list of episode objects to NRK video entries (nrk:<id>).
+  - _ASSETS_KEYS = ('episodes', 'instalments')
+  - _extract_assets_key(embedded): detects whether ‘episodes’ or ‘instalments’ exists in embedded data.
+  - _catalog_name(serie_kind): returns 'podcast' for podcast types, otherwise 'series'.
+  - _entries(self, data, display_id): paginates through embedded data, extracting entries and following next links via API calls.
+
+- NRKTVSeasonIE(NRKTVSerieBaseIE)
+  - Handles NRK TV/Radio seasons.
+  - _VALID_URL matches season URLs.
+  - _real_extract(url):
+    - Builds catalog URL for the season: catalog/{series_type}/{series}/seasons/{season_id}
+    - Calls API with pageSize=50; obtains title from data and returns a playlist of the season’s entries via _entries.
+
+- NRKTVSeriesIE(NRKTVSerieBaseIE)
+  - Handles NRK TV/Radio series pages (both new layout and old layout).
+  - _VALID_URL matches series URLs (serie/podkast) on tv.nu, nrksuper, radio.nrk, etc.
+  - Suitable() overridden to avoid clashing with other NRK extractors.
+  - _real_extract(url):
+    - Determines domain (tv or radio) and series_id.
+    - Fetches catalog data with ageSize limits and appropriate size prefix based on domain.
+    - Extracts titles (and possibly subtitles), assembles entries across seasons (linked seasons vs embedded seasons) and extra material.
+    - Returns a playlist with the collected entries, series_id, and title/subtitle as the playlist title/description.
+
+- NRKTVDirekteIE(NRKTVIE)
+  - Handles “Direkte” (live) NRK TV/Radio streams.
+  - Minimal matcher; primarily used for existence checks (only_matching in tests).
+
+- NRKRadioPodkastIE(InfoExtractor)
+  - Handles NRK Radio podcasts.
+  - _VALID_URL matches radio NRK podcast episode URLs with an ID like l_<uuid>.
+  - _real_extract(url):
+    - Maps to NRKIE by converting to nrk:<id> and reusing NRKIE’s logic for formats/metadata via NRK’s playback metadata.
+
+- NRKPlaylistBaseIE(InfoExtractor)
+  - Base for NRK-generated playlists outside the main NRKIE flow.
+  - _real_extract(url):
+    - Extracts video IDs from HTML via _ITEM_RE and builds a list of nrk:<video_id> entries.
+    - Attempts to fetch a playlist title and description via page metadata/OG data when available.
+    - Returns a playlist_result with entries, id, title, and description.
+
+- NRKPlaylistIE(NRKPlaylistBaseIE)
+  - NRK public playlists on nrk.no (excluding “video”/“skole” paths).
+  - _VALID_URL and _ITEM_RE tailored to nrk.no page structure.
+  - _extract_title and _extract_description use Open Graph data extraction helpers.
+
+- NRKTVEpisodesIE(NRKPlaylistBaseIE)
+  - Episode listing for NRK TV programs.
+  - _VALID_URL matches tv.nrk.no/program/episodes/...
+  - _ITEM_RE extracts episode IDs; _extract_title tries to pull a concise title from the page.
+
+- NRKSkoleIE(InfoExtractor)
+  - NRK Skole content extractor.
+  - _VALID_URL matches yangs with mediaId in query string.
+  - _real_extract(url):
+    - Calls NRK Skole API to fetch psId from the initial video’s mediaId.
+    - Redirects to NRK’s NRKIE-based entry for the mapped nrk_id (nrk:<psId>).
+
+Important implementation details
+- Format extraction and CDN handling
+  - _extract_nrk_formats handles HLS/M3U8 and MP3 assets, with special logic for Akamai, and a CDN-replacement fallback to nrk-od-XX.akamaized.net if initial attempts fail.
+  - _CDN_REPL_REGEX is used to detect formats that may require CDN host replacement.
+- API communication
+  - _call_api constructs URLs under https://psapi.nrk.no/ and fetches JSON metadata or assets for playback, metadata, programs, seasons, catalog, etc.
+  - _real_extract for NRKIE heavily depends on the manifest structure: playable.assets, format hints, encrypted flags, and subtitles.
+- Metadata handling
+  - Title, description, duration, thumbnails, and subtitles are extracted from preplay/metadata where available.
+  - Subtitles support multiple languages and types (e.g., nb-nor, nb-ttv) with language-based keys.
+  - Age rating: legalAge is mapped to age_limit (A -> 0; numeric codes parsed as int).
+- Series and episodes logic
+  - NRKIE enriches NRK video entries with series, season, and episode information when the content is identified as a series.
+  - Episode numbers can be inferred from description text (e.g., Sesong, episode titles, or numeric patterns).
+- Pagination and catalog traversal
+  - NRKTVSerieBaseIE._entries handles paginated catalog data, navigating through embedded structures and next links to accumulate all entries for a series/podcast.
+  - NRKTVSeriesIE aggregates seasons and extra material depending on API response shape (linked seasons vs embedded seasons).
+- Geo-blocking and rights errors
+  - _raise_error translates NRK error payloads (e.g., ProgramRightsAreNotReady, ProgramRightsHasExpired, NoProgramRights, ProgramIsGeoBlocked) to user-friendly messages and/or geo-restriction prompts.
+  - NRK content is geo-blocked for non-Norwegian viewers; the code uses self.raise_geo_restricted with _GEO_COUNTRIES if needed.
+- Tests and URL patterns
+  - The module includes extensive _TESTS for various NRK content: video and audio, podcasts, episodes, seasons, playlists, and Skole content.
+  - Many extractors provide an is-inspection path via NRKIE delegation (e.g., NRKTVEpisodeIE delegates to NRKIE for final extraction).
+
+In short
+- The code provides a comprehensive NRK extraction suite: direct NRK video extraction (NRKIE), TV/Radio wrappers, episode/season/series navigators, podcast handling, live streams, and Skole content.
+- It heavily relies on NRK’s psapi JSON endpoints for playback, metadata, and catalog data, with careful handling of formats, subtitles, age ratings, and geo-block restrictions.
+- It includes robust pagination logic to traverse catalog data and build complete playlist entries for series/podcasts.

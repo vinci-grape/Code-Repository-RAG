@@ -1,0 +1,69 @@
+Description:
+- This is a YouTube-DL extractor for CONtv (class CONtvIE, subclass of InfoExtractor). It fetches video metadata and streams from CONtv endpoints and supports both single videos and episodic series ( playlists of episodes ).
+
+Key functionality:
+- URL pattern: matches details-movie URLs on contv.com, capturing the video id.
+- Data sources:
+  - details endpoint: http://metax.contv.live.junctiontv.net/metax/2.5/details/{video_id} with device=web
+  - episodic series endpoint (when type is episodic): http://metax.contv.live.junctiontv.net/metax/2.5/seriesfeed/json/{video_id}
+- Behavior:
+  - If details indicate type 'episodic', the extractor builds a playlist:
+    - Fetches season/episode data, iterates episodes, and creates individual entry URLs pointing to each episode’s details-movie page.
+    - Returns a playlist with the list of episode entries and the series title.
+  - If not episodic, it treats the item as a single movie:
+    - Collects formats:
+      - HLS formats from media_hls_url using _extract_m3u8_formats (with m3u8_id='hls', non-fatal if unavailable).
+      - Direct MP4 URL from media_mp4_url as a format with format_id 'http'.
+    - Sorts formats for proper prioritization.
+    - Subtitles from captions (assumes English) and attaches to the entry.
+    - Thumbnails built from images array (url, width, height).
+    - Description chosen from possible fields (large_description, medium_description, small_description, or fallback) in that order.
+    - Metadata:
+      - timestamp from metax_added_on (scaled by 1000 to seconds)
+      - duration from media duration (scaled by 1000)
+      - view_count from details.num_watched
+      - like_count from details.num_fav
+      - categories, tags, season_number, episode_number, release_year from details fields
+    - Returns a dict with id, title, formats, thumbnails, description, timestamps/durations, subtitles, and other metadata.
+
+Key classes/functions and implementation details:
+- CONtvIE(InfoExtractor): main extractor class.
+- _VALID_URL: regex to identify CONtv details-movie pages.
+- _TESTS: includes two tests:
+  - A non-episodic video test with expected id, title, ext, description (md5), upload_date, and timestamp.
+  - An episodic test that returns a playlist and at least 7 items (playlist_mincount).
+- _real_extract(url):
+  - video_id extraction via _match_id.
+  - Retrieves details JSON via _download_json(..., video_id, query={'device': 'web'}).
+  - Episodic flow:
+    - Fetch seasons/episodes via /seriesfeed/json/{video_id}.
+    - Build a list of entries using self.url_result with the episode details URLs and the same extractor (CONtvIE.ie_key()).
+    - Return self.playlist_result(entries, video_id, details.get('title')).
+  - Non-episodic flow:
+    - Parse m_details = details['details'], title = details['title'].
+    - Build formats:
+      - HLS: if media_hls_url present, extend formats with _extract_m3u8_formats(media_hls_url, video_id, 'mp4', m3u8_id='hls', fatal=False).
+      - MP4: if media_mp4_url present, append {'format_id': 'http', 'url': media_mp4_url}.
+    - Self._sort_formats(formats).
+    - Subtitles: from m_details['captions'] (english default), building list of {'url': caption_url}.
+    - Thumbnails: from m_details['images'] (url, width, height).
+    - Description: prefer large_description, then medium_description, then small_description, then none.
+    - Additional metadata extraction with safe parsing helpers:
+      - timestamp: float_or_none(details.get('metax_added_on'), 1000)
+      - duration: float_or_none(m_details.get('duration'), 1000)
+      - view_count: int_or_none(details.get('num_watched'))
+      - like_count: int_or_none(details.get('num_fav'))
+      - categories: details.get('category')
+      - tags: details.get('tags')
+      - season_number: int_or_none(details.get('season'))
+      - episode_number: int_or_none(details.get('episode'))
+      - release_year: int_or_none(details.get('pub_year'))
+    - Return a dict with all gathered fields (id, title, formats, thumbnails, description, timestamps, subtitles, duration, view_count, like_count, categories, tags, season/episode, release_year).
+
+Important implementation notes:
+- Uses utility helpers float_or_none and int_or_none for robust numeric parsing, with optional multipliers (1000 for ms timestamps/durations).
+- Handles missing data gracefully (e.g., non-existent HLS/MP4 URLs, empty captions or images).
+- Episodic handling creates a playlist of episode entries by constructing URLs to each episode’s details-movie page and reusing the same extractor.
+- Subtitles and thumbnails are optional and only included when present in the API response.
+
+In short, CONtvIE fetches CONtv content metadata, supports both single videos and episodic series, extracts multiple video formats (HLS and direct MP4), captions, thumbnails, and rich metadata, and returns either a video info object or a playlist of episodes.

@@ -1,0 +1,119 @@
+Below is a concise but comprehensive summary of the code in youtube-dl/youtube_dl/extractor/videomore.py.
+
+Overview
+- Purpose: Implement YouTube-dl extractors for Videomore/More.tv content. Handles videos, embeds and seasons by querying the More.tv/Videomore APIs and extracting available streaming formats (DASH, HLS, MSS).
+
+Key Classes
+1) VideomoreBaseIE (InfoExtractor)
+- Purpose: Shared base for Videomore-related extractors.
+- Constants:
+  - _API_BASE_URL = 'https://more.tv/api/v3/web/'
+  - _VALID_URL_BASE = r'https?://(?:videomore\.ru|more\.tv)/'
+- Helpers:
+  - _download_page_data(display_id)
+    - Calls API_BASE_URL + 'PageData' with query param url = '/' + display_id.
+    - Returns attributes.response.data from the JSON.
+  - _track_url_result(track)
+    - Reads trackVod from a track, chooses video_url from playerLink or link.
+    - Returns a url_result pointing to VideomoreIE with hubId as the third param.
+
+2) VideomoreIE (InfoExtractor)
+- IE_NAME = 'videomore'
+- _VALID_URL: Complex pattern covering multiple Videomore/More.tv player configurations, including embedded players, siren.more.tv, and odysseus paths. Also matches when track_id is present.
+- _TESTS: Includes multiple test cases for videos, seasons, embeds, and various track/pointer URLs (some expected to raise or be skipped).
+- _GEO_BYPASS = False
+- _extract_url(webpage) (staticmethod)
+  - Tries to extract a config URL from the page:
+    - First, looks for an object tag with data pointing to videomore.ru/player.swf with a config=URL to an XML.
+    - If not found, looks for an iframe pointing to videomore.ru/embed/...
+  - If found, returns the extracted URL. Used to detect embedded video URLs in pages.
+- _real_extract(self, url)
+  - Parses display_id from URL via _match_id.
+  - Retrieves partner_id (from URL query or default '97').
+  - Downloads config data from https://siren.more.tv/player/config with partner_id and track_id.
+  - Extracts the first item from data.playlist.items.
+  - Metadata: title, series (project_name), season_name, episode_name. If no title, builds a title from available series/season/episode values.
+  - Streams: collects any existing streams and also appends protocol-specific URLs if present (DASH/HLS).
+  - Formats: For each stream URL:
+    - If protocol == 'DASH': _extract_mpd_formats(...)
+    - If protocol == 'HLS': _extract_m3u8_formats(...)
+    - If protocol == 'MSS': _extract_ism_formats(...)
+  - Error handling:
+    - If no formats found, checks item['error']:
+      - If the error indicates geo-restriction (RU-only messages), raises a geo restriction for RU.
+      - Otherwise raises ExtractorError with the error message.
+  - Returns a dict with:
+    - id, title, series, season, episode, thumbnail, duration, view_count, age_limit
+    - formats (sorted via _sort_formats)
+  - Notes:
+    - Duration and numeric fields are parsed via int_or_none.
+    - Uses compat helpers for URL/query handling to be Python-2/3 compatible.
+
+3) VideomoreVideoIE (VideomoreBaseIE)
+- IE_NAME = 'videomore:video'
+- _VALID_URL: Based on VideomoreBaseIE._VALID_URL_BASE with an id group that matches a variety of path patterns (two-level path or fragment).
+- _TESTS: Several tests for:
+  - Single video (with og:video:iframe)
+  - Seasoned series (1 season/14 episode)
+  - Other pages that should be matched or skipped
+- Inheritance: Subclass of VideomoreBaseIE
+- Suitable override:
+  - suitable() returns False if VideomoreIE.suitable(url) is True, otherwise uses the parent suitable logic. This separates single-video pages from other types handled by VideomoreIE.
+- _real_extract(self, url)
+  - display_id = self._match_id(url)
+  - Returns result by calling self._download_page_data(display_id) and then wrapping it with self._track_url_result(...)
+  - Effectively redirects to VideomoreIE for actual video extraction by resolving the page’s track data.
+
+4) VideomoreSeasonIE (VideomoreBaseIE)
+- IE_NAME = 'videomore:season'
+- _VALID_URL: Base URL plus a season identifier in a two-part path (e.g., molodezhka/film_o_filme).
+- _TESTS: Includes tests for:
+  - A season page with a known title/id and playlist_mincount
+  - Other season-like URLs that should be matched or skipped
+- Suitable override:
+  - suitable() returns True only if neither VideomoreIE nor VideomoreVideoIE deem the URL suitable; otherwise False. This ensures season-level pages are handled distinctively.
+- _real_extract(self, url)
+  - display_id = self._match_id(url)
+  - season = self._download_page_data(display_id)
+  - season_id = compat_str(season['id'])
+  - Fetches tracks via API: _API_BASE_URL + 'seasons/%s/tracks' % season_id
+  - For each track in tracks, builds a Video URL result via self._track_url_result(track)
+  - Returns a playlist_result of those entries with the season title as playlist title.
+
+Important Implementation Details
+- API Interactions
+  - Page data endpoint: /api/v3/web/PageData with url parameter.
+  - Season tracks endpoint: /api/v3/web/seasons/{season_id}/tracks
+  - Player config endpoint: https://siren.more.tv/player/config with partner_id and track_id.
+- URL Handling
+  - Uses compat_parse_qs and compat_urllib_parse_urlparse for robust query handling across Py2/3.
+  - _VALID_URL patterns are broad to accommodate embedded players, direct videomore URLs, and odysseus/more.tv players.
+- Track Resolution
+  - _track_url_result(track) prioritizes trackVod.playerLink, falling back to trackVod['link'], and passes hubId to the downstream VideomoreIE.
+- Formats Extraction
+  - Supports multiple streaming formats:
+    - DASH (mpd)
+    - HLS (m3u8)
+    - MSS/ISM (for MMS-style streams)
+  - Uses built-in extractors: _extract_mpd_formats, _extract_m3u8_formats, _extract_ism_formats.
+  - Formats are collected from both explicit stream entries and protocol URLs provided in item['streams'].
+- Metadata Handling
+  - Title: taken from item.title; if missing, concatenates series, season, and episode to form a reasonable title.
+  - Other fields: series, season, episode, thumbnail, duration, view_count, age_limit (with int_or_none for safe numeric parsing).
+- Error and Geo Handling
+  - If no formats found, checks item.get('error') and converts certain Russian geo-restriction messages into a geo-restriction error for RU.
+  - Otherwise raises ExtractorError with the provided message.
+- Geo Bypass
+  - _GEO_BYPASS is set to False by default (can be toggled in subclass if needed).
+- Tests
+  - The _TESTS arrays provide representative URLs for each extractor class to validate behavior, including skip_download hints, expected IDs, and titles.
+- Edge Cases
+  - Handles both single videos and season/playlist pages.
+  - Some URLs may redirect or require login (as reflected in tests with “Requires logging in” skip).
+
+Summary of Main Functionality
+- VideomoreBaseIE provides core helpers for API data retrieval and track-based URL resolution.
+- VideomoreIE handles obtaining video data from More.tv’s player config API, constructing formats, handling geo restrictions, and returning detailed metadata.
+- VideomoreVideoIE resolves a page URL to a track and defers to VideomoreIE for extraction.
+- VideomoreSeasonIE builds a playlist by aggregating all tracks within a season through API calls.
+- The module supports multiple streaming protocols (DASH, HLS, MSS) and robustly handles metadata, errors, and geo-blocking.

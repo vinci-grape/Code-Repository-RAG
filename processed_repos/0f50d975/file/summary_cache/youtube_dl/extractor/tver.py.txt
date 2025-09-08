@@ -1,0 +1,41 @@
+concise comprehensive summary
+
+- Purpose
+  - TVerIE is a YouTube-DL extractor for TVer.jp (Japanese streaming) that handles pages under corner, feature, and episode. It retrieves metadata via TVer API and delegates video playback to Brightcove.
+
+- Core functionality
+  - Logs in to TVer API to obtain an access token on initialization.
+  - For a given TVer page URL, fetches metadata from https://api.tver.jp/v4/{path} using the token.
+  - Builds a Brightcove player URL using publisher_id and a reference_id (with small adjustments based on service).
+  - Returns a url_transparent entry that points to BrightcoveNew, exposing description and episode_number when available, and restricting playback to JP geo.
+
+- Key classes / functions
+  - TVerIE(InfoExtractor)
+    - _VALID_URL: Regex to match TVer URLs for corner/episode/feature pages with an ID (optionally prefixed with 'f').
+    - _real_initialize(self): Downloads an access token from https://tver.jp/api/access_token.php and stores it in self._TOKEN.
+    - _real_extract(self, url): 
+      - Parses path and video_id from URL.
+      - Fetches main data from https://api.tver.jp/v4/{path} with the token.
+      - Extracts publisher_id (p_id) and service, normalizes service by removing 'ts_' prefix.
+      - Determines reference_id (r_id); if service is not one of allowed values, prefixes with 'ref:'.
+      - Constructs a Brightcove URL using BRIGHTCOVE_URL_TEMPLATE and wraps it with geo_countries JP via smuggle_url.
+      - Returns a dict with:
+        - _type: 'url_transparent'
+        - url: Brightcove URL
+        - ie_key: 'BrightcoveNew'
+        - description: main['note'][0]['text'] if available
+        - episode_number: integer from main['ext']['episode_number'] if available
+  - BRIGHTCOVE_URL_TEMPLATE: Template for Brightcove player URL.
+  - _TESTS: Examples of URLs to verify pattern matching (only_matching=True). Indicates 7-day availability note.
+
+- Important implementation details
+  - Token handling: Token is fetched once during extractor initialization and reused for the subsequent API call to obtain the main metadata.
+  - API interaction: Uses _download_json to fetch API responses; passes token as a query parameter.
+  - Data handling: Uses try_get to safely access nested fields (description text, episode_number). Converts episode_number with int_or_none.
+  - Service / reference handling: If TVer service is not in the allowed set ('tx', 'russia2018', 'sebare2018live', 'gorin'), the reference_id is prefixed with 'ref:' to form a valid Brightcove videoId.
+  - Geo restriction: Brightcove URL is wrapped with geo_countries JP to enforce Japanese geo restrictions.
+  - Output: The extractor uses a transparent URL type pointing to BrightcoveNew, enabling the standard Brightcove video extraction pipeline.
+
+- Behavior notes
+  - The extractor does not directly return a playable video URL; it provides a Brightcove URL via a url_transparent entry so the BrightcoveNew extractor handles playback.
+  - The code accounts for optional fields, avoiding crashes when description or episode_number are missing.

@@ -1,0 +1,36 @@
+- Purpose: A small script that generates an Atom feed (update/releases.atom) for youtube-dl releases by reading version data from update/versions.json and emitting one <entry> per version.
+
+- Key components:
+  - Templates
+    - atom_template: Atom feed skeleton with placeholders @TIMESTAMP@ and @ENTRIES@.
+    - entry_template: Atom entry template with placeholders @VERSION@ and @TIMESTAMP@.
+  - Templates are built with textwrap.dedent and later filled with actual values.
+
+- Main workflow:
+  - Environment/setup:
+    - Adjusts sys.path to import a local utils module (write_file) from a parent directory.
+  - Timestamp initialization:
+    - Computes now_iso as current UTC time in ISO format with trailing 'Z'.
+    - Replaces @TIMESTAMP@ in the feed template with now_iso.
+  - Load versions:
+    - Reads update/versions.json to obtain a mapping; collects version strings from the keys of versions_info['versions'] and sorts them.
+  - Build per-version entries:
+    - For each version string v (format like "YYYY.MM.DD" with an optional fourth segment for patch level):
+      - Split by '.'; parse year, month, day from first three fields.
+      - Validate the date using datetime.date(year, month, day). If invalid (e.g., 2024-02-30), decrement day until a valid date is found, counting how many days were “fake” (faked).
+      - Optional patch level: if a fourth field exists, try to parse it as an int; on failure, default patchlevel to 1.
+      - Construct an entry timestamp as ISO-like: YYYY-MM-DDT00:MM:SSZ where MM is the number of faked days and SS is the patchlevel.
+      - Fill the entry_template with the actual version and computed timestamp.
+  - Assemble feed:
+    - Join all generated entries, indent them, and substitute them into the atom_template at @ENTRIES@.
+  - Write output:
+    - Writes the final feed to update/releases.atom using write_file.
+
+- Notable implementation details:
+  - Date handling trick: invalid version dates are “kinda” encoded by backing off the day to the nearest valid date and encoding the number of days backed off (faked) in the minute field, with the patch level encoded in the seconds field. This provides a deterministic, sortable timestamp without requiring actual release dates.
+  - Patch level handling: optional; defaults to 1 if absent or non-numeric.
+  - Output format: a simple Atom feed with one entry per version, linking to a downloads page for that version.
+  - Robustness: assumes update/versions.json exists and has the expected structure; uses a simple loop with minimal error handling around file IO.
+
+- Output effect:
+  - Creates or overwrites update/releases.atom containing a self-link, title, id, updated timestamp, and a sequence of <entry> elements for each version, each pointing to YouTube-DL downloads for that version.

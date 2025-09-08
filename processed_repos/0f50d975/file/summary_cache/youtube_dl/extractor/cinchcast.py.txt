@@ -1,0 +1,58 @@
+Concise summary of youtube-dl extractor: CinchcastIE (file: youtube_dl/extractor/cinchcast.py)
+
+- Purpose:
+  - Extract audio/video information from Cinchcast player URLs by fetching an MRSS feed and constructing formats.
+
+- Key class:
+  - CinchcastIE(InfoExtractor)
+
+- URL matching:
+  - _VALID_URL = r'https?://player\.cinchcast\.com/.*?(?:assetId|show_id)=(?P<id>[0-9]+)'
+  - Captures the numeric ID from URLs containing either assetId or show_id.
+
+- Tests (_TESTS):
+  - Test 1:
+    - URL with show_id=5258197
+    - Expected info: id '5258197', ext 'mp3', title 'Train Your Brain to Up Your Game with Coach Mandy', upload_date '20130816'
+  - Test 2:
+    - URL with assetId=7141703 (wrapped in HTML entities)
+    - only_matching: True (not executed as a full download in tests)
+  - Note: Actual test for the second URL runs in a generic test environment.
+
+- Main workflow (_real_extract):
+  1) Extract video_id from the URL using self._match_id(url).
+  2) Download MRSS feed:
+     - URL: http://www.blogtalkradio.com/playerasset/mrss?assetType=single&assetId=<video_id>
+     - Feed is loaded via self._download_xml(...).
+  3) Parse the MRSS XML:
+     - item = doc.find('.//item')
+     - title = xpath_text(item, './title', fatal=True)
+     - date_str = xpath_text(item, './{http://developer.longtailvideo.com/trac/}date')
+     - upload_date = unified_strdate(date_str, day_first=False)
+  4) Formats:
+     - Primary format from MRSS content URL:
+       - url = item.find('./{http://search.yahoo.com/mrss/}content').attrib['url']
+       - format_id = 'main'
+     - If a backupContent exists:
+       - backup_url = xpath_text(item, './{http://developer.longtailvideo.com/trac/}backupContent')
+       - Add a backup format with:
+         - format_id: 'backup'
+         - url: backup_url
+         - preference: 2 (indicates more reliable)
+     - Call self._sort_formats(formats) to order formats by preference/quality.
+  5) Return info dictionary:
+     - id: video_id
+     - title: extracted title
+     - upload_date: computed upload_date
+     - formats: list of formats
+
+- Important implementation details:
+  - Uses MRSS feed from BlogTalkRadio to obtain actual media URLs.
+  - Handles namespaces in MRSS/XML for date and backup content via explicit namespace URLs in XPath or element lookup.
+  - Uses:
+    - unified_strdate to normalize the upload date.
+    - xpath_text helper for robust XML text extraction with optional fatal error if critical field (title) is missing.
+  - Notes a known issue: duration is present but reported as incorrect (comment in code).
+
+- Output:
+  - A dictionary with id, title, upload_date, and a list of formats suitable for youtube-dl to download/play.

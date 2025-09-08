@@ -1,0 +1,36 @@
+- Purpose: A YouTube-dl extractor for snotr.com video pages. It parses the page, collects video metadata, and builds a structured info dict including video formats, titles, descriptions, and additional attributes.
+
+- Class and inheritance:
+  - SnotrIE(InfoExtractor): Implements the extraction logic for Snotr videos.
+
+- URL matching:
+  - _VALID_URL = r'http?://(?:www\.)?snotr\.com/video/(?P<id>\d+)/([\w]+)'
+  - Extracts video_id from the URL path (numeric ID).
+
+- Tests:
+  - _TESTS contains two sample URLs with expected info_dict data (id, ext, title, duration, filesize_approx, description, thumbnail). One test also specifies an expected warning for description.
+
+- Main extraction flow (_real_extract):
+  1. Match the URL against _VALID_URL to obtain video_id.
+  2. Download the webpage using _download_webpage(url, video_id).
+  3. Extract title via _og_search_title(webpage) from OpenGraph metadata.
+  4. Extract description via _og_search_description(webpage) from OpenGraph metadata.
+  5. Parse HTML5 video entries using _parse_html5_media_entries(url, webpage, video_id, m3u8_entry_protocol='m3u8_native')[0] to obtain the base info_dict (including formats and extension, typically mp4).
+  6. Extract optional metadata from the page with regular expressions:
+     - view_count: from a pattern capturing "Views:" inside a <p> block; converted to int with str_to_int (fatal=False).
+     - duration: from a pattern capturing "Length:"; converted with parse_duration (fatal=False).
+     - filesize_approx: from a pattern capturing "Filesize:"; converted with parse_filesize (fatal=False).
+  7. Merge/override fields in info_dict with:
+     - 'id': video_id
+     - 'description': description
+     - 'title': title
+     - 'view_count': view_count
+     - 'duration': duration
+     - 'filesize_approx': filesize_approx
+  8. Return the final info_dict containing the video formats, metadata, and derived fields.
+
+- Key implementation details:
+  - Uses _parse_html5_media_entries with m3u8_entry_protocol='m3u8_native' to properly handle HLS/m3u8 streams if present.
+  - Relies on OpenGraph meta tags for title and description, providing a robust source of metadata even if the page HTML is complex.
+  - Uses optional extraction (fatal=False) for view count, duration, and filesize to avoid failing extraction if these fields are absent.
+  - The final info_dict combines data from the HTML5 media entries and the extracted metadata, giving fields such as id, title, description, duration, filesize_approx, view_count, as well as the standard video formats and ext derived from the media entries.

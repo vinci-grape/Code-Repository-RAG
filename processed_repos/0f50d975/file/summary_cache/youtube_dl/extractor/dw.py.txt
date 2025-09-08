@@ -1,0 +1,65 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/dw.py
+
+Purpose
+- Implement extractors for Deutsche Welle (DW) content:
+  - DWIE: extracts DW video and audio items embedded on DW pages.
+  - DWArticleIE: handles DW article pages that link to a DW media item and delegates extraction to DWIE.
+
+Key classes
+- DWIE (InfoExtractor)
+  - IE_NAME: 'dw'
+  - _VALID_URL: matches DW video/audio pages with URLs like .../av-<id>
+  - _TESTS: three sample tests (video, audio, and a short-lived documentary video with skip condition)
+
+- DWArticleIE (InfoExtractor)
+  - IE_NAME: 'dw:article'
+  - _VALID_URL: matches DW article pages with URLs containing a pattern a-<id>
+  - _TEST: example article page that resolves to a DW video/media item
+
+Main functionality
+
+DWIE._real_extract(url)
+- Determine media_id from URL via _match_id and fetch the page.
+- Extract hidden form inputs from the page via _hidden_inputs(webpage). These inputs carry metadata such as:
+  - media_title, media_id, file_name, display_date, preview_image, file_duration, etc.
+- title = hidden_inputs['media_title']
+- media_id fallback: use hidden_inputs['media_id'] if present, otherwise the one from URL.
+- If the page indicates a video with streaming (hidden_inputs['player_type'] == 'video' and hidden_inputs['stream_file'] == '1'):
+  - Build SMIL URL: http://www.dw.com/smil/v-<media_id>
+  - Use _extract_smil_formats with this SMIL URL and media_id. Apply a transform_source to rewrite RTMP paths to HTTP URLs:
+    - Replace 'rtmp://tv-od.dw.de/flash/' with 'http://tv-download.dw.de/dwtv_video/flv/'
+  - _sort_formats(formats) to order formats by quality/priority.
+- Else (non-SMIL case, e.g., direct file):
+  - formats = [{'url': hidden_inputs['file_name']}]
+
+- Upload date:
+  - Try upload_date = hidden_inputs.get('display_date')
+  - If missing, extract a date from the HTML with a regex for a date inside a span with class "date" and parse with unified_strdate.
+- Return a video info dictionary:
+  - id: media_id
+  - title
+  - description: from _og_search_description(webpage)
+  - thumbnail: hidden_inputs.get('preview_image')
+  - duration: int_or_none(hidden_inputs.get('file_duration'))
+  - upload_date
+  - formats: as determined above
+
+DWArticleIE._real_extract(url)
+- article_id = _match_id(url)
+- Download the article page and read hidden inputs.
+- media_id = hidden_inputs['media_id']
+- Find the actual media path on the article page with a regex:
+  - href="([^"]+av-<media_id>)" class="overlayLink"
+- media_url = join article URL with the discovered media path
+- Return self.url_result(media_url, 'DW', media_id) to delegate to the DW extractor (DWIE) for the real media item
+
+Important implementation details
+- Uses _hidden_inputs to pull page-embedded metadata used to determine URLs and formats without parsing complex JS.
+- For video items with streaming, leverages DW’s SMIL-based formats via _extract_smil_formats and converts RTMP sources to HTTP endpoints for download compatibility.
+- Robust upload_date extraction: first from a hidden input, then via HTML regex if necessary; uses unified_strdate to normalize dates.
+- DWArticleIE delegates to the main DW extractor by returning a DW URL result, ensuring consistent handling of the media item.
+- Uses compat_urlparse.urljoin to resolve relative media URLs against the article page URL.
+- Included _TESTS demonstrate handling of video, audio, and a time-limited documentary (with skip text when video is removed).
+
+Overall
+- The module provides DW-specific extraction logic, handling both direct video/audio items and article pages that link to DW media. It focuses on extracting metadata (title, description, upload date, thumbnail, duration) and formats (SMIL-based or direct file URLs), with careful handling of DW’s page structures and fallback mechanisms.

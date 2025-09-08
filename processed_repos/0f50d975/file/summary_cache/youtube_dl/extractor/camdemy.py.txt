@@ -1,0 +1,67 @@
+- Purpose
+  - A YouTube-dl extractor module for camdemy.com, providing two extractors:
+    - CamdemyIE for individual media items.
+    - CamdemyFolderIE for folders/playlists of media.
+
+- Key classes
+  - CamdemyIE (InfoExtractor)
+    - _VALID_URL: https:// camdemy.com/media/<id>
+    - _TESTS: includes tests for a single video, a video with a non-empty description, and an external source (YouTube) case.
+  - CamdemyFolderIE (InfoExtractor)
+    - _VALID_URL: https:// camdemy.com/folder/<id>
+    - _TESTS: tests covering folder URLs with trailing slash, without trailing slash, and a version with a displayMode parameter to force listing all items.
+
+- Main functionality (CamdemyIE)
+  - Workflow:
+    1. Extract video_id from URL.
+    2. Download the page HTML.
+    3. Try to find an external source URL via a specific HTML pattern (class="srcFrom"). If found, return a direct URL result to that external source.
+    4. If no external source, fetch oEmbed JSON from http://www.camdemy.com/oembed/?format=json&url=<url>.
+    5. From oEmbed:
+       - Get title and thumbnail_url.
+       - Build video_folder by joining thumbnail_url with 'video/'.
+       - Download fileList.xml from video_folder/fileList.xml and read the fileName from the XML.
+       - Build the final video URL by joining video_folder with fileName.
+    6. Fallbacks and extra metadata:
+       - upload_date: try to extract “published on …” date from the HTML using a regex; format with unified_strdate.
+       - view_count: extract a numeric view count from a specific HTML pattern; convert to int with str_to_int.
+       - description: prefer the page metadata 'description'; if absent, fall back to oEmbed description and clean HTML.
+       - duration: parse duration from oEmbed using parse_duration.
+       - creator: from oEmbed author_name.
+    7. Return a dict with:
+       - id, url (video URL), title, thumbnail, description, creator, duration, upload_date, view_count.
+  - Notable implementation details:
+    - Handles external sources by detecting a special anchor/text and returning a direct URL result early.
+    - Video URL is derived from a fileList.xml in a video/ subfolder tied to the oEmbed thumbnail URL.
+    - Robustness for pages that show “No permission or not login” by using the oEmbed endpoint to obtain metadata.
+
+- Main functionality (CamdemyFolderIE)
+  - Workflow:
+    1. Extract folder_id from URL.
+    2. Construct a final URL by injecting displayMode=list into the query string (to ensure all items are listed on one page).
+    3. Download the folder HTML page.
+    4. Find all occurrences of links to /media/<id>/ via the pattern href='(/media/\d+/?)'.
+    5. Build a list of entries as individual media URLs and create a playlist from them.
+    6. Obtain folder_title from meta keywords on the page.
+    7. Return a playlist result with the collected entries, folder_id, and folder_title.
+  - Notable implementation details:
+    - Forces a single-page display by adding displayMode=list, ensuring all items are accessible without pagination.
+    - Uses a simple regex to extract media links and converts them to absolute URLs.
+
+- Dependencies and utilities used
+  - Inherits from InfoExtractor.
+  - Uses _download_webpage, _download_json, _download_xml to fetch content.
+  - Uses _html_search_regex, _html_search_meta, and clean_html for metadata extraction.
+  - Uses compat_urlparse and compat_urllib_parse_urlencode for URL manipulation.
+  - Uses parse_duration, unified_strdate, str_to_int for metadata normalization.
+
+- Summary of inputs/outputs
+  - CamdemyIE:
+    - Input: /media/<id> page.
+    - Output: metadata dict with id, url, title, thumbnail, description, creator, duration, upload_date, view_count, etc.
+  - CamdemyFolderIE:
+    - Input: /folder/<id> page.
+    - Output: a playlist of video entries with id and title derived from the folder, plus folder_title.
+
+- Why this matters
+  - Provides comprehensive extraction of camdemy video details by combining oEmbed metadata with a derived direct video URL from a related XML file, and gracefully handles external sources and login-restricted pages.

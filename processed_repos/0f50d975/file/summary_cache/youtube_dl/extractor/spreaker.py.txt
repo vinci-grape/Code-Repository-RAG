@@ -1,0 +1,90 @@
+Here's a concise, comprehensive summary of the code in youtube-dl/youtube_dl/extractor/spreaker.py.
+
+Purpose
+- Implements YouTube-DL extractors for Spreaker:
+  - Individual episodes (API v2 and legacy endpoints)
+  - Show playlists (listing all episodes)
+  - Pages that host episodes or shows (redirecting to the API endpoints)
+
+Main functionality
+- _extract_episode(data, episode_id=None)
+  - Central helper that converts a Spreaker episode JSON object into a standardized info dictionary used by YouTube-DL.
+  - Extracts:
+    - id, url, display_id (permalink), title, description
+    - timestamp (unified_timestamp on published_at)
+    - uploader/uploader_id/creator (robustly via try_get from either show/author fields)
+    - duration (tries duration or length, converts ms to seconds)
+    - view_count, like_count, comment_count (supports multiple possible field layouts)
+    - format details: format 'MPEG Layer 3', mp3 a.k.a. mp3 container/ext
+    - thumbnails from image_original, image_medium, image
+    - series (show title if present)
+    - extractor_key set to SpreakerIE.ie_key()
+  - Uses helper utilities: compat_str, int_or_none, float_or_none, str_or_none, try_get, url_or_none, unified_timestamp
+
+Extractor classes
+- SpreakerIE (single episode, API v2)
+  - _VALID_URL matches:
+    - https://api.spreaker.com/episode/<id> (legacy)
+    - https://api.spreaker.com/v2/episodes/<id>?export=episode_segments (v2)
+  - _TESTS includes sample IDs and expected fields (id, display_id, ext, title, timestamp, uploader, duration, counts, series)
+  - _real_extract(url)
+    - Extracts episode_id from URL
+    - Downloads JSON from https://api.spreaker.com/v2/episodes/<id>
+    - Uses data['response']['episode'] as the episode object
+    - Returns _extract_episode(data, episode_id)
+
+- SpreakerPageIE (episode page → API)
+  - _VALID_URL matches Spreaker user episode pages:
+    - https://www.spreaker.com/user/<user>/... (episode)
+  - _real_extract(url)
+    - Gets display_id from URL
+    - Downloads the page HTML
+    - Finds episode_id via two regex options:
+      - data-episode_id="..."/
+      - episode_id: <number>
+    - Redirects to SpreakerIE by returning a URL result to https://api.spreaker.com/episode/<episode_id>
+
+- SpreakerShowIE (show/list of episodes)
+  - _VALID_URL matches API show endpoints:
+    - https://api.spreaker.com/show/<id>
+  - _TESTS includes a show with playlist_mincount
+  - _entries(show_id)
+    - Iterates pages starting at 1
+    - Downloads JSON from https://api.spreaker.com/show/<show_id>/episodes with query params page and max_per_page=100
+    - Expects pager structure at response.pager; breaks if missing
+    - Iterates results (episode dicts), yields _extract_episode(result)
+    - Stops when reaching last_page
+  - _real_extract(url)
+    - Extracts show_id
+    - Returns playlist_result of _entries(show_id)
+
+- SpreakerShowPageIE (show page → API)
+  - _VALID_URL matches Spreaker show pages:
+    - https://www.spreaker.com/show/<show-slug>
+  - _real_extract(url)
+    - Extracts display_id and downloads the page
+    - Finds show_id via regex show_id: <id>
+    - Redirects to https://api.spreaker.com/show/<show_id> with SpreakerShowIE as extractor
+
+Key implementation details
+- Robust field access:
+  - Uses try_get to handle multiple possible JSON shapes for uploader, series, and counts.
+  - Thumbnails are gathered from image_original, image_medium, image with url_or_none.
+- Consistent episode info
+  - The info dict includes id, url, display_id, title, description, timestamp, uploader/creator, duration, counts, thumbnails, and series.
+  - Explicit extractor_key points to SpreakerIE.ie_key() to identify extractor provenance.
+  - Formats are hard-coded to MP3 (mp3 container/extension).
+- Pagination and playback data
+  - Show listing uses pager information to determine end-of-list and last page.
+  - Uses max_per_page=100 for efficiency.
+- Testing
+  - Includes _TESTS for each extractor to validate URL matching, fields, and behavior.
+- Utilities used
+  - compat_str for id strings
+  - float_or_none, int_or_none, str_or_none for robust number/string extraction
+  - url_or_none to validate thumbnail URLs
+  - unified_timestamp to convert published_at to epoch
+  - url_result and playlist_result to integrate with YouTube-DL’s result handling
+
+Overall
+- The file provides a cohesive set of extractors for Spreaker: direct episode fetch (both legacy and v2), episode pages that redirect to API endpoints, show-based playlists, and show pages that redirect to show API endpoints. It emphasizes robust JSON handling, multiple possible data layouts, and consistent output suitable for YouTube-DL’s standard info dict schema.

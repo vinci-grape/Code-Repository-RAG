@@ -1,0 +1,31 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/myvidster.py
+
+- Purpose: Implement a lightweight extractor for MyVidster videos that delegates the actual video extraction to the real video host (via the URL found on the MyVidster page).
+
+- Main class:
+  - MyVidsterIE(InfoExtractor)
+
+- Key components:
+  - _VALID_URL: Regex that matches MyVidster video pages
+    - Pattern: https?://(?:www\.)?myvidster\.com/video/(?P<id>\d+)/
+  - _TEST: Test case illustrating usage
+    - Example URL on MyVidster
+    - Expected md5, info_dict (id, title, upload_date, uploader, ext, age_limit)
+    - add_ie: ['XHamster'] (indicating the final content will be handled by the XHamster extractor)
+  - _real_extract(self, url):
+    - video_id = self._match_id(url): extracts the numeric id from the URL
+    - webpage = self._download_webpage(url, video_id): fetches the page HTML
+    - Returns a URL result for the real video:
+      - real_url is extracted via _html_search_regex from the page using the pattern:
+        rel="videolink" href="(?P<real_url>.*)">
+      - self.url_result(real_url): delegates to the appropriate extractor based on the real URL (in practice, this points to an XHamster page, so the XHamster extractor handles metadata)
+
+- Main functionality:
+  - The extractor does not parse metadata itself. It simply finds the link to the actual video (the one marked with rel="videolink") on the MyVidster page and forwards that URL to the standard Youtube-DL mechanism, which will likely use the XHamster extractor (as indicated by the test’s add_ie).
+
+- Important implementation details:
+  - Delegation pattern: Uses self.url_result with the extracted real URL, relying on URL-based extractor resolution (e.g., XHamster) to obtain full metadata and actual video info.
+  - Simplicity: No direct parsing of title, uploader, or other metadata from MyVidster; all metadata is expected to come from the downstream extractor.
+  - Fragility: Depends on the presence of a link element with rel="videolink" in the page HTML; if the site structure changes, extraction may fail.
+
+In short, this file implements a wrapper that grabs the real video URL from a MyVidster page and passes it on to the appropriate extractor (e.g., XHamster) to fetch the actual video data.

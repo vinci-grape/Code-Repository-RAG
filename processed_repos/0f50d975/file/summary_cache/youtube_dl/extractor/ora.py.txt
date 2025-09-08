@@ -1,0 +1,43 @@
+Concise summary of OraTVIE extractor (OraTV / UnsafeSpeech)
+
+- Purpose
+  - Extract video information from OraTV and UnsafeSpeech pages. Supports both OraTV-hosted HLS videos and fallback to YouTube when direct HLS is not available.
+
+- Class and main methods
+  - OraTVIE: Subclass of InfoExtractor.
+  - _real_extract(url): Core entry point that fetches the page, discovers video data, and builds the final video formats and metadata.
+
+- URL pattern and tests
+  - _VALID_URL targets ora.tv and unsafespeech.com with a flexible path, capturing an id component.
+  - _TESTS include a real OraTV example (expected mp4 since direct video) and an UnsafeSpeech example (only_matching to ensure URL patterns work).
+
+- Webpage parsing and data extraction
+  - Downloads the page and searches for the JSON-like video data using: '"(?:video|current)"\s*:\s*({[^}]+?})'.
+  - Attempts to extract an HLS/m3u8 URL from the video data via: 'hls_stream"?\s*:\s*"([^"]+)'.
+  - If an m3u8 URL is found:
+    - Uses _extract_m3u8_formats to parse the HLS playlist into formats (mp4, m3u8_native).
+    - Extracts available quality tags from the m3u8 path using a regex (QUALITIES_RE = ((,[a-z]+\d+)+,?)).
+    - Builds a direct HTTP URL template by substituting a %s placeholder for the quality into the path, after removing the trailing '.csmil/master.m3u8' portion.
+    - Joins with base 'http://videocdn-pmd.ora.tv/' to form complete HTTP URLs.
+    - Adds additional formats for each available quality (e.g., mobile400, sd900, hd1080) using a defined preference order: ['mobile400','basic400','basic600','sd900','sd1200','sd1500','hd720','hd1080'].
+    - Sorts all formats with _sort_formats.
+  - If no m3u8 URL is found:
+    - Falls back to YouTube by extracting a YouTube ID from the page ('"youtube_id"\s*:\s*"([^"]+)') and returning a Youtube format via url_result.
+
+- Metadata extraction
+  - id: Extracted from the video data ('"id"\s*:\s*(\d+)'), with a default of display_id if not found.
+  - display_id: The captured URL id from the _VALID_URL.
+  - title: Extracted from the page’s Open Graph title (_og_search_title) and HTML-unescaped.
+  - description: Retrieved from the page element with class 'video_txt_decription' via get_element_by_attribute.
+  - thumbnail: Extracted from the video data ('"thumb"\s*:\s*"([^"]+)') and converted to an absolute URL with _proto_relative_url.
+  - formats: The list assembled from either the m3u8-derived formats (and additional HTTP-quality formats) or the YouTube extraction path.
+
+- Notable implementation details
+  - Uses compat_urlparse for path handling when building HTTP templates.
+  - The m3u8-based approach derives direct HTTP URLs for each quality by inferring a templated path from the m3u8 URL’s path and the quality tokens found in the path.
+  - The code comments reference a pattern similar to GameSpotIE for quality handling, indicating a shared strategy for Ora/other sites.
+  - The HLS path parsing and template construction are robust to multiple qualities, enabling a wide range of output formats.
+  - The code gracefully handles cases where HLS is not available by delegating to YouTube, ensuring the extractor provides a result in both scenarios.
+
+- Output
+  - Returns a dict with id, display_id, title, description, thumbnail, and a list of formats (with format_id and preference where applicable). Ensures formats are sorted for proper preference handling.

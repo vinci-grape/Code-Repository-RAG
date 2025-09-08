@@ -1,0 +1,66 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/toongoggles.py
+
+What it does
+- Implements a YouTube-DL extractor for ToonGoggles, able to extract either a single episode video or a playlist of episodes from a show page.
+
+Key components
+- Class ToonGogglesIE(InfoExtractor)
+  - _VALID_URL: Regex to match ToonGoggles show pages
+    - Matches http/https, optional www, domain toongoggles.com
+    - Path /shows/{show_id} with an optional subpath that may include /.../episodes/{episode_id}
+    - Captures:
+      - show_id (digits)
+      - episode_id (digits) if present
+  - _TESTS: Two test cases
+    - Test 1: Direct episode URL, expects an mp4 video with id 217147 and associated metadata (title, uploader_id, description, upload_date, timestamp, etc.)
+    - Test 2: Show URL, expects a playlist (playlist_mincount: 11) and a minimal info dict with id and title
+  - _call_api(self, action, page_id, query)
+    - Builds API calls to http://api.toongoggles.com/{action}
+    - Merges common query params:
+      - for_ng: 1
+      - for_web: 1
+      - show_meta: 1
+      - version: 7.0
+    - Performs a JSON API request and returns the parsed JSON
+  - _parse_episode_data(self, episode_data)
+    - Transforms an episode entry into a YouTube-DL video result with Kaltura
+    - Output dict uses:
+      - _type: 'url_transparent' (wrapper that delegates to another extractor)
+      - ie_key: 'Kaltura' (indicates Kaltura extractor should handle the actual video)
+      - id: episode_id
+      - title: episode_name
+      - url: 'kaltura:513551:' + entry_id (Kaltura video reference)
+      - thumbnail: optional thumbnail_url
+      - description: optional
+      - duration: parsed from hms via parse_duration
+      - series: show_name
+      - season_number: int or None from season_num
+      - episode_id: episode_id
+      - episode: title
+      - episode_number: int or None from episode_num
+      - categories: optional categories
+  - _real_extract(self, url)
+    - Parses show_id and optional episode_id from the URL using _VALID_URL
+    - If episode_id is present:
+      - Calls API action 'search' with id=episode_id and filter 'episode'
+      - Takes the first object and passes it to _parse_episode_data to return the video entry
+    - If episode_id is not present (show page):
+      - Calls API action 'getepisodesbyshow' with showid and a very large max
+      - Iterates over returned objects and converts each to a playable entry via _parse_episode_data
+      - Returns a playlist_result(entries, show_id, show_name)
+
+Important implementation details
+- Video source strategy
+  - The extractor does not fetch direct video URLs itself. Instead, it produces a Kaltura-based URL ('kaltura:513551:' + entry_id) and relies on the Kaltura extractor (ie_key 'Kaltura') to handle actual playback.
+- API interactions
+  - All ToonGoggles API requests go through _call_api with common flags (for_ng, for_web, show_meta) and version 7.0.
+  - Episode search path uses action 'search' with filter 'episode' to retrieve single episode data.
+  - Show path uses action 'getepisodesbyshow' to retrieve a list of episodes for a show.
+- Data mapping
+  - Uses int_or_none to safely convert season_num and episode_num to integers.
+  - Uses parse_duration to convert HMS duration strings into seconds.
+- Output shapes
+  - Single episode: a url_transparent entry that points to Kaltura, with rich metadata.
+  - Show page: a playlist_result containing multiple url_transparent entries, each corresponding to an episode, with show name as playlist title.
+
+In short, ToonGogglesIE fetches metadata from ToonGoggles’ API and builds either a single Kaltura-based video entry or a playlist of such entries for a show, delegating actual video extraction to the Kaltura extractor.

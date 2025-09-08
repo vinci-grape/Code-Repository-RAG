@@ -1,0 +1,38 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/bet.py
+
+What it does
+- Implements a YouTube-DL extractor for BET (Bet.com) videos by leveraging MTVN services.
+- Extracts video metadata by:
+  - loading the BET article/video page
+  - pulling a video identifier (mgid) from the page
+  - querying a MTVN feed using that mgid
+  - taking the first feed entry as the video info dict
+  - augmenting that dict with a display_id, description, and upload_date derived from the page
+
+Key components
+- BetIE class
+  - Inherits from MTVServicesInfoExtractor (reuses common MTVN-based extraction logic)
+  - _VALID_URL: Regular expression matching BET article/video URLs ending in .html and capturing an id slug
+  - _FEED_URL: "http://feeds.mtvnservices.com/od/feed/bet-mrss-player" – feed endpoint used to obtain video metadata
+  - _get_feed_query(self, uri): Returns a dict with {'uuid': uri} used as query parameters for the feed request
+  - _extract_mgid(self, webpage): Extracts the mgid by locating data-uri="..."> in the page via a regex
+  - _real_extract(self, url): Main extraction flow
+    - display_id = self._match_id(url): derives the slug from the URL
+    - webpage = self._download_webpage(url, display_id): downloads the page
+    - mgid = self._extract_mgid(webpage): gets the mgid from the page
+    - videos_info = self._get_videos_info(mgid): fetches video metadata from the MTVN feed
+    - info_dict = videos_info['entries'][0]: uses the first feed entry as the video info
+    - upload_date = unified_strdate(self._html_search_meta('date', webpage)): converts the page date to the standard YYYYMMDD format
+    - description = self._html_search_meta('description', webpage): extracts the page description from meta tags
+    - info_dict.update({ 'display_id': display_id, 'description': description, 'upload_date': upload_date }): enriches the info dict
+    - return info_dict: final metadata for the video (including fields like id, display_id, ext, title, duration, thumbnail, subtitles, etc.)
+
+Important implementation details
+- Uses MTVServicesInfoExtractor infrastructure to handle fed metadata (via _get_videos_info and feed-based retrieval)
+- _FEED_URL with query {'uuid': mgid} enables a standardized way to fetch video details from MTVN services
+- _extract_mgid relies on a data-uri attribute in the HTML page to locate the mgid
+- Date handling via unified_strdate ensures upload_date is returned in the expected format (e.g., 20141208)
+- _TESTS provide two sample Bet URLs with expected output, asserting fields like id, display_id, ext, title, description, duration, upload_date, thumbnail, and subtitles; they skip actual downloads to test only extraction logic
+
+Overall
+- This extractor focuses on BET pages, uses an mgid obtained from the page to query MTVN’s feed, and returns a comprehensive metadata dictionary for the video, enriched with page-derived fields like display_id, description, and upload_date.

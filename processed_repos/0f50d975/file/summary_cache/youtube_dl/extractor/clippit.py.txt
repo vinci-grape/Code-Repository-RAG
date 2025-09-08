@@ -1,0 +1,51 @@
+- Purpose: A YouTube-DL extractor for Clippit (clippituser.tv). It parses a video page at /c/<id> and returns metadata and available video formats.
+
+- Class and base:
+  - ClippitIE(InfoExtractor): Implements the extraction logic by overriding _real_extract.
+
+- URL pattern:
+  - _VALID_URL = r'https?://(?:www\.)?clippituser\.tv/c/(?P<id>[a-z]+)'
+  - Extracts the video_id from the URL as the page identifier.
+
+- Testing data:
+  - _TEST provides a sample URL, expected md5 for the MP4, and an info_dict with id, ext, title, uploader, uploader_url, timestamp, upload_date, description, and thumbnail.
+
+- Main functionality (_real_extract):
+  - Fetches the HTML page: webpage = self._download_webpage(url, video_id)
+  - Extracts title from the page via HTML <title> tag.
+  - Formats extraction:
+    - Considers two formats: 'sd' and 'hd'.
+    - For each format_id, reads the corresponding data-%s-file attribute (data-sd-file and data-hd-file) from the page.
+    - If a format URL is found, extracts height from the URL path using a regex /(?P<height>\d+)\.mp4.
+    - Builds a format entry with:
+      - url: the media URL
+      - format_id: 'sd' or 'hd'
+      - quality: determined by qualities(FORMATS)
+      - height: integer height if parsed, else None
+  - Uploader details:
+    - Tries to extract uploader name from a pattern matching a tag with class="username".
+    - Constructs uploader_url as https://www.clippituser.tv/p/<uploader> if present, otherwise None.
+  - Timestamp:
+    - Extracts a datetime attribute and converts it with parse_iso8601; otherwise None.
+  - Thumbnail:
+    - Extracts a thumbnail URL from data-image attribute.
+  - Description:
+    - Uses _og_search_description(webpage) as the description (Open Graph fallback).
+
+- Returned information:
+  - id: video_id
+  - title: extracted from the page
+  - formats: list of available formats with url, format_id, quality, and height
+  - uploader: uploader name (if found)
+  - uploader_url: uploader page URL (if found)
+  - timestamp: Unix timestamp parsed from datetime attribute (or None)
+  - description: Open Graph description
+  - thumbnail: thumbnail URL (if found)
+
+- Implementation details:
+  - Uses _html_search_regex for parsing HTML attributes (data-*-file, datetime, data-image, class="username" pattern).
+  - Uses _og_search_description for robust description extraction.
+  - Relies on the qualities function to rank 'sd' vs 'hd' formats.
+  - Gracefully handles missing format URLs or fields by skipping or returning None where appropriate.
+
+Overall, the extractor retrieves two possible video formats from Clippit pages, along with metadata (title, uploader, timestamp, description, thumbnail), assembling a standard video information dictionary for youtube-dl.

@@ -1,0 +1,70 @@
+Here's a concise but comprehensive summary of the HuffPost extractor code.
+
+Overview
+- Implements an InfoExtractor for HuffPost live segments (HuffPost IE).
+- Fetches segment metadata from HuffPost’s embedded API and builds a list of available video formats.
+- Extracts common metadata (title, description, duration, upload date, thumbnails) and handles multiple source types (live, live_again, m3u8, f4m, direct mp4 URLs).
+
+Key components
+- Class: HuffPostIE(InfoExtractor)
+  - IE_DESC: "Huffington Post"
+  - _VALID_URL: Regex matching HuffPost live segment URLs:
+    - Matches http(s)://(embed.)?live.huffingtonpost.com/ with either:
+      - r/segment/... or
+      - HPLEmbedPlayer/?segmentId=
+    - Captures video_id as a hex string.
+  - _TEST: A sample test case with an expected md5, info_dict (id, ext, title, description, duration, upload_date), and a skip_download hint (m3u8 download). Also expects a 404 warning in this test scenario.
+
+Main workflow (_real_extract)
+1. Extract video_id from the URL using self._match_id(url).
+2. Build API URL: http://embed.live.huffingtonpost.com/api/segments/{video_id}.json
+3. Download and parse JSON: data = self._download_json(api_url, video_id)['data']
+4. Metadata extraction:
+   - video_title = data['title']
+   - duration = parse_duration(data.get('running_time'))
+   - upload_date = unified_strdate(data.get('schedule', {}).get('starts_at') or data.get('segment_start_date_time'))
+   - description = data.get('description')
+5. Thumbnails:
+   - Iterate over data['images'].values()
+   - Filter out None URLs
+   - For each URL, if it matches a pattern ending with -{width}x{height}., extract the resolution and store {'url': url, 'resolution': widthxheight}
+6. Formats handling:
+   - Collect sources: data.get('sources', {})
+   - Consider live_sources from both 'live' and 'live_again' sources
+   - For each (key, url) in live_sources:
+     - ext = determine_ext(url)
+     - If ext is 'm3u8':
+       - Extend formats with _extract_m3u8_formats(url, video_id, ext='mp4', m3u8_id='hls', fatal=False)
+     - If ext is 'f4m':
+       - Extend formats with _extract_f4m_formats(url + '?hdcore=2.9.5', video_id, f4m_id='hds', fatal=False)
+     - Otherwise (direct MP4-like URLs):
+       - Append a format dict:
+         - 'format': key
+         - 'format_id': key.replace('/', '.')
+         - 'ext': 'mp4'
+         - 'url': url
+         - 'vcodec': 'none' if key.startswith('audio/') else None
+7. Fallback for special case:
+   - If no formats found and data.get('fivemin_id') exists, return self.url_result('5min:%s' % data['fivemin_id'])
+8. Sort formats: self._sort_formats(formats)
+9. Return a structured info dictionary:
+   - 'id': video_id
+   - 'title': video_title
+   - 'description': description
+   - 'formats': formats
+   - 'duration': duration
+   - 'upload_date': upload_date
+   - 'thumbnails': thumbnails
+
+Important implementation details
+- URL matching relies on a hex video_id extracted from the path segment after either r/segment/ or HPLEmbedPlayer/ segmentId.
+- Data is pulled from the embedded API at /api/segments/{video_id}.json and expected to contain a top-level 'data' object.
+- Thumbnails are parsed from data['images'], using a regex to extract resolution from the URL suffix (pattern includes -{width}x{height} before a dot).
+- Formats support multiple source types:
+  - HLS (m3u8) via _extract_m3u8_formats with ext forced to mp4 and m3u8_id 'hls'
+  - Smooth streaming (f4m) via _extract_f4m_formats with a hdcore parameter and f4m_id 'hds'
+  - Direct URLs are labeled with the original key and treated as MP4 unless the key indicates audio-only (vcodec set to 'none' for audio paths)
+- If there are no available formats but a special 5-minute item exists (fivemin_id), the code falls back to a dedicated 5min URL via url_result.
+- The code follows typical youtube-dl extractor patterns: download JSON, parse fields, construct a unified list of formats, and return a meta dictionary with standardized keys.
+
+In short, this extractor retrieves HuffPost live segment metadata from an API, builds a consolidated list of video formats from various source types, extracts useful metadata and thumbnails, and returns a structured item suitable for download.

@@ -1,0 +1,95 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/nick.py
+
+Purpose
+- A set of YouTube-dl extractors for Nickelodeon/Nick family sites (nick.com, nickjr and regional variants) to fetch video information (titles, IDs, descriptions, formats) by leveraging MTVN/MTV Services helpers.
+
+Base and common pattern
+- All classes derive from MTVServicesInfoExtractor, reusing common MTVN/MSSD extraction utilities (e.g., _get_videos_info, _get_videos_info_from_url, _download_json, _download_webpage, MRSS handling).
+- Each class defines its own _VALID_URL and _real_extract (or MRSS-specific logic) to handle different site structures and regional variations.
+- Tests in _TESTS illustrate expected outputs or simply matching behavior for various URLs.
+
+1) NickIE (nick.com)
+- IE_NAME: nick.com
+- _VALID_URL: Handles nick.com and nickjr.com video URLs with paths like videos/clip or other video pages.
+- _FEED_URL and _GEO_COUNTRIES: Uses an MTV feed and restricts to US.
+- _get_feed_query(self, uri): Builds query for feed requests: {'feed': 'nick_arc_player_prime', 'mgid': uri}.
+- _real_extract(self, url):
+  - Extracts domain and display_id from URL via _VALID_URL.
+  - Downloads JSON from http://<domain>/data/video.endLevel.json with query {'urlKey': display_id}.
+  - Uses video_data['player'] + video_data['id'] as input to _get_videos_info to produce final info.
+- Main functionality: fetches a JSON endLevel response containing player and id, then delegates to generic video info resolver.
+
+2) NickBrIE (nickelodeon.br and BR variants)
+- IE_NAME: nickelodeon:br
+- _VALID_URL: Complex pattern to cover BR domains and variants (nickjr.com.br, mundonick.uol.com.br, nickjr.<2-letter>, nickelodeonjunior.fr, etc.).
+- _TESTS: Several only_matching cases for BR/Portuguese-language domains.
+- _real_extract(self, url):
+  - Extracts domain and display_id from URL.
+  - Downloads the page, finds an mgid in data-contenturi or data-mgid attributes.
+  - video_id = _id_from_uri(uri).
+  - Fetches config from http://media.mtvnservices.com/pmt/e1/access/index.html with query {'uri': uri, 'configtype': 'edge'} and Referer header.
+  - info_url = config['feedWithQueryParams'] with template parameters removed.
+  - If info_url is 'None', builds a BR-specific MRSS feed URL:
+    - Strips www. from domain if present.
+    - Maps domain to a content_domain (mundonick.uol -> mundonick.com.br, nickjr -> br.nickelodeonjunior.tv).
+    - Builds query with mgid, imageEp, arcEp; for nickjr.com.br adds ep param.
+    - info_url = update_url_query('http://feeds.mtvnservices.com/od/feed/intl-mrss-player-feed', query)
+  - Finally calls _get_videos_info_from_url(info_url, video_id) to return the video info.
+- Main functionality: BR-specific flow to resolve MRSS or a fallback MRSS feed, then parse videos.
+
+3) NickDeIE (nick.de and other continental variants)
+- IE_NAME: nick.de
+- _VALID_URL: Matches several Nick variants across Europe (nick.de, nick.com.pl, nick.ch, nickelodeon nl/be/at/dk/no/se, etc.).
+- _TESTS: Several only_matching cases.
+- _extract_mrss_url(self, webpage, host):
+  - Finds MRSS URL from data-mrss attribute via regex data-mrss or data-mrss="...".
+  - Returns MRSS URL with siteKey set to host (via update_url_query).
+- _real_extract(self, url):
+  - Extracts video_id and host from the matched URL.
+  - Downloads page, obtains mrss_url via _extract_mrss_url(webpage, host).
+  - Returns _get_videos_info_from_url(mrss_url, video_id).
+- Main functionality: EU/DE/localized sites that embed videos via MRSS feed; resolves MRSS URL and uses standard MRSS-based extraction.
+
+4) NickNightIE (nicknight)
+- IE_NAME: nicknight
+- _VALID_URL: Matches Nick Night on various European domains (nicknight.de/at/tv) with path shows/playlist or shows/.../videos/.../id
+- _TESTS: Several only_matching cases.
+- Inherits from NickDeIE but overrides MRSS URL extraction:
+  - _extract_mrss_url(self, webpage, *args):
+    - Uses regex to find mrss URL from a mrss value in the page (mrss or equivalent format): mrss: "http..." or similar.
+- Functionality: Uses the NickDeIE MRSS-based flow but tailored to Nick Night’s MRSS embedding.
+
+5) NickRuIE (nickelodeon.ru and other RU-locale variants)
+- IE_NAME: nickelodeonru
+- _VALID_URL: Matches nickelodeon.ru/fr/es/pt/ro/hu/com.tr and similar; general RO/FR/ES/PT/RU variants with shows/videos structure.
+- _TESTS: Includes several only_matching cases.
+- _real_extract(self, url):
+  - Extracts video_id via regex match and host.
+  - Downloads the page, obtains MRSS URL via _extract_mrss_url(webpage, host) (inherited helper that reads data-mrss from page).
+  - Returns _get_videos_info_from_url(mrss_url, video_id).
+- Main functionality: RU-family sites rely on MRSS-driven extraction.
+
+6) NickRuIE’s MRSS extraction helper usage
+- _extract_mrss_url is provided by NickDeIE (and reused by NickRuIE) to pull MRSS feed URLs from pages; NickNightIE overrides this for its own MRSS format.
+
+Key implementation details
+- Data sources:
+  - NickIE uses a JSON endpoint data/video.endLevel.json and composes the input for the standard video info resolver.
+  - NickBrIE uses a config fetch from media.mtvnservices.com and then a possibly provided MRSS feed URL.
+  - NickDeIE, NickNightIE, and NickRuIE rely on MRSS feeds extracted from pages via data-mrss or similar attributes.
+- URL handling:
+  - update_url_query is used to build MRSS feed URLs with necessary query parameters in NickBrIE and NickBrIE fallback.
+  - _remove_template_parameter is used to strip template parameters from feed URLs when provided.
+- ID extraction:
+  - _valid_url patterns define how to extract display_id or id and sometimes host/domain for MRSS lookups.
+  - _id_from_uri is used to derive a video_id from a MO/URIs in NickBrIE.
+- Regional variations:
+  - NickBrIE explicitly handles BR-specific domain variants and includes content_domain mapping for fallback MRSS feed resolution.
+  - NickNightIE and NickRuIE provide MRSS-based extraction paths for their respective regional sites.
+- Tests:
+  - The _TESTS arrays include long example playlists (Nick.com) and several only_matching cases for BR, NL, FR, ES, PT, RU variants to ensure valid URL recognition and extraction behavior.
+
+Overall
+- This file implements a family of Nickelodeon/Nick extractors, each tailored to different regional site structures (nick.com, nickjr BR, de, ru, night variants, etc.).
+- The common strategy is to derive a direct video info set via MTVN/MTV Services backends (JSON or MRSS), then feed that into the standard video information extraction pipeline provided by the base class.
+- The code carefully handles MRSS-based feeds, edge-case fallbacks, and regional URL formats to robustly fetch video metadata across many locales.

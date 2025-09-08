@@ -1,0 +1,46 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/lci.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for LCi (French news site). It delegates the actual video extraction to the external Wat (Web Audio/Video) extractor.
+
+- Key class
+  - LCIIE(InfoExtractor)
+    - Inherits from youtube_dl.extractor.common.InfoExtractor.
+
+- URL pattern
+  - _VALID_URL = r'https?://(?:www\.)?lci\.fr/[^/]+/[\w-]+-(?P<id>\d+)\.html'
+  - Matches LCI article pages like /international/...-2001679.html
+  - The numeric id after the hyphen is captured as the video_id (not the final video id used by output).
+
+- Test data
+  - _TEST defines a sample URL, the expected md5 of the delivered mp4, and the info_dict:
+    - id: 13244802
+    - ext: mp4
+    - title: "Hillary Clinton et sa quinte de toux, en plein meeting"
+    - description: (md5 checksum)
+
+- Main extraction flow (_real_extract)
+  - video_id = self._match_id(url)
+    - Extracts the numeric id from the URL for page retrieval and logging.
+  - webpage = self._download_webpage(url, video_id)
+    - Downloads the page HTML.
+  - wat_id = self._search_regex(
+      (r'data-watid=[\'"](\d+)', r'idwat["\']?\s*:\s*["\']?(\d+)'),
+      webpage, 'wat id')
+    - Attempts to locate the internal Wat video id on the page using two patterns:
+      - data-watid="12345" (first pattern)
+      - idwat: "12345" or similar JSON-like syntax (second pattern)
+    - This yields the numeric Wat id used to identify the video.
+  - return self.url_result('wat:' + wat_id, 'Wat', wat_id)
+    - Constructs a result that delegates to the Wat extractor with the scheme wat:<wat_id>.
+    - The final extracted information (title, description, and video URL) is provided by the Wat extractor.
+    - The output id used by YouTube-DL will be the Wat id (e.g., 13244802).
+
+- Implementation details
+  - Delegation pattern: Instead of parsing the video URL directly, the extractor returns a URL for the Wat extractor, passing the found Wat id.
+  - Flexible extraction of wat_id: uses a tuple of regex patterns to handle variations in how the id is embedded in the page (data-watid attribute or a JSON-like idwat field).
+  - The _TEST validates the integrated behavior by checking the final mp4 video and metadata produced through the Wat extractor path.
+
+- Limitations and behavior
+  - If neither regex pattern finds a wat_id, _search_regex raises an error (as expected for a robust extractor).
+  - The code relies on Wat to provide the actual video information; LCIIE itself does not parse or resolve the video URL directly.

@@ -1,0 +1,82 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/picarto.py
+
+Overview
+- Implements two extractors for Picarto content:
+  - PicartoIE: handles live streams from picarto.tv channels.
+  - PicartoVodIE: handles VODs exposed via the videopopout URL.
+- Uses youtube-dl’s InfoExtractor base class and common utilities for JSON extraction, error handling, and format parsing.
+
+PicartoIE (live streams)
+- URL pattern: _VALID_URL = https?://(?:www.)?picarto\.tv/(?P<id>[a-zA-Z0-9]+)
+  - Extracts channel_id from the URL.
+- Suitable logic:
+  - PicartoIE.suitable(url) returns True unless PicartoVodIE.suitable(url) would handle it, ensuring VODs are dispatched to the right extractor.
+- Data flow to fetch live info:
+  - Calls https://ptvintern.picarto.tv/ptvapi with a GraphQL-like query to retrieve channel metadata:
+    - channel: adult, id, online, stream_name, title
+    - getLoadBalancerUrl: url
+  - Uses data['channel'] as metadata.
+  - If metadata['online'] == 0, raises ExtractorError('Stream is offline', expected=True).
+  - title is metadata['title'].
+  - Fetch load balancer JSON via data['getLoadBalancerUrl']['url'] + '/stream/json_' + metadata['stream_name'] + '.js'
+  - Iterates over sources in cdn_data['source']:
+    - For type 'html5/application/vnd.apple.mpegurl': extract HLS formats via _extract_m3u8_formats(source_url, channel_id, 'mp4', m3u8_id='hls', fatal=False)
+    - For type 'html5/video/mp4': add direct MP4 URL ({'url': source_url})
+- Formats handling:
+  - Collects and sorts formats via _sort_formats(formats).
+- Metadata and output:
+  - age_limit derived from adult flag: mature = metadata.get('adult'); None => age_limit=None; True => 18; False => 0.
+  - Returns a dict with:
+    - id: channel_id
+    - title: self._live_title(title.strip())
+    - is_live: True
+    - channel: channel_id
+    - channel_id: metadata.get('id')
+    - channel_url: https://picarto.tv/{channel_id}
+    - age_limit
+    - formats
+- Tests:
+  - _TEST describes a typical live stream: url, expected id, extension mp4, title pattern, timestamp, is_live True; skips when stream offline.
+
+PicartoVodIE (video popout / VODs)
+- URL pattern: _VALID_URL = https?://(?:www.)?picarto\.tv/videopopout/(?P<id>[^/?#&]+)
+- Test coverage via _TESTS:
+  - Valid VOD example with a filename-like id (ArtofZod_2017.12.12.00.13.23.flv) and md5, title, and thumbnail expectations.
+  - A non-matching or redirect-like sample (Plague) marked only_matching True to ensure proper routing.
+- Data flow to fetch VOD:
+  - video_id extracted from URL.
+  - webpage = _download_webpage(url, video_id)
+  - vod_info parsed from a JSON blob embedded in the page, located by regex (?s)#vod-player["\']\s*,\s*(\{.+?\})\s*\)
+  - The blob is transformed from JavaScript to JSON with transform_source=js_to_json.
+- Formats handling:
+  - Uses _extract_m3u8_formats on vod_info['vod'] with:
+    - entry_protocol='m3u8_native'
+    - m3u8_id='hls'
+  - Formats are sorted via _sort_formats(formats).
+- Output:
+  - Returns a dict with:
+    - id: video_id
+    - title: video_id (as a fallback/default)
+    - thumbnail: vod_info.get('vodThumb')
+    - formats
+- Notes:
+  - The approach targets HLS-based VODs embedded in the popout page and converts the embedded JavaScript-configured payload to a standard format list for youtube-dl.
+
+Key implementation details
+- Both extractors subclass InfoExtractor and integrate with youtube-dl’s format/muxing logic.
+- Live extraction relies on a two-step API flow: a GraphQL-like channel query to fetch metadata and an additional request to a load-balancer URL that provides a JSON structure describing available sources/formats.
+- HLS support is implemented via _extract_m3u8_formats with m3u8_id='hls'; direct MP4 sources are added as simple URLs.
+- Age restrictions for live streams are derived from an 'adult' flag in the channel metadata.
+- For VODs, the code expects a JSON-like payload embedded in the page after a #vod-player marker and uses js_to_json to convert it to a Python-friendly dict.
+- The code uses channel_id as a stable identifier for both the filename/title in live mode and the VOD URL path in vod mode, ensuring consistent naming.
+- Error handling:
+  - If the channel is offline (online == 0), raises ExtractorError with expected=True to indicate user-facing unavailability.
+- Test scaffolding:
+  - _TEST provides a representative live stream case with expected extensions, title pattern, timestamp, and is_live flag.
+  - _TESTS for PicartoVodIE validate the ability to parse the embedded JSON and extract HLS formats from the VOD payload.
+
+Summary
+- The file implements two Picarto extractors:
+  - PicartoIE for live streams: fetches channel metadata, loads balancing info, parses available sources (HLS and direct MP4), computes age limits, and returns a structured stream list with metadata.
+  - PicartoVodIE for VODs: parses a popout page to extract a JSON config, builds HLS formats from vod data, and returns basic metadata (id, title, thumbnail) with the available formats.
+- The design cleanly separates live vs. VOD handling and uses Picarto-specific endpoints and payload formats to build a usable mediainfo dict for youtube-dl.

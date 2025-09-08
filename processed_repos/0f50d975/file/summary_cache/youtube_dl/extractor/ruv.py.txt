@@ -1,0 +1,50 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/ruv.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Icelandic broadcaster Rúv (RUV) pages.
+  - Supports extracting video (including m3u8/HLS and mp3 audio) from specific Rúv URL patterns and returning standard YouTube-DL metadata plus available formats.
+
+- Main class
+  - RuvIE(InfoExtractor): Inherits common extraction utilities from youtube-dl’s InfoExtractor.
+
+- URL matching
+  - _VALID_URL: Regexp to match URLs of the form https://ruv.is/(sarpurinn/...|node)/<id> where id may include additional segments like a date.
+  - _TESTS: Includes two functional tests
+    - One m3u8 (video) example with MP4 as target format and a provided MD5 for the downloaded content.
+    - One mp3 example with MD5 and audio-only format handling.
+    - Several URLs with only_matching: True to verify non-matching or non-supported URLs are ignored by the extractor.
+
+- Extraction workflow (_real_extract)
+  - display_id: Extracted from the URL using _match_id.
+  - webpage: Download page HTML via _download_webpage.
+  - title: Retrieved via _og_search_title (OpenGraph title from the page).
+  - Media URL extraction:
+    - FIELD_RE is a dynamic regex to find video URLs in fields like video.src or video.poster.
+    - media_url: Extracted using FIELD_RE with 'src' (video URL) from the page.
+  - video_id: Extracted from a link tag that points to a node page (pattern /node/<digits>); falls back to display_id if not found.
+  - ext: Determined from media_url using determine_ext.
+  - formats handling:
+    - If ext is 'm3u8': use _extract_m3u8_formats with media_url, video_id, and m3u8-specific options (entry_protocol='m3u8_native', m3u8_id='hls').
+    - If ext is 'mp3': build a formats list with a single mp3 entry and set vcodec to 'none' (audio-only).
+    - Otherwise: default formats list containing the single media_url.
+  - metadata:
+    - description: _og_search_description(webpage, default=None) (OpenGraph description).
+    - thumbnail: First tries _og_search_thumbnail(webpage, default=None); if absent, falls back to FIELD_RE with 'poster' to find a poster image, non-fatal.
+    - timestamp: Parse via unified_timestamp on article:published_time meta tag (non-fatal fallback).
+  - Return dictionary containing:
+    - id: video_id
+    - display_id: display_id (from URL)
+    - title: title
+    - description: description
+    - thumbnail: thumbnail
+    - timestamp: timestamp
+    - formats: formats (list of format dictionaries)
+
+- Implementation details
+  - Uses _download_webpage, _og_search_title, _og_search_description, _og_search_thumbnail for OpenGraph-based metadata.
+  - Uses _html_search_meta to obtain published time from the page (with fatal=False to avoid hard failures).
+  - Uses _search_regex to extract video_id from the page if available (default to display_id when not found).
+  - Uses determine_ext to branch logic for m3u8 vs mp3 vs other URLs.
+  - For m3u8, relies on _extract_m3u8_formats with proper HLS handling; for mp3, constructs a single audio-only format.
+
+In short, this extractor visits a Ruv page, locates the embedded media URL via a JS/HTML field, determines the type (m3u8, mp3, or other), builds appropriate formats, and collects basic metadata (title, description, thumbnail, timestamp) to return a complete video information dictionary.

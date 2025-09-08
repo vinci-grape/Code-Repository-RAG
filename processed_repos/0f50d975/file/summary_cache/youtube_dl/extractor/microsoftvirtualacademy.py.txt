@@ -1,0 +1,98 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/microsoftvirtualacademy.py
+
+Overview
+- This module provides two extractors for Microsoft Virtual Academy (MVA) content:
+  - MicrosoftVirtualAcademyIE (video extractor for individual MVA videos)
+  - MicrosoftVirtualAcademyCourseIE (course extractor producing a playlist of videos)
+- A shared base class, MicrosoftVirtualAcademyBaseIE, supplies helper methods.
+
+Key classes and main functionality
+1) MicrosoftVirtualAcademyBaseIE
+- Inherits from InfoExtractor.
+- _extract_base_url(course_id, display_id)
+  - Calls the MVA API: https://api-mlxprod.microsoft.com/services/products/anonymous/<course_id>
+  - Returns the base URL for content, used to locate video assets.
+- _extract_chapter_and_title(title)
+  - Parses a string in the format "chapter | title" using a regex.
+  - Returns (chapter as int, title) if matched; otherwise (None, title).
+
+2) MicrosoftVirtualAcademyIE (video extractor)
+- IE_NAME = 'mva'; handles Microsoft Virtual Academy videos.
+- _VALID_URL
+  - Matches either a direct MVA video page URL or the shorthand form mva:<course_id>:<video_id>.
+  - Captures:
+    - course_id
+    - id (video_id)
+- _TESTS
+  - Includes a real video URL with expected id, title, formats, and English subtitles.
+  - Includes a shorthand test url for matching only.
+- _real_extract(url)
+  - Unsmuggles the URL to recover any injected base_url data.
+  - Extracts course_id and video_id from the URL.
+  - Determines base_url via smuggled data or by calling _extract_base_url(course_id, video_id).
+  - Downloads video settings XML at:
+    <base_url>/content/content_<video_id>/videosettings.xml?v=1
+  - Extracts the Title from the XML and uses _extract_chapter_and_title to derive a clean title (the code discards the chapter part here).
+  - Builds formats by parsing MediaSources in the XML:
+    - If videoType is 'smoothstreaming', uses _extract_ism_formats(video_url, video_id, 'mss', fatal=False) to fetch Smooth Streaming formats.
+    - Otherwise, for each MediaSource:
+      - Skips non-http URLs.
+      - Reads videoMode (e.g., "720p") and derives height via regex.
+      - Reads codec attribute; if two codes are present (e.g., "avc,aac"), assigns acodec and vcodec; if one code, uses it as vcodec.
+      - Appends a format dict with: url, format_id (videoMode), height, acodec, vcodec.
+  - _sort_formats(formats) to order them sensibly.
+  - Subtitles: collects MarkerResourceSource elements and builds an English ('en') subtitles dict with:
+    - url = base_url + subtitle_path
+    - ext = the type attribute from the source (e.g., 'ttml')
+- Returns a dict with:
+  - id: video_id
+  - title: extracted title
+  - subtitles: dictionary of subtitles (en)
+  - formats: list of available video formats
+
+3) MicrosoftVirtualAcademyCourseIE (course extractor)
+- IE_NAME = 'mva:course'; handles MVA course pages.
+- _VALID_URL
+  - Matches either a course page (with display_id and id) or the shorthand mva:course:<id>.
+  - Captures:
+    - display_id (course slug)
+    - id (course_id)
+- _TESTS
+  - Includes two real course URLs with expected playlist_count and titles.
+  - Also tests for alternative domains and shorthand URL forms (only_matching).
+- suitable(cls, url)
+  - Ensures this extractor does not clash with MicrosoftVirtualAcademyIE.
+  - Returns False if the video extractor would handle the URL; otherwise delegates to the parent suitable().
+- _real_extract(url)
+  - Parses course_id and display_id from the URL.
+  - base_url = _extract_base_url(course_id, display_id)
+  - Downloads the course manifest: <base_url>/imsmanifestlite.json
+  - Manifest structure: manifest.organizations.organization[0] contains chapters/items.
+  - Iterates over chapters and their items:
+    - For each item, extracts item_id and metadata.
+    - Skips items where metadata.learningresourcetype != 'Video'.
+    - title is derived from the item title via _extract_chapter_and_title.
+    - duration = parse_duration(metadata.duration)
+    - description = metadata.description
+    - Creates a playlist entry as a transparent URL to the video extractor:
+      - url = smuggle_url('mva:<course_id>:<item_id>', {'base_url': base_url})
+      - title, description, duration
+      - chapter, chapter_number, chapter_id for playlist metadata
+  - Derives playlist title as organization.title or manifest.metadata.title.
+  - Returns a playlist_result(entries, course_id, title)
+
+Implementation details and notes
+- Uses:
+  - re for pattern matching
+  - xpath_text to extract XML text
+  - compat_xpath to handle cross-version XPath
+  - int_or_none, parse_duration for robust numeric/duration parsing
+  - smuggle_url / unsmuggle_url to pass contextual data (like base_url) through URLs
+- Video extraction supports both:
+  - Smooth Streaming formats via _extract_ism_formats
+  - Direct media sources with explicit height and codecs
+- Subtitles are collected from MarkerResourceSource entries and keyed by language (only 'en' shown in code)
+- The code carefully handles missing or malformed entries (filters out invalid URLs, missing identifiers, non-video items)
+- The two extractors are designed to be mutually exclusive: Course extractor rejects URLs that the Video extractor would handle to avoid overlap.
+
+In short, this module enables youtube-dl to fetch and assemble both individual MVA videos and course playlists by parsing MVA’s content manifests, video settings XML, and course manifests, supporting various format types and English subtitles.

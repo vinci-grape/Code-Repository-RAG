@@ -1,0 +1,20 @@
+- Purpose: Implement an extractor for Engadget video pages in youtube-dl.
+
+- Key class: EngadgetIE, subclass of InfoExtractor.
+
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?engadget\.com/video/(?P<id>[^/?#]+)'. Captures the video id from Engadget video URLs.
+
+- Core logic (_real_extract):
+  - Extracts video_id using self._match_id(url).
+  - Returns a url_result pointing to the AOL Video extractor with the id formatted as 'aol-video:<video_id>' (i.e., delegation to the AOL Video backend).
+
+- Delegation behavior:
+  - The actual media is resolved via the AOL Video extractor. The code uses url_result('aol-video:%s' % video_id) to chain extraction through AOL Video (and, per tests, through FiveMin as an additional extractor when needed).
+
+- Tests (_TESTS):
+  - Test 1: Uses Engadget URL with id 518153925. Expects mp4, with title "Samsung Galaxy Tab Pro 8.4 Review" and a specific md5. Also indicates to use the FiveMin extractor (add_ie: ['FiveMin']).
+  - Test 2: Uses another Engadget URL and is marked only_matching to ensure the URL pattern matches without full extraction (for that sample).
+
+- Notable implementation details:
+  - No direct video URL parsing is performed; the extractor serves as a pass-through to AOL Video.
+  - Uses the common testing structure of youtube-dl extractors, including _TESTS with md5, info_dict, and add_ie hints.

@@ -1,0 +1,44 @@
+Here is a concise, focused summary of the code in ./youtube-dl/devscripts/fish-completion.py:
+
+Purpose
+- Generate a Fish shell completion script for youtube-dl by reading youtube-dl’s optparse-based options and emitting corresponding fish completion commands into a template.
+
+Main functionality
+- build_completion(opt_parser): Core function that builds a list of Fish completion commands for all options discovered in the provided optparse parser, then injects them into a template to produce youtube-dl.fish.
+- The script is executed at import time: it loads the youtube-dl option parser and immediately runs build_completion on it.
+
+Key classes / functions
+- build_completion(opt_parser)
+  - Iterates through all option groups and options in the opt_parser.
+  - For each option:
+    - long_option: the option name with leading dashes stripped.
+    - Builds a Fish completion command list:
+      - ['complete', '--command', 'youtube-dl', '--long-option', long_option]
+      - If a short option exists, adds ['--short-option', short_opt]
+      - Adds ['--description', option.help] unless the help text is suppressed.
+    - Extends the command with extra arguments from EXTRA_ARGS for that long option (e.g., which options require a parameter, or special handling like available formats for recode-video).
+    - Uses shell_quote to properly escape the command for shell usage.
+    - Collects all such quoted commands into a list.
+  - Reads the Fish completion template file (FISH_COMPLETION_TEMPLATE), substitutes the placeholder {{commands}} with the newline-joined generated commands, and writes the result to FISH_COMPLETION_FILE (youtube-dl.fish) via read_file/write_file utilities.
+
+Important implementation details
+- Path setup: Inserts the repository root into sys.path to import youtube_dl directly from the codebase (not from installed site-packages).
+- Template-driven: Uses a template file devscripts/fish-completion.in with a {{commands}} placeholder, enabling easy maintenance of the final script layout.
+- EXTRA_ARGS mapping: Provides per-option extra arguments for the Fish completion:
+  - 'recode-video': adds an --arguments clause with supported formats and marks it exclusive.
+  - Options that require a parameter (e.g., 'download-archive', 'cookies', 'load-info', 'batch-file') are flagged with '--require-parameter'.
+- Optparse integration: Works with optparse.OptionGroup/Option objects:
+  - long_option is derived from option.get_opt_string() with dashes stripped.
+  - short option is taken from option._short_opts[0] if present (internal attribute access; typical for optparse).
+  - Skips options with help marked as optparse.SUPPRESS_HELP.
+- Output: Writes the final Fish completion script to youtube-dl.fish in the repository root (or current working directory when run).
+
+Files/paths involved
+- FISH_COMPLETION_FILE = 'youtube-dl.fish'
+- FISH_COMPLETION_TEMPLATE = 'devscripts/fish-completion.in'
+- Template-driven approach via read_file and write_file from utils.
+
+Execution flow
+- parser = youtube_dl.parseOpts()[0]
+- build_completion(parser)
+- Generates a Fish completion script that defines how to complete the youtube-dl command, including long/short options, descriptions, and any option-specific parameter hints or extra arguments.

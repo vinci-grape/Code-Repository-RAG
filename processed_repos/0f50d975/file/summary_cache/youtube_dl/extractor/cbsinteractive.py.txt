@@ -1,0 +1,59 @@
+Concise summary of CBS Interactive extractor (youtube-dl/youtube_dl/extractor/cbsinteractive.py)
+
+- Purpose
+  - Extract video metadata and available formats for CBS Interactive sites (CNET and ZDNet) pages under /videos or /video paths.
+  - Normalize data to youtube-dl’s standard info dictionary, using MPX (MSP) IDs and CBSIE’s common extraction logic.
+
+- Main class
+  - CBSInteractiveIE(CBSIE)
+    - Inherits common CBS video extraction behavior from CBSIE.
+
+- Key data and logic
+  - _VALID_URL
+    - Matches URLs for CNET or ZDNet video pages, e.g. http(s)://www.cnet.com/videos/... or /video/... with a slug id captured as display_id.
+  - MPX_ACCOUNTS
+    - Mapping of site to MPX account IDs:
+      - cnet -> 2198311517
+      - zdnet -> 2387448114
+  - _real_extract(self, url)
+    - Parses site and display_id from the URL using the _VALID_URL regex.
+    - Downloads the page HTML.
+    - Extracts a JSON blob from the page containing video data via a targeted HTML pattern:
+      - data(?:-(?:cnet|zdnet))?-video(?:-(?:uvp(?:js)?|player))?-options='([^']+)'
+    - Parses the JSON to a Python dict (data).
+    - Chooses the video data object (vdata) via:
+      - data.get('video') or first element of data.get('videos') or data.get('playlist').
+    - Reads the MPX reference ID from vdata['mpxRefId'] as the canonical video id (video_id).
+    - Extracts basic info from vdata:
+      - title = vdata['title']
+      - author information (if available) to form uploader and uploader_id:
+        - uploader = "FirstName LastName"
+        - uploader_id = author['id']
+      - If author unavailable, uploader and uploader_id are left None.
+    - Fetches additional metadata via:
+      - info = self._extract_video_info(video_id, site, self.MPX_ACCOUNTS[site])
+        - This leverages CBSIE’s shared logic to pull MPX-based details (e.g., streams, duration, timestamps, etc.).
+    - Augments the info dict with:
+      - id: video_id
+      - display_id: display_id (slug from URL)
+      - title: title
+      - duration: int_or_none(vdata.get('duration'))
+      - uploader: uploader
+      - uploader_id: uploader_id
+    - Returns the complete info dictionary.
+
+- Important implementation details
+  - Robust data extraction:
+    - The code accounts for different JSON shapes by selecting either data['video'] or the first item of data['videos'] / data['playlist'].
+  - Author handling:
+    - If author info exists, constructs a human-friendly uploader name from firstName and lastName and includes an author id when available.
+  - Uses CBSIE's _extract_video_info with MPX account IDs to gather standard metadata and formats, ensuring consistency with other CBS-related extractors.
+  - Test cases (_TESTS) cover multiple host variants (CNET and ZDNet) and forms of video page URLs, including an example that is onlymatched (not fully downloaded).
+
+- What you get from extraction
+  - A unified info dict containing:
+    - id, display_id, title, duration, uploader, uploader_id
+    - plus any MPX-derived fields (formats, timestamps, upload_date, etc.) provided by _extract_video_info.
+  - Supports m3u8/other format discovery via CBSIE’s mechanisms (as indicated by test params noting m3u8 download).
+
+In short, this extractor pulls a page-specific JSON payload to identify the MPX video, enriches it with author and title data, then delegates to CBSIE’s MPX-based extraction to obtain the final formats and metadata.

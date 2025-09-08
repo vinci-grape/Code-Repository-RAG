@@ -1,0 +1,35 @@
+Concise but comprehensive summary of motorsport.py
+
+Purpose:
+- Implement a YouTube-DL extractor (MotorsportIE) for motorsport.com video pages that render their videos via an embedded YouTube player. The extractor delegates the actual video metadata extraction to the YouTube extractor.
+
+Key class:
+- MotorsportIE (inherits from InfoExtractor)
+  - IE_DESC: 'motorsport.com'
+  - _VALID_URL: Regex matching motorsport.com video pages and capturing the video slug as id
+  - _TEST: Provides a sample URL and expected info dict (including id, ext, title, duration, description, uploader, upload_date, thumbnail) and indicates to use the Youtube extractor; skips actual download in tests
+
+Main functionality (_real_extract):
+1) Determine display_id from the URL using the captured id in _VALID_URL.
+2) Download the MotorSport page HTML.
+3) Locate the iframe containing the video player:
+   - Look for an iframe with id="player_iframe" and extract its src attribute (iframe_path).
+4) Download the iframe page (resolved with urljoin to handle relative paths).
+5) Extract the YouTube video id from the iframe content:
+   - Search for a pattern like www.youtube.com/embed/{11-char-id}
+6) Return a url_transparent result pointing to the YouTube watch URL:
+   - url: https://youtube.com/watch?v=<youtube_id>
+   - display_id preserved
+   - This defers to the Youtube IE for actual video metadata (title, duration, uploader, upload_date, thumbnail, etc.)
+
+Implementation details:
+- Uses InfoExtractor base methods: _download_webpage, _html_search_regex, _search_regex, and compat_urlparse.urljoin.
+- Regexes:
+  - _VALID_URL targets the path structure: /<category>/video/<segment>/<id> with optional trailing slash or query.
+  - iframe regex to locate the player iframe by id and extract its src.
+  - YouTube id regex to capture the 11-character video id from the embed URL.
+- Final output type '_type': 'url_transparent' indicating another extractor (Youtube) will handle the actual video extraction.
+- _TEST demonstrates expected behavior: Cars the metadata (title, duration, etc.) would come from the YouTube page after delegation, with skip_download in tests to avoid actually downloading video data.
+
+Summary of main flow:
+- Map motorsport.com video page to an embedded YouTube video by parsing the page -> extract the YouTube embed id from the iframe -> construct a YouTube watch URL -> delegate to Youtube extractor for metadata and actual download.

@@ -1,0 +1,87 @@
+Concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/radiocanada.py
+
+Overview
+- Provides two information extractors for Radio-Canada content integrated into youtube-dl:
+  - RadioCanadaIE: handles mediaconsole medianet pages and radiocanada:appCode:id style URLs.
+  - RadioCanadaAudioVideoIE: handles audio/video pages and delegates to the first extractor by constructing a radiocanada:medianet:<id> reference.
+- Both extractors fetch metadata and video formats from Radio-Canada APIs, handle errors (including geo restrictions and login requirements), and return a structured video info dict compatible with youtube-dl.
+
+Key classes and main functionality
+- RadioCanadaIE (InfoExtractor)
+  - URL patterns:
+    - Accepts two formats: radiocanada:appCode:id or https://ici.radio-canada.ca/widgets/mediaconsole/…/(app_code)/(id)
+  - _call_api(self, path, video_id=None, app_code=None, query=None)
+    - Builds a JSON query with:
+      - client_key = fixed value
+      - output = json
+      - appCode and idMedia when video_id is provided
+      - access_token if self._access_token is set
+    - Performs GET to https://services.radio-canada.ca/media/{path}
+    - Robust error handling:
+      - If an ExtractorError with HTTP 401/422 occurs, tries to parse the underlying JSON error and raise a user-friendly ExtractorError with the error description.
+  - _extract_info(self, app_code, video_id)
+    - Fetches metas from meta/v1/index.ashx
+    - Helper get_meta(name) to retrieve text values from metas by name
+    - Warns if protectionType meta exists (not strictly DRM, but often associated with protection)
+    - Builds a validation query:
+      - connectionType=hd, deviceType=ipad, multibitrate=true
+      - Includes self._claims if set
+    - Calls validation/v2/ to obtain v_data; extracts v_url from v_data['url']
+    - If no v_url:
+      - Checks error message:
+        - Geography error -> raise geo restriction for CA
+        - Premium/unavailable -> raise login required
+        - Else raise ExtractorError with the API-provided message
+    - Builds formats from _extract_m3u8_formats(v_url, video_id, 'mp4') and sorts them
+    - Subtitles:
+      - Looks for closedCaption or closedCaptionHTML5 in metas
+      - If found, adds French ('fr') subtitles with detected extension (via determine_ext)
+    - Returns a dict with:
+      - id, title, description, thumbnail, duration, series, season_number, episode_number, upload_date
+      - subtitles and formats
+      - Title fallback: Title or AV-nomEmission
+      - Description fallback: Description or ShortDescription
+      - Thumbnail fallback: imageHR / imageMR / imageBR
+      - Date conversion via unified_strdate
+  - _real_extract(self, url)
+    - Extracts app_code and video_id via regex from _VALID_URL and delegates to _extract_info
+
+- RadioCanadaAudioVideoIE (InfoExtractor)
+  - URL pattern:
+    - https://ici.radio-canada.ca/.../media-<id> either with or without trailing path
+  - _real_extract(self, url)
+    - Converts the audio/video page to the internal radiocanada:medianet:<id> URL and delegates by returning self.url_result(...)
+  - This enables reuse of the first extractor’s logic for the media-<id> pages by mapping to the medianet path.
+
+Important implementation details
+- _VALID_URL patterns are designed to cover mediaconsole pages and the radiocanada:appCode:id form.
+- API interaction:
+  - Uses a fixed client_key and requests JSON responses.
+  - App code and media id are passed to the meta/validation endpoints to fetch the correct media entry.
+  - Supports an optional access_token for authenticated requests.
+- Error handling:
+  - On HTTP 401/422 responses, the code extracts a helpful error message from the API’s JSON payload and raises an ExtractorError with that message.
+  - Handles geo-restriction and login-required cases explicitly based on API error messages.
+- Metadata extraction:
+  - Uses meta/v1/index.ashx to read a set of metadata fields. get_meta(name) helper returns the first non-empty text value for a given field name.
+  - Falls back to alternative metadata fields if primary ones are missing (e.g., Title or AV-nomEmission; Description or ShortDescription).
+  - Thumbnails are chosen from imageHR, imageMR, or imageBR.
+  - Upload date converted with unified_strdate; duration via int_or_none.
+- DRM and protection awareness:
+  - A warning is issued if a protectionType meta exists, reflecting potential DRM or content protection, but this is advisory (not definitive).
+  - The code acknowledges that protectionType does not always imply DRM (noted in comments).
+- Formats:
+  - Video formats are retrieved by _extract_m3u8_formats from the provided HLS URL (v_url) with a preferred extension of mp4.
+  - Formats are sorted for quality preference.
+- Subtitles:
+  - Attempts to obtain closed captions URLs from metadata and registers them as French subtitles ('fr') with the appropriate extension determined by the URL.
+
+Tests
+- _TESTS contain sample URLs and expected info dicts, including:
+  - A typical mediaconsole URL with title, description, upload_date, and mp4 extension.
+  - A mediaconsole URL with an empty title to demonstrate fallback behavior.
+  - A radiocanada: URL form to ensure the extractor path handles protectionType and non-DRM scenarios.
+- Second extractor tests ensure that an audio-video URL maps to the internal medianet ID and is processed by the main extractor.
+
+In short
+- This file enables youtube-dl to fetch and parse Radio-Canada video content via their media APIs, handling both public-mediaconsole pages and the radiocanada:appCode:id style, with robust error handling, geo restrictions, metadata extraction, HLS format extraction, subtitles, and compatibility with an additional audio/video page pattern through a small adaptor extractor.

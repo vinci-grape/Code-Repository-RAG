@@ -1,0 +1,37 @@
+Summary of the code in ./youtube-dl/test/test_age_restriction.py
+
+- Purpose
+  - A unit test module for youtube-dl that verifies age-restriction handling. It checks that videos behind an age gate do not produce info JSON when the user’s age is below the limit, and that they do produce it when the age is above the limit.
+
+- Main components
+  - _download_restricted(url, filename, age)
+    - Creates a YoutubeDL instance with:
+      - age_limit set to age
+      - skip_download enabling metadata-only operation
+      - writeinfojson to produce a .info.json file
+      - outtmpl to define the expected video filename (id.ext)
+    - Determines json_filename as the base filename with .info.json extension.
+    - Deletes any pre-existing json file (try_rm).
+    - Attempts to download the URL. If a DownloadError occurs, it cleans up the json file.
+    - Returns True if the json file exists after the operation, False otherwise. Finally, it cleans up the json file.
+    - The existence of the .info.json file is used as a proxy indicator that the metadata could be retrieved under the given age limit.
+
+  - TestAgeRestriction (unittest.TestCase)
+    - _assert_restricted(self, url, filename, age, old_age=None)
+      - Asserts that _download_restricted(url, filename, old_age) is True (older user can access).
+      - Asserts that _download_restricted(url, filename, age) is False (younger user is restricted).
+    - test_youtube(self)
+      - Verifies age restriction by using a YouTube video ID (HtVdAasjOgU) with age=10.
+    - test_youporn(self)
+      - Verifies age restriction with a YouPorn URL; passes old_age=25 (allowed) and age=2 (restricted) for the corresponding video (16715086.mp4).
+
+- Important implementation details
+  - Uses test.helper.try_rm to clean up any leftover .info.json files before and after tests.
+  - The json filename is derived from the requested filename by replacing its extension with .info.json.
+  - skip_download=True ensures no actual video download occurs; the test focuses on metadata retrieval via writeinfojson.
+  - The test imports YoutubeDL and DownloadError from youtube_dl to drive the test and handle potential errors.
+  - Test execution is via unittest.main() when run as a script.
+
+- Behavior and expectations
+  - If the content is accessible within the specified age_limit, an info.json file should be created (result True).
+  - If the content is not accessible due to age restrictions, the info.json file should not be created (result False).

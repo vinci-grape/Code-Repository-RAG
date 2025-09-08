@@ -1,0 +1,64 @@
+Here is a concise, feature-focused summary of the code in ./youtube-dl/youtube_dl/extractor/r7.py.
+
+What this file does
+- Implements two extractors for the Brazilian R7 site:
+  - R7IE: Main extractor for direct video pages served by R7 (video player API).
+  - R7ArticleIE: Extractor for video pages embedded in R7 articles; it delegates to R7IE for the actual video data.
+- Both extractors fetch video metadata from R7 and build a standardized information dictionary including video formats, titles, descriptions, thumbnails, durations, and engagement metrics (likes/views).
+
+Key classes and main methods
+- R7IE (InfoExtractor)
+  - _VALID_URL: Matches R7 video page URLs, including:
+    - r7.com paths ending with /idmedia/
+    - noticias.r7.com paths with /.../...- variants
+    - player.r7.com/video/i/
+  - _TESTS: Includes a sample URL with expected metadata (id, ext mp4, title, description MD5, thumbnail, duration, like_count, view_count) and additional only_matching tests.
+  - _real_extract(self, url):
+    - video_id = self._match_id(url)
+    - Fetches JSON metadata from http://player-api.r7.com/video/i/{video_id}
+    - title = video['title']
+    - Formats:
+      - If video['media_url_hls'] exists: add formats via self._extract_m3u8_formats(media_url_hls, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False)
+      - If video['media_url'] exists: add an HTTP format {'url': media_url, 'format_id': 'http'}
+        - If there is exactly one non-video-format (based on vcodec != 'none') from the HLS set, copy its metadata to the HTTP format and set protocol to 'http' to ensure consistent metadata between formats.
+    - self._sort_formats(formats)
+    - description = video.get('description')
+    - thumbnail = video.get('thumb')
+    - duration = int_or_none(video.get('media_duration'))
+    - like_count = int_or_none(video.get('likes'))
+    - view_count = int_or_none(video.get('views'))
+    - Returns a dict with id, title, description, thumbnail, duration, like_count, view_count, formats
+
+- R7ArticleIE (InfoExtractor)
+  - _VALID_URL: Matches article-related R7 URLs with a trailing numeric id: https?://<subdomain>.r7.com/...-<digits>
+  - _TEST: A test ensuring this extractor is only used as a fallback (only_matching)
+  - suitable(cls, url):
+    - Returns False if R7IE would already handle the URL; otherwise defers to parent suitability (i.e., this extractor is used only when R7IE doesn’t match)
+  - _real_extract(self, url):
+    - display_id = self._match_id(url)
+    - webpage = self._download_webpage(url, display_id)
+    - video_id = self._search_regex(r'<div[^>]+(?:id=["\']player-|class=["\']embed["\'][^>]+id=["\'])([\da-f]{24})', webpage, 'video id')
+    - Returns a URL result pointing to http://player.r7.com/video/i/{video_id} using R7IE as the extractor (R7IE.ie_key())
+
+Important implementation details
+- Video ID formats:
+  - R7IE uses a 24-character lowercase hex ID extracted from the URL.
+  - R7ArticleIE extracts a 24-character hex video ID embedded in the page HTML, then delegates to R7IE.
+- Metadata retrieval:
+  - Video metadata is retrieved via the R7 player API: http://player-api.r7.com/video/i/{video_id}
+  - Expected fields include: title, description, thumb, media_duration, likes, views, media_url, media_url_hls
+- Formats handling:
+  - HLS formats: If media_url_hls is present, formats are gathered with _extract_m3u8_formats using m3u8_native, with an id of 'hls'.
+  - HTTP formats: If media_url is present, an http format is added. If there is exactly one m3u8 format discovered, its metadata is copied to the HTTP format to keep consistency between formats.
+  - Formats are then sorted via _sort_formats.
+- Data extraction helpers:
+  - int_or_none is used to safely parse numeric fields (duration, likes, views).
+- Output structure:
+  - The final video info dict contains: id, title, description, thumbnail, duration, like_count, view_count, formats
+- Robustness:
+  - HLS extraction uses fatal=False to avoid failing if HLS is unavailable.
+  - R7ArticleIE avoids clashing with R7IE by only applying when R7IE isn’t suitable for the URL.
+
+In short, this file provides two extractors for R7:
+- R7IE: Direct video pages; fetches JSON metadata, builds HLS and HTTP formats, and returns a complete info_dict.
+- R7ArticleIE: Article-embedded videos; extracts the internal video id and delegates to R7IE for the actual extraction.

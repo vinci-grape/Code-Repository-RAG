@@ -1,0 +1,70 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/eitb.py
+
+Overview
+- Implements an information extractor (EitbIE) for eitb.tv videos, integrated into youtube-dl.
+- Extracts video metadata and formats (MP4/RENDITIONS, HLS, and HDS) from eitb’s REST endpoints.
+
+Key components
+- Class: EitbIE(InfoExtractor)
+  - IE_NAME: 'eitb.tv'
+  - _VALID_URL: Regex matching eitb.tv video pages under /eu/bideoa or /es/video with a numeric id captured as 'id'.
+  - _TEST: Demonstrates a sample URL and expected parsed fields (id, ext, title, description, duration, timestamp, upload_date, tags).
+
+Main functionality (_real_extract)
+- Video ID extraction
+  - video_id = self._match_id(url)
+
+- Retrieve video metadata
+  - Downloads JSON from: http://mam.eitb.eus/mam/REST/ServiceMultiweb/Video/MULTIWEBTV/<video_id>/
+  - Expects payload with web_media array; uses web_media[0] as the primary media object (media).
+
+- Build MP4/Rendition formats
+  - Iterates over media['RENDITIONS']:
+    - Uses PMD_URL as the source URL; skips if missing.
+    - tbr (total bitrate) derived from ENCODING_RATE (default 1000 if missing).
+    - format_id starts as 'http'; if tbr present, appends '-<tbr>'.
+    - Collects format dicts with: url, format_id, width, height, tbr.
+
+- HLS (HTTP Live Streaming) handling
+  - hls_url = media.get('HLS_SURL')
+  - If present, requests a token-auth endpoint:
+    - Uses Referer header set to the page URL.
+    - Calls: http://mam.eitb.eus/mam/REST/ServiceMultiweb/DomainRestrictedSecurity/TokenAuth/
+    - If a token is returned, appends it as hdnts to the HLS URL and extracts M3U8 formats via _extract_m3u8_formats:
+      -_formats added with m3u8_id='hls'
+      - fatal=False to continue on failure
+
+- HDS (HTTP Dynamic Streaming) handling
+  - hds_url = media.get('HDS_SURL')
+  - If present, extracts F4M formats via _extract_f4m_formats:
+    - Appends ?hdcore=3.7.0 to the URL
+    - Replaces 'euskalsvod' with 'euskalvod' in the URL before extraction
+    - f4m_id='hds', fatal=False
+
+- Finalize formats
+  - self._sort_formats(formats)
+
+- Return video metadata
+  - id: video_id
+  - title: prefers NAME_ES, else name, else NAME_EU
+  - description: prefers SHORT_DESC_ES, else video['desc_group'], else SHORT_DESC_EU
+  - thumbnail: STILL_URL, else THUMBNAIL_URL
+  - duration: LENGTH converted from milliseconds to seconds via float_or_none(value, 1000)
+  - timestamp: parse_iso8601(media['BROADCST_DATE'], ' ')
+  - tags: TAGS
+  - formats: list of all gathered formats (MP4/RENDITIONS, HLS, HDS)
+
+Implementation details and utilities
+- Uses helper utilities:
+  - float_or_none: to convert ENCODING_RATE to tbr and LENGTH from ms to seconds
+  - int_or_none: to safely parse numeric width/height
+  - parse_iso8601: to parse the broadcast date into a timestamp
+  - sanitized_Request: to attach headers for token-auth request
+- Robustness:
+  - Skips renditions without PMD_URL
+  - HLS token retrieval is optional; if token isn’t available, HLS formats are not added
+  - HDS formats are added with fatal=False to avoid failing extraction if they’re unavailable
+  - sort_formats called to order formats by quality/bitrate
+
+Overall purpose
+- Provide a comprehensive extractor for eitb.tv that gathers all available video formats (direct MP4 renditions, HLS with domain-restricted token, and HDS) and returns a complete metadata dictionary suitable for download via youtube-dl. It includes robust fallbacks for title/description/thumbnail and converts durations and timestamps into standard formats.

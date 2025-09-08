@@ -1,0 +1,84 @@
+Here's a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/drtv.py.
+
+Overview
+- This file implements two extractors for DR (Danmarks Radio) content:
+  - DRTVIE: for on-demand DR TV content accessed via the DR mu programcard API.
+  - DRTVLiveIE: for live DR TV channels, using a separate channel API to discover live streams.
+- Both extractors target Denmark (geo-restricted by default) and produce standard YouTube-dl style video information dictionaries with formats, metadata, and optional subtitles.
+
+Key classes and main flow
+- DRTVIE (InfoExtractor)
+  - URL patterns: _VALID_URL matches various DR TV pages (tv/se, nyheder, radio, drtv/episode/program) and captures a video id.
+  - Process:
+    - Download the page and check for a "not available" message.
+    - Try to locate a program/episode identifier (video_id) from HTML attributes or an embedded URN. If needed, unquote it.
+    - Build a programcard API URL (https://www.dr.dk/mu-online/api/1.4/programcard) and request JSON data with expanded view.
+    - If a specific video_id is found, request programcard data for that id; otherwise, derive video_id from embedded JSON and request with productionnumber.
+    - Extract title, description, timestamp, and other metadata. Title uses data.Title or a cleaned-up OG title.
+    - Gather assets from the programcard data (PrimaryAsset and SecondaryAssets). Each asset can be:
+      - Image: used as thumbnail.
+      - VideoResource / AudioResource: contains streaming links and metadata.
+      - Subtitles: per-asset subtitles lists (language mapping to IETF codes).
+    - For each asset with a Link:
+      - If a direct Uri is present, use it. If EncryptedUri is present, decrypt it.
+      - Decryption uses a custom AES-CBC scheme (decrypt_uri) with a derived key from the asset value and a fixed salt, followed by PKCS-style unpadding. This yields a real URI that may be used for HLS/HDS or direct file formats.
+      - Determine format_id and preference based on asset target (e.g., HDS, HLS, Default, or language-specific subtitles like SpokenSubtitles, SignLanguage, VisuallyInterpreted).
+      - For HDS: fetch f4m formats, optionally mark audio as vcodec=none if resource is AudioResource.
+      - For HLS: fetch m3u8 formats.
+      - For other links: create a direct format entry with URL, tbr (bitrate), extension, and optional vcodec, with a proper format_id (including bitrate if present) and a potential language/preference tag.
+    - Subtitles: collect per-language subtitles, mapping Danish to 'da', and determine file extensions via mimetype.
+    - Optional geo-restriction: if no formats were found but the asset was RestrictedToDenmark, raise a geo-restriction error for DK.
+    - Sort formats with _sort_formats.
+    - Return a dict with:
+      - id, title, description, thumbnail, timestamp, duration
+      - formats, subtitles
+      - series, season, season_number, season_id, episode, episode_number, release_year
+- DRTVLiveIE (InfoExtractor)
+  - URL patterns: _VALID_URL matches live DR TV pages like https://www.dr.dk/tv/live/dr1
+  - Process:
+    - Fetch channel data from https://www.dr.dk/mu-online/api/1.0/channel/{channel_id}.
+    - Build a live title from channel data.
+    - Iterate available StreamingServers and their Qualities/Streams:
+      - Build stream URLs from server + stream path, removing any query parameter b.
+      - If LinkType is HLS: extract m3u8 formats with live=True.
+      - If LinkType is HDS: extract f4m formats with hdcore parameter.
+    - Sort formats and return a dict with id, title, thumbnail, formats, and is_live=True.
+
+Important implementation details
+- Decryption of EncryptedUri
+  - Encrypted URIs are decrypted with AES-CBC.
+  - The key is SHA-256 of the string "%s:sRBzYNXBzkKgnjj8pGtkACch" % a, where a is derived from the encrypted string.
+  - IV is derived from a portion of the encrypted string, and the ciphertext is parsed from hex data.
+  - The decrypted data is byte-unwrapped, PKCS-style unpadded, converted to UTF-8, and the portion before a '?' is returned as the real URI.
+  - This mechanism is used to recover actual streaming URLs that DRM-obfuscated.
+- Asset handling
+  - Assets may be VideoResource or AudioResource with multiple Links. Each Link can have either a Uri or EncryptedUri and may specify Target (HDS, HLS, Default) and Bitrate.
+  - Languages/subtitles are collected per asset; Danish maps to 'da'.
+  - Special handling for spoken subtitles or sign language: formats get a negative or special preference and a suffix like -SpokenSubtitles or -SignLanguage in the format_id.
+  - For HDS links, f4m formats are fetched; for HLS, m3u8 formats are fetched; otherwise direct file formats are appended with vcodec set to 'none' for AudioResource.
+- Metadata extraction
+  - Title prefers data.Title and otherwise uses the page’s Open Graph title with cleanup to remove trailing "TV | DR"/“DRTV”.
+  - Description prefers Open Graph description unless not present, in which case data.Description is used.
+  - Timestamps are derived from PrimaryBroadcastStartTime or SortDateTime via unified_timestamp.
+- Geo-restriction handling
+  - If a video is restricted to Denmark and no formats are produced, a geo-restriction error is raised to inform the user they’re outside the allowed region.
+- Robust URL/channel handling
+  - The code attempts multiple strategies to locate a programcard id (data attributes or URN), and even decodes embedded JSON to fetch a production number if needed.
+  - It gracefully handles missing or encrypted URIs, reporting a warning when decryption fails but continuing with other links.
+
+What you get from the extractors
+- DRTVIE: A well-formed video info dict for DR TV on-demand content, including:
+  - id, title, description, thumbnail, timestamp, duration
+  - a list of formats (with proper format_id, tbr, ext, vcodec where applicable, and preferences)
+  - subtitles (per-language, with correct extensions)
+  - series/season/episode metadata
+- DRTVLiveIE: A live video info dict for DR TV channels, including:
+  - id, title, thumbnail
+  - formats (HLS/HDS streams discovered from the channel API)
+  - is_live set to True
+
+Tests
+- The _TESTS for DRTVIE cover embedded pages, standard program pages, sign-language formats, and cases with expected warnings like “Unable to download f4m manifest”.
+- The DRTVLiveIE test covers a sample live stream and expects a live title pattern and mp4 format.
+
+In short, this module enables YouTube-dl to fetch both on-demand and live DR TV content by interfacing with DR’s programcard and channel APIs, decrypting protected URIs, assembling a variety of streaming formats (HDS, HLS, direct), and returning rich metadata with proper geo-awareness.

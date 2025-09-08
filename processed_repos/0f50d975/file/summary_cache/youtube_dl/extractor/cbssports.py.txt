@@ -1,0 +1,61 @@
+- Purpose
+  - This file implements YouTube-dl extractors for CBS Sports related video content, including CBS Sports embed pages, the CBS Sports site, and 247Sports video pages.
+
+- Key classes
+  - CBSSportsEmbedIE (InfoExtractor)
+    - IE_NAME: 'cbssports:embed'
+    - _VALID_URL: matches CBS Sports or embed.247sports URLs containing either an id UUID or a pcid parameter.
+    - _real_extract(url):
+      - Extracts either uuid or pcid from the URL.
+      - Builds a query: {'id': uuid} or {'pcid': pcid}.
+      - Downloads video metadata from https://www.cbssports.com/api/content/video/ (first element of the returned array).
+      - Reads video_id, title, and metadata (with fallback if missing).
+      - Extracts formats from the HLS URL found in metadata.files[0].url using _extract_m3u8_formats with m3u8_native, enabling HLS formats (m3u8_id='hls', fatal=False).
+      - Sorts formats.
+      - Builds a thumbnail list from video.image.path, including width, height, and filesize when available.
+      - Returns a dict with id, title, formats, thumbnails, description, timestamp (from dateCreated.epoch), and duration (from metadata.duration).
+    - Notes: contains commented-out placeholders for alternative extraction approaches (byId/byGuid) and a test suite with two embed URLs.
+
+  - CBSSportsBaseIE (InfoExtractor)
+    - _real_extract(url):
+      - Downloads the page and searches for an iframe embed URL matching /player/embed.
+      - Returns a URL result pointing to the CBSSportsEmbedIE (embed extractor).
+
+  - CBSSportsIE (CBSSportsBaseIE)
+    - IE_NAME: 'cbssports'
+    - _VALID_URL: CBS Sports article/video pages
+    - _TESTS: Example that expects fields like id, ext, title, description, timestamp, upload_date, duration, etc.
+    - Behavior: uses the base embed-retrieval flow to resolve to the embed extractor.
+
+  - TwentyFourSevenSportsIE (CBSSportsBaseIE)
+    - IE_NAME: '247sports'
+    - _VALID_URL: 247Sports video pages
+    - _TESTS: Example with an id and video metadata (title, description, timestamp, duration, etc.)
+    - Behavior: uses the base embed-retrieval flow to resolve to the embed extractor.
+
+- Main functionality and data flow
+  - For embed URLs (CBSSportsEmbedIE):
+    - Parse either a UUID-based id or a pcid from the URL.
+    - Call CBS Sports API /api/content/video/ to fetch video metadata.
+    - Use the first entry from the response as the video object.
+    - Extract the video id, title, and metadata (including description and duration).
+    - Retrieve the video’s HLS manifest URL from metadata and parse it into formats via _extract_m3u8_formats.
+    - Build optional thumbnails from image data.
+    - Return a structured information dictionary compatible with youtube-dl (id, title, formats, thumbnails, description, timestamp, duration).
+
+  - For CBS Sports and 247Sports pages (CBSSportsBaseIE and its subclasses):
+    - Download the page and locate the embedded player iframe URL.
+    - Delegate to CBSSportsEmbedIE to perform the actual video metadata extraction and format parsing.
+
+- Important implementation details
+  - Robust handling of optional fields using int_or_none and try_get.
+  - Formats extraction uses HLS (m3u8_native) with fatal=False to tolerate missing formats gracefully.
+  - Thumbnails are built when an image object with a path is present.
+  - Multiple entry points are supported:
+    - CBS Sports embeds (direct embed URLs)
+    - CBS Sports site pages
+    - 247Sports pages
+  - Tests demonstrate expected outputs, including IDs, titles, descriptions, timestamps, and durations for sample URLs.
+
+- Summary
+  - This module provides a cohesive set of extractors to resolve CBS Sports and 247Sports video content through embed pages, centralizing metadata retrieval via the CBS Sports API and parsing HLS formats for playback.

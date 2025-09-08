@@ -1,0 +1,75 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/sixplay.py
+
+Overview
+- Implementes a video extractor for the Six/RTL family of sites (6play.fr, rtlplay.be, play.rtl.hr, rtlmost.hu) as SixPlayIE, a subclass of InfoExtractor.
+- Fetches clip metadata from a middleware API, processes assets to build video formats and subtitles, and returns a standard info dictionary.
+
+Key components
+- Class SixPlayIE(InfoExtractor)
+  - IE_NAME = '6play'
+  - _VALID_URL: Regex matching URLs from supported domains with a pattern that ends in -c_<id> (id is digits). Also allows the shorthand 6play: URLs.
+  - _TESTS: Examples to validate extraction, including a primary 6play.fr URL and several only_matching tests for other domains.
+- _real_extract(self, url)
+  - Core extraction method:
+    - Parses domain and video_id from the URL using _VALID_URL.
+    - Maps domain to service/consumer_name:
+      - 6play.fr -> ('6play', 'm6web')
+      - rtlplay.be -> ('rtlbe_rtl_play', 'rtlbe')
+      - play.rtl.hr -> ('rtlhr_rtl_play', 'rtlhr')
+      - rtlmost.hu -> ('rtlhu_rtl_most', 'rtlhu')
+    - Fetches clip metadata via JSON API:
+      - Endpoint: https://pc.middleware.6play.fr/6play/v2/platforms/m6group_web/services/{service}/videos/clip_{video_id}
+      - Headers: {'x-customer-name': consumer_name}
+      - Query: {'csa': 5, 'with': 'clips'}
+    - Reads first clip_data from data['clips'][0], uses clip_data['title'] as title.
+    - Collects format assets from clip_data.get('assets') and processes each asset to build formats and subtitles.
+
+Main functionality and implementation details
+- Formats and quality handling
+  - Initializes formats = [] and subtitles = {}.
+  - quality_key = qualities(['lq', 'sd', 'hq', 'hd']) to map quality labels to integer scores for sorting.
+  - Iterates over assets:
+    - Skips assets without a full_physical_path URL, or those considered DRM/usp paths (conditions involving protocol, type, and certain substrings), or duplicate URLs.
+    - Appends asset_url to a list of URLs for deduplication.
+    - Determines container and extension via determine_ext(asset_url).
+    - Subtitles: if protocol == 'http_subtitle' or ext == 'vtt', adds to subtitles['fr'] with the URL and continues.
+    - HLS/DASH handling (container == 'm3u8' or ext == 'm3u8'):
+      - If protocol == 'usp':
+        - If the asset URL query contains a token, makes a geo-verified request to asset_url to resolve to a final URL (self._request_webpage with geo_verification_headers()).
+        - Replaces '_drmnp.ism/' with '_unpnp.ism/' to strip DRM markup.
+        - Attempts to adjust quality directories by replacing '_sd1/' to '_sd2/'/_sd3/ in a loop and tries to extract formats:
+          - Uses self._extract_m3u8_formats(asset_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+          - Also tries self._extract_mpd_formats(asset_url with .mpd)
+          - Breaks if any m3u8 formats are found; otherwise tries next variant.
+      - If protocol != 'usp':
+        - Directly uses self._extract_m3u8_formats(asset_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+    - MP4 handling (container == 'mp4' or ext == 'mp4'):
+      - Creates a format dict with:
+        - url: asset_url
+        - format_id: quality (asset.get('video_quality'))
+        - quality: quality_key(quality)
+        - ext: ext
+- Sorting and finalization
+  - self._sort_formats(formats) to order by quality/bitrate.
+- Helper: get(getter)
+  - Small helper to obtain description/title fields from either data or clip_data, preferring non-empty values.
+- Return dictionary
+  - id: video_id
+  - title: title from clip_data
+  - description: obtained via get(lambda x: x['description'])
+  - duration: int_or_none(clip_data.get('duration'))
+  - series: get(lambda x: x['program']['title'])
+  - formats: list of collected formats
+  - subtitles: collected subtitles (primarily French)
+
+Important implementation notes
+- Handles multiple domains via a domain-to-service mapping, enabling extraction across 6play and RTL variants.
+- Uses a remote middleware endpoint to fetch clip data and assets; passes a customer/consumer name in headers for access control.
+- Robust handling of HLS (m3u8) and DASH (mpd) streams, including DRM/USp edge cases:
+  - For usp-protocol HLS assets with tokens, resolves the final URL through a geo-verification request.
+  - Attempts to switch SDR/HD variants by modifying the asset URL (__sd1__ to __sd2__/__sd3__) to try multiple qualities.
+  - Replaces DRM-related segments in URLs to access unprotected streams when possible.
+- Subtitles extraction supports French subtitles via http_subtitle or vtt assets.
+- Provides a comprehensive info_dict with id, title, description, duration, series, formats, and subtitles, suitable for downstream processing by youtube-dl.
+
+Overall, this extractor focuses on converting the SixPlay/RTL video clip data into a cohesive set of video formats and subtitles, handling various streaming protocols and DRM-related URL quirks to maximize compatibility across the supported domains.

@@ -1,0 +1,61 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/joj.py
+
+Overview
+- Implemented a YouTube-DL extractor for the JOJ media site (Slovakia).
+- Class JojIE extends InfoExtractor and handles URLs for embedded JOJ videos.
+- Supports extracting metadata (title, duration, thumbnail) and video formats from JOJ embed pages or a secondary XML playlist fallback.
+
+Key components
+- Class: JojIE(InfoExtractor)
+- URL matching: _VALID_URL supports two modes
+  - joj:<id> (custom scheme)
+  - https://media.joj.sk/embed/<id> (or http)
+  - The id is captured as a named group 'id'
+- _TESTS: Includes a primary test for a known embed URL with expected info dict (id, ext, title, thumbnail, duration), plus several only_matching tests to ensure non-embed or wrong schemes are ignored.
+- _extract_urls(webpage): Static method that scans a page for iframe embeds pointing to //media.joj.sk/embed/... and returns the matched embed URLs.
+- _real_extract(self, url): Core extraction logic.
+  - video_id: Extracted from the URL via _match_id.
+  - webpage: Download the embed page at https://media.joj.sk/embed/<video_id>.
+  - title: Try to extract in order:
+    - videoTitle field from embedded JS or JSON-like structure
+    - fall back to the <title> tag
+    - fall back to OpenGraph title via _og_search_title
+  - bitrates/format data:
+    - Attempt to parse a JS object assigned to src or bitrates: look for a pattern like src = {...}; or bitrates = {...}; and convert with js_to_json.
+    - If a 'mp4' key exists in the parsed object, iterate its URLs to build formats:
+      - Detect height from the URL with a regex (\d+)[pP]\. and set format_id like "720p" and height as int.
+  - Fallback formats (if no formats found from bitrates):
+    - Download an XML playlist from https://media.joj.sk/services/Video.php?clip=<video_id>.
+    - Iterate over /files/file entries:
+      - path attribute provides the file location; skip if missing.
+      - format_id from file id or label.
+      - Build direct URL as http://n16.joj.sk/storage/<path-without-dat-prefix>.
+      - Extract height from format_id or path via (\d+)[pP], if present, and convert to int.
+  - _sort_formats(formats): Normalizes and sorts the collected formats.
+  - thumbnail: Derived from OpenGraph data on the page via _og_search_thumbnail.
+  - duration: Parsed from videoDuration: <number> in the page (optional, fatal=False).
+  - Returns a dictionary with:
+    - id: video_id
+    - title
+    - thumbnail
+    - duration
+    - formats: list of format dictionaries
+
+Important implementation details
+- Dependency helpers:
+  - _download_webpage, _download_xml, _search_regex, _og_search_title, _og_search_thumbnail, _parse_json, _sort_formats, int_or_none, try_get, js_to_json are used to robustly fetch and parse data.
+- Robust data extraction with fallbacks:
+  - Title extraction uses multiple strategies to maximize success across JOJ pages.
+  - Formats are first attempted from embedded JS/wrapper data (preferred) and then fall back to a traditional XML playlist if needed.
+  - duration is optional and safely parsed with fatal=False.
+- Data parsing specifics:
+  - bitrates parsing uses a JS-to-JSON transformation to convert embedded JavaScript objects into Python data structures.
+  - Height extraction relies on URL or format_id/path patterns (e.g., "720p" or similar) and is converted to integers when available.
+- URL extraction for embedding:
+  - _extract_urls() uses a regex to find iframe embeds with a src pointing to media.joj.sk/embed/…, returning all discovered URLs for further processing.
+
+What this achieves
+- Enables youtube-dl to download JOJ videos by:
+  - Recognizing JOJ embed URLs and the joj: scheme
+  - Retrieving metadata (title, duration, thumbnail)
+  - Building a list of available video formats with qualities (height-based), prioritizing embedded JS-provided formats and falling back to an XML-based playlist when necessary.

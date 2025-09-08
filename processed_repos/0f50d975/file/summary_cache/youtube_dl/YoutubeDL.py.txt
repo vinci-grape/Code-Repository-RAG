@@ -1,0 +1,111 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/YoutubeDL.py
+
+Overview
+- This file defines the core YoutubeDL class, which orchestrates fetching video metadata (via InfoExtractors), selecting and downloading formats, writing output files (videos, JSON metadata, thumbnails, subtitles, etc.), applying post-processors (e.g., merging with FFmpeg), and handling errors, logging, and various user options.
+- It is designed for extensibility: supports registering multiple InfoExtractors (IEs), PostProcessors, and handles complex format selection syntax.
+
+Key classes, data structures, and responsibilities
+- YoutubeDL class
+  - Central coordinator for extraction, processing, downloading, and post-processing.
+  - Maintains global state: options (params), registered IEs (_ies), instantiated IEs (_ies_instances), post-processors (_pps), cookies, logging, and playlist tracking.
+  - Supports a large set of user options (described in the constructor docstring) that influence discovery, filtering, output, and processing behavior.
+- Decorators and helpers
+  - _catch_unsafe_file_extension: wraps methods to catch _UnsafeExtensionError and report a user-friendly error via report_error.
+  - __handle_extraction_exceptions: decorator used on IE extraction and iterable processing to translate domain-specific exceptions (GeoRestrictedError, ExtractorError, etc.) into user-facing messages or re-raises depending on ignore_errors.
+- Supporting components (imported from other modules)
+  - InfoExtractors (IEs) management: add_info_extractor, get_info_extractor, add_default_info_extractors, and integration with gen_extractor_classes.
+  - PostProcessors: a chain of processing steps after download (e.g., FFmpegMergerPP, FFmpegPostProcessor).
+  - Downloader integration: get_suitable_downloader, and downloader lifecycle through process_info, post_process, etc.
+  - Utilities and compatibility helpers from youtube_dl.utils, cache, and compat modules.
+  - Cookie handling via YoutubeDLCookieJar and YoutubeDLCookieProcessor.
+
+Main functionality and workflow
+- Initialization and setup
+  - __init__ sets default options, initializes IE and post-processor lists, cookie handling, and the HTTP opener. It also processes deprecations, bidi workaround setup, and restrictfilenames heuristics.
+  - _setup_opener builds a urllib opener with proxies, SSL handling, cookie support, and file:// access disabled for security.
+  - If auto_init is enabled, it prints a debug header and registers default InfoExtractors.
+  - Post-processors and progress hooks from params are instantiated and registered.
+- Info extraction flow
+  - extract_info(url, download, ie_key, extra_info, process, force_generic_extractor)
+    - Chooses which IE(s) to try (specified ie_key or all registered IEs).
+    - Filters for site compatibility via ie.suitable(url); uses get_info_extractor to instantiate/obtain an IE.
+    - Delegates to __extract_info for the actual extraction, which applies header cookies, calls IE.extract(url), normalizes results, and adds default extra_info (extractor, webpage URL, extractor key).
+  - __extract_info(url, ie, download, extra_info, process)
+    - Applies header cookies to the request, performs extraction, and handles results (single video, playlist, URL redirections, compat_list, etc.).
+    - For playlists, delegates to __process_playlist with recursion guards against infinite nesting, and tracks _playlist_level and _playlist_urls.
+  - process_ie_result and __process_playlist
+    - process_ie_result handles different _type values: video, url, url_transparent, playlist/multi_video, compat_list.
+    - For video: enriches with extra_info and calls process_video_result.
+    - For url/url_transparent: follows or resolves nested extra information, possibly leading to new processing steps.
+    - For playlist/multi_video: expands entries, applies playlist options (start, end, items, reverse, random), and processes each entry (calls __process_iterable_entry).
+    - For compat_list: adapts legacy formats to the current structure and processes each entry.
+- Video processing and downloading
+  - process_video_result(info_dict, download)
+    - Validates required fields (id, title); normalizes/sanitizes fields (string/numeric types).
+    - Produces an output filename via prepare_filename, and prints forced information (title, id, url if requested, etc.).
+    - If simulate mode is active, stops after preparation/printing.
+    - Creates necessary directories, writes auxiliary data (description, annotations, subtitles), and writes metadata JSON if requested.
+    - Writes thumbnails if configured; chooses the right thumbnail URL and downloads it.
+    - If not skipping download, chooses a suitable downloader (including support for external downloader and per-file headers) and downloads formats.
+    - If multiple formats are requested, may merge them via a FFmpegMergerPP post-processor; otherwise downloads a single file.
+    - Applies post-processing (e.g., fixups, merging, metadata tweaks) and records the download in a download-archive if configured.
+    - Handles errors robustly and respects max_downloads and other limits.
+- Filename and output handling
+  - prepare_filename(info_dict): builds the final filename from the output template (outtmpl), handling:
+    - Auto-numbering (autonumber), epoch, resolution (e.g., width/height), and safe sanitization of fields.
+    - Backward compatibility for playlist_index/autonumber formatting (padding and field sizing).
+    - Environment variable expansion and path expansion with careful handling of percent signs and boundary characters.
+    - Built-in safeguards for Python 2/Windows path encoding quirks.
+- Format selection and filtering
+  - _default_format_spec and build_format_selector
+    - determine the default format selection, considering merging capabilities and whether to prefer best video+audio combos.
+    - build_format_selector parses a format_spec string (e.g., "bestvideo+bestaudio/best") into a function that selects formats from the extractor-provided list.
+    - Supports complex constructs: SINGLE, GROUP, MERGE, PICKFIRST, nested selections, and per-format filters.
+  - _build_format_filter
+    - Parses format filter expressions (e.g., width, height, tbr, abr, vbr, fps, filesize) with numeric and string operators and returns a predicate used to filter available formats.
+- Subtitles, metadata, and thumbnails
+  - process_subtitles selects subtitles and their formats based on user options (writesubtitles, writeautomaticsub, allsubtitles, subtitleslangs, subtitlesformat) and available subtitles.
+  - _write_info_json: writes filtered info_dict to an info.json file when requested.
+  - _write_thumbnails: downloads and saves chosen thumbnails according to writethumbnail or write_all_thumbnails options.
+  - Subtitle and description handling is integrated into process_video_result with error handling and per-subtitle download logic.
+- Post-processing and archiving
+  - post_process(filename, ie_info) runs a chain of post-processors (per-IE postprocessors first, then global ones); handles deletion of originals unless keepvideo is set.
+  - _make_archive_id, in_download_archive, record_download_archive manage a simple text-based archive of downloaded videos to avoid re-downloading.
+- Networking, cookies, and headers
+  - _calc_headers(info_dict, load_cookies) builds HTTP headers for downstream tools, including cookies and X-Forwarded-For headers.
+  - _calc_cookies generates a Cookie header for a request from the current cookies.
+  - _remove_cookie_header strips Cookie header from HTTP header dict to avoid leaking unscoped cookies.
+  - _load_cookies and related helpers parse cookies from Cookie header or info.json, scope them, and store in the cookie jar.
+- Diagnostics, debugging, and compatibility
+  - print_debug_header prints rich diagnostic information when verbose mode is enabled: encoding details, Python/OS details, git HEAD, FFmpeg/rtmpdump/phantomjs versions, proxy maps, and optional call-home checks.
+  - urlopen, encode, get_encoding, and encoding-related helpers for robust I/O handling across Python 2/3 and various environments.
+- User-facing output and formatting helpers
+  - to_screen, to_stdout, to_stderr manage human-readable messaging, respecting quiet mode, logging, and bidi workaround.
+  - report_warning, report_error, trouble provide a consistent error-reporting API with colorized messages in terminals.
+  - list_formats, list_thumbnails, and list_subtitles render pretty tables for available formats, thumbnails, and subtitles.
+  - sanitize_info, filter_requested_info: clean the internal info_dict for JSON output or export, with options to remove private keys.
+- Miscellaneous helpers
+  - _setup_opener generates a robust urllib opener with proxy support, disables file:// access for security, and configures HTTPS handling.
+  - The class handles a large number of edge cases: date ranges, age restrictions, view-count filters, playlist slicing, reverse/randomization, and per-item filtering via match_filter/matchtitle/rejecttitle.
+  - Security-conscious features: strict cookie handling, explicit cookie header scoping, removal of unscoped cookies, and prohibition of file:// scheme in the HTTP opener.
+
+Important implementation details and nuances
+- Error handling
+  - __handle_extraction_exceptions and _catch_unsafe_file_extension decorators centralize error handling for extraction and iterable processing, translating domain errors into user-friendly messages or raising DownloadError as needed.
+- Playlist processing
+  - Tracks nested playlist processing depth with _playlist_level and _playlist_urls to avoid infinite recursion and to deduplicate downloads for the same playlist URL.
+  - Supports playlist_start, playlist_end, playlist_items, playlist_reverse, and playlistrandom parameters with per-entry extra information (n_entries, playlist metadata, etc.).
+- Format selection complexity
+  - The format selector supports advanced syntax with GROUP, MERGE (video+audio merging), PICKFIRST, and nested combinations, including per-format filters and compatibility checks for merging outputs.
+  - It computes a ctx with formats and incomplete_formats flags to guide selection logic, ensuring robust handling for extractors that provide incomplete format lists.
+- Security and privacy
+  - Cookies are carefully managed: cookies can be loaded from headers or files, are scoped to domains when appropriate, and Unscoped cookies raise warnings or are disallowed to mitigate leakage.
+  - The file deliberately disables file:// protocol in the HTTP opener to prevent abuse.
+- Data integrity and compatibility
+  - Various normalization steps ensure numeric fields are indeed numeric, strings are sanitized, and format IDs are unique, with fallbacks if missing.
+  - Backwards compatibility handling for legacy IE results (compat_list) and legacy formats to ensure smooth transitions across versions.
+- Output and diagnostics
+  - Rich, user-facing messages accompany actions (downloading, merging, writing metadata, etc.). The code uses a lot of well-timed printouts to stdout/stderr and supports a verbose debug mode with detailed environment information.
+
+In short
+- This file implements the main engine of youtube-dl: initializing extractors, selecting and downloading formats, assembling output (files and metadata), applying post-processing and archiving, handling complex user options (including playlists and format filtering), and providing robust error handling, cookies/security management, and rich diagnostic output. It is the central hub that coordinates extraction, processing, and delivery of downloaded media in a flexible, extensible manner.

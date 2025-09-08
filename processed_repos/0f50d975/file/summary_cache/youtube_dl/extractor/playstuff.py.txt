@@ -1,0 +1,36 @@
+Concise summary of the file: youtube-dl/youtube_dl/extractor/playstuff.py
+
+- Purpose
+  - Implement PlayStuffIE to extract video information from Stuff.co.nz’s Play Stuff pages and map them to Brightcove videos for playback.
+
+- Key class
+  - PlayStuffIE(InfoExtractor)
+    - _VALID_URL: Matches URLs like https://play.stuff.co.nz/details/<id>
+    - _TESTS: 
+      - Test 1: Valid page, expects a playlist with Brightcove video(s), md5, and metadata (title, description, uploader_id, timestamp, upload_date). Declares to use BrightcoveNew IE.
+      - Test 2: Geo-restricted page, marked only_matching (ensures URL matching works even when geo-blocked).
+    - BRIGHTCOVE_URL_TEMPLATE: Template to build Brightcove player URLs: http://players.brightcove.net/{accountId}/{playerId}_default/index.html?videoId={assetId}
+
+- Main functionality (_real_extract)
+  - Extract video_id from URL using _match_id.
+  - Download page HTML and locate the embedded state object via the __INITIAL_STATE__ JavaScript variable, parsing it as JSON.
+  - Retrieve account_id and player_id from state.configurations with safe fallbacks:
+    - accountId default: '6005208634001'
+    - playerId default: 'default'
+  - Iterate over state['items'] entries:
+    - Skip non-dict entries.
+    - Retrieve asset_id from video['content']['attributes']['assetId']; skip if missing.
+    - Build a Brightcove URL with account_id, player_id, and asset_id.
+    - Wrap the URL with geo_countries=['NZ'] using smuggle_url to enforce or note geographic constraints.
+    - Add a url_result for each asset using type 'BrightcoveNew' and the original Stuff video_id as the entry id.
+  - Return a playlist_result(entries, video_id) to present all Brightcove videos as a single playlist tied to the Stuff page id.
+
+- Important implementation details
+  - Uses _parse_json and _search_regex to extract the JSON state from the page.
+  - try_get with compat_str is used to safely extract nested fields and provide robust defaults.
+  - The extractor produces BrightcoveNew entries for each available assetId found in the state, effectively converting a single Stuff page into multiple Brightcove videos.
+  - Geo restriction handling: smuggle_url adds geo_countries NZ to the Brightcove URLs, allowing potential bypass in tests or downstream handling.
+  - The code is designed to gracefully skip missing assets and continue with available items.
+
+- Overall behavior
+  - Converts Stuff’s Play Stuff pages into a multi-entry Brightcove playlist, exposing metadata (title, description, uploader_id, timestamp, upload_date) via the final InfoDicts, and enabling playback through BrightcoveNew.

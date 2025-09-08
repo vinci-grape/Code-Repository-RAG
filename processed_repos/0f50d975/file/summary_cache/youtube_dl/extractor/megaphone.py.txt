@@ -1,0 +1,39 @@
+- Purpose: Extract audio from Megaphone embedded players (Megaphone.fm) for youtube-dl.
+
+- Class: MegaphoneIE(InfoExtractor)
+  - Metadata:
+    - IE_NAME = 'megaphone.fm'
+    - IE_DESC = 'megaphone.fm embedded players'
+  - URL pattern: _VALID_URL = r'https://player\.megaphone\.fm/(?P<id>[A-Z0-9]+)'
+  - Test case (_TEST): example URL, expected MD5, and info dict with id, extension mp3, title, thumbnail, duration, and author.
+
+- Core extraction flow (_real_extract):
+  - video_id = self._match_id(url): extract the id from the URL.
+  - webpage = self._download_webpage(url, video_id): download page content.
+  - Metadata via Open Graph:
+    - title = self._og_search_property('audio:title', webpage)
+    - author = self._og_search_property('audio:artist', webpage)
+    - thumbnail = self._og_search_thumbnail(webpage)
+  - Episode JSON extraction:
+    - episode_json = self._search_regex(r'(?s)var\s+episode\s*=\s*(\{.+?\});', webpage, 'episode JSON')
+    - episode_data = self._parse_json(episode_json, video_id, js_to_json): parse the JS object into JSON-friendly data (handles JS style to JSON conversion via js_to_json)
+  - Video URL:
+    - video_url = self._proto_relative_url(episode_data['mediaUrl'], 'https:')
+      - mediaUrl from episode data can be protocol-relative; ensure https.
+  - Formats:
+    - formats = [{'url': video_url}]
+  - Return dictionary with:
+    - id, thumbnail, title, author, duration (episode_data['duration']), formats
+
+- Additional helper (_extract_urls):
+  - Classmethod that scans a webpage for iframes whose src matches _VALID_URL and returns the list of URLs found.
+  - Implementation: re.findall('<iframe... src="(URL)">', webpage) using the same _VALID_URL pattern.
+
+- Important implementation details:
+  - Metadata derived from Open Graph properties: audio:title, audio:artist, and og:thumbnail.
+  - The episode data is embedded in the page as a JavaScript object assigned to var episode; the code extracts this object with a regex and converts it to JSON via js_to_json before parsing.
+  - The actual media URL is taken from episode_data['mediaUrl'] and normalized to an https URL if needed via _proto_relative_url.
+  - Only a single format is produced (no multiple qualities); the returned file is typically an MP3, inferred from the media URL/extension.
+  - The _TEST expects ext 'mp3' and includes duration and author consistent with the episode data.
+
+Overall, this extractor targets Megaphone’s embedded player pages, pulls episode data from a JS object on the page, resolves the media URL, and returns a standard video/audio info dict with a single format and associated metadata.

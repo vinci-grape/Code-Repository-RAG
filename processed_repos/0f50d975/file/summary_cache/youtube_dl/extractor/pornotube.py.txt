@@ -1,0 +1,58 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/pornotube.py
+
+- Purpose
+  - A YouTube-DL extractor for Pornotube video pages. Retrieves video URL and rich metadata by authenticating with AEBN APIs and aggregating data from multiple endpoints.
+
+- Main class
+  - PornotubeIE(InfoExtractor)
+
+- URL pattern
+  - _VALID_URL matches pornotube video pages:
+    - http(s)://[subdomain.]pornotube.com/[anything]/video/<id>
+    - Captures the numeric video id
+
+- Testing data
+  - _TEST provides a sample URL and the expected extracted info:
+    - id '4964', ext 'mp4', upload_date '20141203'
+    - title, description hash, uploader, categories, thumbnail pattern, timestamp, and age_limit 18
+
+- Core extraction flow (_real_extract)
+  1) Extract video_id from URL using _match_id.
+  2) Authenticate to AEBN API to obtain a tokenKey:
+     - POST to https://api.aebn.net/auth/v2/origins/authenticate
+     - Body: {"credentials": "Clip Application"} (JSON)
+     - Headers: Content-Type: application/json, Origin: http://www.pornotube.com
+     - Response: JSON with tokenKey
+  3) Retrieve delivery info (video URL):
+     - GET https://api.aebn.net/delivery/v1/clips/<video_id>/MP4
+     - Headers: Authorization: <token>
+     - Response: JSON with mediaUrl (actual video URL)
+  4) Fetch metadata fields via content API:
+     - Fields requested: title, description, startSecond, endSecond, publishDate, studios{name}, categories{name}, movieId, primaryImageNumber
+     - GET https://api.aebn.net/content/v2/clips/<video_id>?fields=<comma-separated-fields>
+     - Headers: Authorization: <token>
+     - Response: JSON (may be a list; if so, first element is used)
+  5) Normalize and extract metadata:
+     - title = info['title']
+     - timestamp = int_or_none(info.get('publishDate'), scale=1000)
+       - Converts publishDate (likely in milliseconds) to Unix timestamp
+     - uploader = info.get('studios', [{}])[0].get('name')
+     - movie_id and primary_image_number used to build thumbnail URL:
+       - thumbnail = http://pic.aebn.net/dis/t/<movie_id>/<movie_id>_<primaryImageNumber 8-digit zero-padded>.jpg
+     - duration = endSecond - startSecond if both present
+     - categories = [c['name'] for c in info.get('categories', []) if c.get('name')]
+  6) Return final info dictionary with:
+     - id, url (video_url), title, description, duration, timestamp, uploader, thumbnail, categories, age_limit (18)
+
+- Key implementation details
+  - Uses _download_json for all HTTP requests, with appropriate note strings and headers.
+  - Handles potential list response for metadata by selecting the first item.
+  - Builds a precise thumbnail URL from movieId and primaryImageNumber when available.
+  - Safely parses integers with int_or_none to handle missing fields.
+  - Age restriction hardcoded to 18.
+
+- Output structure
+  - JSON-like dictionary with:
+    - id, url, title, description, duration, timestamp, uploader, thumbnail, categories, age_limit
+
+This extractor demonstrates a multi-step API-based approach: authenticate, fetch delivery URL, then gather metadata, and synthesize a complete video entry suitable for download by youtube-dl.

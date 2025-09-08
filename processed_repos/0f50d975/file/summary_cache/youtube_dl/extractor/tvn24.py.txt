@@ -1,0 +1,49 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/tvn24.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for TVN24 network pages (TVN24, TVN24 BIS, TVN Meteo, etc.). It fetches page metadata and available video formats from embedded data attributes in the HTML.
+
+- Key class
+  - TVN24IE(InfoExtractor): main extractor class extending YoutubeDL’s InfoExtractor framework.
+
+- URL matching
+  - _VALID_URL: Regular expression that matches TVN24-related domains (tvn24.pl, tvn24bis.pl, tvnmeteo.tvn24.pl, etc.) and captures an article/video id.
+
+- Testing
+  - _TESTS: Several test cases to validate extraction:
+    - Example with explicit metadata (title, description, thumbnail, mp4 format).
+    - Example with a different page layout and skip_download behavior.
+    - Several “only_matching” tests for non-extractable URLs.
+  - Tests verify id, ext, title, description, thumbnail, and formats (where applicable).
+
+- Real extraction flow (_real_extract)
+  1) Determine display_id from the URL using _match_id and fetch the page with _download_webpage.
+  2) Title extraction:
+     - Try OpenGraph title via _og_search_title, fallback to a regex that looks for a magazine header element.
+  3) Helper: extract_json(attr, name, default=NO_DEFAULT, fatal=True)
+     - Pulls a JSON-ish string from an HTML attribute like data-quality or data-share-params using _search_regex.
+     - Parses with _parse_json, applies unescapeHTML to the source, and returns a Python object.
+     - Uses NO_DEFAULT to distinguish between “missing” and “present but empty”.
+  4) Formats extraction:
+     - quality_data = extract_json('data-quality', 'formats')
+     - Build formats list from quality_data items: for each (format_id, url)
+       - Include: url, format_id, height inferred from the numeric portion of format_id (strip trailing 'p' and convert to int).
+     - Sort formats with _sort_formats.
+  5) Description and thumbnail:
+     - description: from OpenGraph description via _og_search_description.
+     - thumbnail: from OpenGraph thumbnail via _og_search_thumbnail or fallback to data-poster attribute found with a regex.
+  6) Video id resolution:
+     - First try share params: extract_json('data-share-params', 'share params', default=None); if it yields a dict, take video_id = share_params.get('id').
+     - If not found, attempt to locate data-vid-id attribute in HTML or extract an ID from the URL as a fallback.
+  7) Return metadata:
+     - A dict with id, title, description, thumbnail, and formats.
+
+- Important implementation details
+  - The extractor relies on embedded JSON-like data attributes (e.g., data-quality, data-share-params) in the HTML to discover available streaming formats and metadata.
+  - extract_json is a small helper that centralizes extraction and parsing of these data attributes, using HTML-unescaping and proper error handling (via fatal/default controls).
+  - Formats are constructed from the key-value pairs of the data-quality dictionary, with height parsed from the format_id (e.g., "720p" -> 720).
+  - Robust title extraction by trying OG metadata first, then a regex fallback for older layouts.
+  - Thumbnail extraction prioritizes OpenGraph and falls back to a data-poster attribute if needed.
+  - Video ID resolution is designed to work across multiple layouts by preferring share-params, then data-vid-id, then URL-derived IDs.
+
+Overall, TVN24IE is a resilient extractor that parses video metadata and available formats from TVN24 family pages by reading structured data embedded in the page HTML, handling multiple layouts, and producing the standard YouTube-DL video info dictionary.

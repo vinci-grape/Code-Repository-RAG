@@ -1,0 +1,72 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/peekvids.py
+
+What it does
+- Implements two YouTube-DL extractors for adult streaming sites PeekVids and PlayVids.
+- Both extractors pull video metadata and multiple video formats from the site’s v-alt (video sources) API endpoints.
+- They merge metadata from JSON-LD, page HTML, and detail blocks to populate the standard info dictionary (title, description, uploader, categories, tags, etc.) and a list of video formats.
+
+Key classes
+- PeekVidsIE (InfoExtractor)
+  - _VALID_URL: Matches PeekVids URLs of two formats:
+    - https://peekvids.com/<anything>/<id>
+    - https://peekvids.com/embed/?v=<id>
+  - _DOMAIN: www.peekvids.com
+  - _get_detail(html): Returns the HTML block containing detailed metadata by selecting the element with class detail-video-block.
+  - _real_extract(url):
+    - Extracts the initial video_id from the URL.
+    - Downloads the page; if it returns a 429 and contains “Rate Limit Exceeded”, raises an ExtractorError with a helpful message (bot suspicion).
+    - Extracts a display title from the page and a short video_id from the HTML (data-id attribute on a video tag).
+    - Fetches a JSON list of sources from https://www.peekvids.com/v-alt/<short_id>.
+    - Builds formats:
+      - If the JSON contains key-value pairs where keys are data-src<height> and values are URLs, creates a format dict per entry with:
+        - url, format_id (the height as string), height (as int)
+      - If no such structured sources exist, falls back to using all values in the JSON as direct URLs.
+      - Sorts formats with _sort_formats.
+    - Extracts additional metadata:
+      - JSON-LD data (VideoObject) via _search_json_ld.
+      - If thumbnail missing, uses OpenGraph thumbnail.
+      - Description: tries to derive from the detail block HTML, falling back to None.
+      - Title: uses the cleaned page title if not present in JSON-LD; removes trailing meme/descriptor phrases; falls back to a generic title if needed.
+      - Categories and Tags: parsed from the detail block by looking for spans labeled “Categories” and “Tags” and splitting the subsequent list.
+      - Uploader: parsed from a textual “Uploaded by” pattern on the page.
+    - Returns a merged info dict containing:
+      - id (short numeric id from v-alt)
+      - display_id (original URL id portion)
+      - age_limit (18)
+      - formats
+      - categories, tags
+      - uploader
+      - plus all fields from the JSON-LD/constructed info (title, description, thumbnail, timestamp, duration, etc.)
+- PlayVidsIE (PlayVids extractor, subclass of PeekVidsIE)
+  - _VALID_URL: Matches PlayVids URLs, including:
+    - https://www.playvids.com/embed/...
+    - https://www.playvids.com/<two-letter language code>/<id>/pc/...
+    - https://www.playvids.com/v/...
+  - _DOMAIN: www.playvids.com
+  - _get_detail(html): Same concept but targets the detail-block class on PlayVids pages.
+  - Inherits _real_extract from PeekVidsIE, but uses its own _DOMAIN and URL structure via:
+    - The v-alt endpoint constructed as https://<DOMAIN>/v-alt/<short_id> where short_id is extracted similarly from the page.
+  - Tests cover multiple PlayVids URLs with expected metadata, including two-language variants and an embed URL.
+
+Important implementation details
+- Robust source extraction:
+  - Formats are primarily built from a structured JSON returned by the v-alt endpoint. The code recognizes data-src<height> entries and uses the numeric part as height/format_id.
+  - If no structured sources are found, it gracefully falls back to treating all values from the JSON as direct URLs.
+- Metadata handling:
+  - JSON-LD (VideoObject) is used as the primary source for metadata; URL field is removed to avoid conflicting with actual formats.
+  - Thumbnail fallback: if not found in JSON-LD, the code uses OpenGraph data from the page.
+  - Description is derived from the detail block HTML and cleaned against the JSON-LD description when possible.
+  - Title normalization: prefers JSON-LD title if present, otherwise uses the page title; trims trailing descriptive suffixes.
+  - Categories and Tags are scraped from the detail block using a specific pattern for labeled lists.
+  - Uploader information is extracted from a textual pattern on the page.
+- Edge cases:
+  - Rate limiting: If the page responds with a 429 and indicates rate limiting, the extractor raises a user-visible, non-fatal error (ExtractorError with expected=True) suggesting to wait or provide cookies/captcha.
+- Code reuse:
+  - PlayVidsIE reuses the same underlying extraction logic as PeekVidsIE by inheriting and only changing domain/url pattern aspects, illustrating a common source extraction flow across similar sites.
+- Tests:
+  - The module includes _TESTS for both extractors, validating IDs, titles, thumbnails, descriptions, timestamps, durations, uploader, categories, and tags. The tests cover multiple URL formats, including embedded pages and language-specific paths.
+
+Notes
+- The code snippet ends with an incomplete trailing “Summary:” line, which appears to be an artifact and not part of the functional extractor logic.
+
+Overall, this module provides two closely related extractors that fetch video metadata and multiple quality formats from PeekVids and PlayVids by combining page parsing, JSON-LD, and a dedicated v-alt API endpoint.

@@ -1,0 +1,39 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/nzz.py
+
+- Purpose
+  - Implement an extractor for Swiss NZZ pages that embed Kaltura videos. It collects all Kaltura video entries from a page and returns them as a playlist of Kaltura items.
+
+- Key class
+  - NZZIE(InfoExtractor)
+    - Inherits from Youtube-dl’s InfoExtractor.
+
+- URL pattern
+  - _VALID_URL = r'https?://(?:www\.)?nzz\.ch/(?:[^/]+/)*[^/?#]+-ld\.(?P<id>\d+)'
+  - Matches NZZ article/video pages whose slug ends with "-ld.<id>", capturing the numeric id as the page id.
+
+- Tests
+  - _TESTS defines two sample URLs with expected results:
+    - First URL should yield a playlist with at least 6 entries (playlist_mincount: 6).
+    - Second URL should yield a playlist with exactly 1 entry (playlist_count: 1).
+  - Each test provides an id in info_dict corresponding to the extracted id.
+
+- Main extraction logic (_real_extract)
+  - Fetches the page HTML: page_id = self._match_id(url); webpage = self._download_webpage(url, page_id)
+  - Finds Kaltura player blocks in the page via regex:
+    - r'(<[^>]+class="kalturaPlayer[^"]*"[^>]*>)'
+  - For each matching player element:
+    - Parses HTML attributes with extract_attributes(player_element) to obtain a dict of data- attributes.
+    - Only supports players where data-type == 'kaltura_singleArticle'. If others, issues a warning and skips.
+    - Reads data-id as entry_id.
+    - Creates a Kaltura entry URL using partner 1750922: 'kaltura:1750922:' + entry_id
+      - This is passed to self.url_result(..., 'Kaltura', entry_id) to delegate to the Kaltura extractor.
+    - Appends each valid Kaltura entry result to a list of entries.
+  - Returns a playlist with the collected entries: self.playlist_result(entries, page_id)
+
+- Important implementation details
+  - Uses a specific Kaltura partner id (1750922) to form the Kaltura entry reference: 'kaltura:1750922:<entry_id>'.
+  - Only processes Kaltura players of type 'kaltura_singleArticle'; other types are skipped with a warning.
+  - Aggregates multiple Kaltura entries on a single NZZ page into a single playlist, using the page id as playlist id.
+  - Relies on extract_attributes to turn HTML tag attributes into a dict for easy access to data-id and data-type.
+
+Overall, this extractor targets NZZ pages that embed Kaltura players, pulls out the individual video entries (when the data-type is supported), and returns them as a Kaltura-based playlist for downstream processing by youtube-dl.

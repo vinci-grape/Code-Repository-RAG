@@ -1,0 +1,86 @@
+Here's a concise, comprehensive summary of the code in youtube-dl/youtube_dl/extractor/ruutu.py.
+
+Overview
+- Implements an information extractor for Ruutu/ruutu.fi and Supla media sources (Finnish media).
+- Fetches a media-XML cache from Nelonen Media API, parses available media formats, and returns a standardized info dictionary.
+
+Key classes and functions
+- RuutuIE (subclass of InfoExtractor)
+  - _VALID_URL: Regular expression matching Ruutu/Supla video URLs and a few related embed/URN formats.
+  - _TESTS: A set of test cases with expected outputs and behavior (including both video and audio sources, and some only_matching cases).
+  - _API_BASE: Base URL for the internal API used to fetch the media XML metadata.
+  - _real_extract(self, url): Core extractor logic:
+    - Extracts video_id from the URL.
+    - Downloads an XML document from https://gatling.nelonenmedia.fi/media-xml-cache?id=<video_id>.
+    - Recursively discovers all available media file URLs from the XML (via a nested structure under Clip/Files/File and some Music/AudioFile nodes).
+    - Downloads potential authenticated stream URLs via /auth/access/v2?stream=<video_url> when available.
+    - Handles multiple format types (HLS, HDS, MPD, direct MP4/MP3, RTMP, etc.) and constructs format dictionaries for each.
+    - Applies DRM and access checks, and handles non-free content or DRM-protected content.
+    - Extracts metadata (title, description, thumbnail, duration, age_limit, upload_date, series, season/episode numbers, categories) from the XML.
+    - Sorts formats and returns a final info dictionary including all metadata and formats.
+
+Main functionality and data flow
+- URL handling and ID extraction:
+  - video_id = self._match_id(url)
+- Metadata source:
+  - Fetches XML from _API_BASE/media-xml-cache with query id=video_id.
+  - XML root assumed to contain a Clip element with nested data.
+- Format extraction (core loop in extract_formats):
+  - Recursively traverses XML nodes to find File entries:
+    - For each File node:
+      - video_url = file node text
+      - Skip empty, duplicate, or NOT_USED-NOT-USED URLs
+      - Determine extension via determine_ext(video_url)
+      - Optionally fetch authenticated URL via /auth/access/v2
+      - Depending on extension:
+        - m3u8: use _extract_m3u8_formats for HLS
+        - f4m: use _extract_f4m_formats for HDS
+        - mpd: currently skipped due to duration/sync issues (no formats added)
+        - mp3 or AudioMediaFile tag: add audio format with vcodec='none'
+        - Other HTTP/RTMP: build a format dict with:
+          - format_id (constructed from protocol, label, or bitrate)
+          - url
+          - width, height (from 'resolution' attribute like "1280x720")
+          - tbr (bitrate)
+          - preference: -1 for RTMP, else 1
+      - Validates URL with _is_valid_url before adding.
+- DRM and access checks:
+  - If DRM tag exists in Clip, raise ExtractorError with expected=True.
+  - If ns_st_cds (via pv helper) is not 'free', raise ExtractorError with message including the value.
+- Metadata extraction:
+  - title: from .//Behavior/Program attributes 'program_name' or 'title'
+  - description: from .//Behavior/Program attributes 'description'
+  - thumbnail: from .//Behavior/Startpicture 'href'
+  - duration: from .//Runtime 'duration' or pv('runtime')
+  - age_limit: from .//AgeLimit
+  - upload_date: unified_strdate(pv('date_start'))
+  - series: pv('series_name')
+  - season_number / episode_number: int from pv('season_number') / pv('episode_number')
+  - categories: themes split by comma (themes extracted via pv helper)
+- Final assembly:
+  - self._sort_formats(formats)
+  - Return dict with id, title, description, thumbnail, duration, age_limit, upload_date, series, season_number, episode_number, categories, formats.
+
+Important implementation details
+- Recursive format discovery: extract_formats(node) traverses nested XML, especially handling tags ending with 'Files' and 'File' to locate media URLs.
+- Authenticated URLs: Some stream URLs may require an extra request to /auth/access/v2 to obtain a usable URL. If available, the authenticated URL is appended and used.
+- Format handling nuances:
+  - m3u8 and f4m formats are extracted via specialized helpers (_extract_m3u8_formats, _extract_f4m_formats) with fatal=False to tolerate missing streams.
+  - mpd formats are ignored due to known duration sync issues between video-only and audio-only streams (comment in code).
+  - Audio: mp3 files or nodes with tag AudioMediaFile are added as audio formats with vcodec='none' to indicate audio-only streams.
+  - Other protocols (HTTP, RTMP) are supported with a computed format_id. RTMP formats receive a lower preference (-1) to bias non-RTMP formats when available.
+- URL validation and skipping logic:
+  - Skips URLs that are empty, duplicated, or contain NOT_USED/NOT-USED.
+  - Validates non-HTTP or RTMP cases based on tag and protocol before including them.
+- DRM and access gating:
+  - If DRM metadata exists, extractor errors with a clear message indicating DRM protection.
+  - If content is not free (ns_st_cds not equal to 'free'), extractor errors indicating the access restriction.
+- Metadata extraction helpers:
+  - Uses a set of small helper functions from utils (xpath_attr, xpath_text, int_or_none, unified_strdate) to robustly pull fields from the XML.
+  - Upload date is normalized to a standard date format via unified_strdate.
+
+Usage context
+- This extractor is designed to work with Ruutu/Supla video pages and embedded players that point to Nelonen Media’s Gatling API.
+- It supports multiple media formats, including HLS (m3u8), HDS (f4m), direct media URLs, and audio formats, and gracefully handles DRM and non-free content.
+
+Overall, the file provides a robust extractor for Ruutu/Supla content by parsing a central media-XML, enumerating all possible media sources, handling authentication when needed, and returning a rich info object with formats and metadata.

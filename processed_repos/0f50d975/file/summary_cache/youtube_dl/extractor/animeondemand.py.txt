@@ -1,0 +1,73 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/animeondemand.py
+
+- Purpose
+  - Implement an InfoExtractor for anime-on-demand.de that logs in (when needed), activates HTML5 beta if required, and extracts a playlist of episodes or films with multiple streaming formats.
+
+- Key class
+  - AnimeOnDemandIE(InfoExtractor)
+
+- URL matching and metadata
+  - _VALID_URL: Matches URLs like https://www.anime-on-demand.de/anime/<id>.
+  - _TESTS: Includes several test cases (OmU, Dub/OmU, episodes without titles, teaser/Trailer, Flash videos).
+
+- Login and access control
+  - _LOGIN_URL and _APPLY_HTML5_URL define endpoints for login and enabling HTML5.
+  - _NETRC_MACHINE = 'animeondemand' enables netrc support.
+  - _login(self): Handles login flow
+    - Retrieves credentials via _get_login_info().
+    - Downloads login page, detects geo restrictions, prepares login form with user credentials.
+    - Posts login data and validates success by checking for Logout links or error messages; raises ExtractorError on failure.
+  - _real_initialize(self): Calls _login() during initialization to ensure access to restricted content.
+
+- HTML5 activation and token handling
+  - If the page lacks data-playlist, the extractor activates the HTML5 beta via _APPLY_HTML5_URL and reloads the page.
+  - CSRF token is read from a meta tag ('csrf-token') for subsequent JSON requests.
+
+- Main extraction flow
+  - _real_extract(self, url)
+    - Extracts anime_id from URL, downloads the page, ensures HTML5 is activated.
+    - Retrieves anime_title and anime_description from the page.
+    - Defines several inner helpers to build the playlist entries.
+
+- Core helpers and logic (inner functions)
+  - extract_info(html, video_id, num=None)
+    - Scans for inputs with class containing "streamstarter".
+    - Reads data attributes: data-dialog-header (title), data-playlist/data-otherplaylist/data-stream (playlist URLs), data-lang (language), value (language note).
+    - For each playlist URL, fetches JSON (via _download_json) using appropriate headers and CSRF token.
+    - Handles different stream types:
+      - If a valid RTMP stream URL is found, creates an RTMP format entry (ext: flv) with app, play_path, etc.
+      - Otherwise, processes a further playlist structure containing startvideo and a nested playlist+sources list.
+        - For each source/file, determines format ext (e.g., m3u8, mpd) and creates appropriate formats:
+          - m3u8: uses _extract_m3u8_formats
+          - mpd/dash: currently bypassed with a continue (mp4/DASH support exists but is skipped here)
+        - Adds language and format_note (combining kind and language note) to each format.
+  - extract_entries(html, video_id, common_info, num=None)
+    - Calls extract_info and, if formats exist, merges with common_info and yields entries.
+    - If no full formats are available, attempts to extract teaser/trailer information and yields a teaser entry with a constructed id and URL.
+  - extract_episodes(html)
+    - Finds episode blocks by regex and enumerates them.
+    - Extracts episode_number from titles (supports both Episode/Film patterns) and episode_title if present.
+    - Builds a per-episode video_id (episode-N) and common_info (series, episode, episode_number).
+    - Delegates to extract_entries for each episode and yields results.
+  - extract_film(html, video_id)
+    - For non-episode films, sets common_info (id, title, description) and yields entries via extract_entries.
+  - entries()
+    - Tries to extract episodes first; if none found, falls back to extracting a single film entry.
+    - Returns a generator of entries (episodes or film) with proper metadata.
+
+- Output
+  - Returns a playlist_result for the anime, containing entries for episodes (or film) with:
+    - id, title, description
+    - formats (from m3u8/hls, and possibly RTMP)
+    - language and format_note per format
+    - episode/series metadata when available
+
+- Important implementation details
+  - Uses CSRF token for JSON playlist requests and includes it in headers.
+  - Handles activation of HTML5 beta if the page does not already provide a playlist.
+  - Supports geo restriction checks and raises appropriate errors.
+  - RTMP support is included for legacy streams; most modern streams are handled via HLS (m3u8) formats.
+  - For DASH (mpd) formats, code paths exist but are skipped (continue) in current flow.
+  - Robust parsing of data attributes from inputs labeled with streamstarter to discover available playlists.
+
+In short, this extractor logs in when required, activates HTML5 if needed, parses complex embedded data attributes to enumerate streams for each episode or film, builds a rich set of formats (primarily HLS, with RTMP support), and yields a structured playlist of episodes/films with metadata.

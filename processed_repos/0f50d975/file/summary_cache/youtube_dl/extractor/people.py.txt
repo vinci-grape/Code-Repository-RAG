@@ -1,0 +1,35 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/people.py
+
+- Purpose:
+  - Implement an extractor for People.com video pages that delegates actual video extraction to Brightcove (BrightcoveNew).
+
+- Core class and inheritance:
+  - PeopleIE(InfoExtractor)
+
+- URL pattern:
+  - _VALID_URL = r'https?://(?:www\.)?people\.com/people/videos/0,,(?P<id>\d+),00\.html'
+  - Matches People.com video pages of the form .../videos/0,,<id>,00.html
+  - Extracts the numeric video id as group "id"
+
+- Test data (_TEST):
+  - Provides a sample URL and expected metadata such as:
+    - id: 'ref:20995451'
+    - ext: 'mp4'
+    - title, description, thumbnail, duration, timestamp, upload_date, uploader_id
+  - Specifies skip_download: True
+  - add_ie: ['BrightcoveNew'] (indicating delegation to BrightcoveNew extractor)
+
+- Main functionality (_real_extract):
+  - Obtains the video id using self._match_id(url)
+  - Constructs a Brightcove URL:
+    http://players.brightcove.net/416418724/default_default/index.html?videoId=ref:<id>
+  - Returns a URL result pointing to the BrightcoveNew extractor:
+    self.url_result('<constructed URL>', 'BrightcoveNew')
+
+- Key implementation details:
+  - The extractor does not fetch or parse metadata itself; it delegates to BrightcoveNew by constructing the Brightcove player URL with videoId=ref:<id>.
+  - The 'ref:' prefix in the id aligns with Brightcove’s video reference format used in the URL.
+  - The test demonstrates expected metadata that will be populated by BrightcoveNew after delegation.
+
+- Overall behavior:
+  - When a People video page is encountered, this extractor redirects to Brightcove's player URL for the given video, leveraging BrightcoveNew to retrieve the actual video information and media.

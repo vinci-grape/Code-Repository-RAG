@@ -1,0 +1,58 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/kakao.py
+
+- Purpose
+  - Implement a YouTube-dl (or similar) information extractor for Kakao TV cliplinks. It fetches video metadata and builds a list of downloadable video formats from Kakao’s API.
+
+- Key class
+  - KakaoIE(InfoExtractor): Main extractor class handling Kakao TV cliplink URLs.
+
+- URL matching
+  - _VALID_URL: Regex that matches Kakao TV cliplink URLs, including both channel-based and embed/player paths. Captures the clip id as group "id" (digits or a string ending with @my).
+
+- API interaction
+  - _API_BASE_TMPL: Base API URL template for cliplinks, used to construct endpoints like .../cliplinks/{id}/impress and .../cliplinks/{id}/raw/videolocation.
+  - The extractor uses two API calls:
+    1) Impress call: api_base + 'impress' with a query requesting a broad set of fields to obtain clipLink and meta including tid.
+    2) Per-profile raw URL call: api_base + 'raw/videolocation' for each video format/profile (excluding AUDIO) to fetch actual video URLs.
+
+- HTTP headers
+  - Builds a Referer header using the embed/player URL with specific query parameters (service=kakao_tv, autoplay=1, profile=HIGH, wmode=transparent) to mimic the embedded player context.
+
+- Data extraction and assembly
+  - video_id: extracted from URL with _match_id.
+  - display_id: video_id with any trailing '@my' removed.
+  - impress: downloaded JSON from the impress endpoint; extract clipLink and clip data.
+  - Title: prefer clip.title; fall back to clipLink.displayTitle.
+  - uploader/uploader_id: derived from clipLink.channel.name and clipLink.channelId.
+  - thumbnail, description, timestamp, duration, view_count, like_count, comment_count, tags: extracted from clip and clipLink fields with safe casting helpers (int_or_none, str_or_none, unified_timestamp, strip_or_none, try_get).
+  - formats: built by iterating clip.videoOutputList and for each non-AUDIO profile:
+    - Sets query['profile'] to the profile name and requests the actual video URL via the per-profile endpoint.
+    - Handles potential 403 responses (GeoBlocked) by inspecting the error payload and raising geo restrictions if necessary.
+    - Each format entry includes: url, format_id (profile name), width, height, format_note (label), filesize, tbr (kbps).
+  - Sorting: formats are sorted with _sort_formats.
+
+- Error handling
+  - If a per-profile URL fetch raises a 403, attempts to parse the error payload to detect GeoBlocked and raise an appropriate geo-restricted error.
+  - Uses try/except to skip missing keys gracefully (KeyError) when parsing formats.
+
+- Output
+  - Returns a dict with:
+    - id: display_id
+    - title: resolved title
+    - description: description (if any)
+    - uploader, uploader_id: uploader info
+    - thumbnail: thumbnailUrl
+    - timestamp: unified timestamp from createTime
+    - duration, view_count, like_count, comment_count
+    - formats: list of format dicts
+    - tags: tagList
+
+- Tests
+  - _TESTS includes three tests:
+    1) A typical cliplink URL with expected mp4 URL and metadata (title, uploader, timestamp, etc.).
+    2) Another clip with metadata validation.
+    3) A geo-restricted URL marked as only_matching to indicate geo-block handling.
+
+- Notes
+  - The code relies on various helper utilities (int_or_none, str_or_none, strip_or_none, try_get, unified_timestamp, update_url_query) and _download_json for making API calls and safely extracting typed values.
+  - The end of the provided snippet shows a stray “Summary:” line, which appears to be outside the Python code block and is not part of the actual implementation.

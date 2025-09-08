@@ -1,0 +1,71 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/massengeschmacktv.py
+
+Purpose
+- Implement an InfoExtractor for massengeschmack.tv to fetch episode video formats and metadata.
+
+Key class
+- MassengeschmackTVIE(InfoExtractor)
+  - IE_NAME: 'massengeschmack.tv'
+  - _VALID_URL: matches URLs like https://massengeschmack.tv/play/<id>
+  - _TEST: example test case with expected id, extension, title, and md5 of the video
+
+Main functionality ( _real_extract )
+1) Identify episode
+- Extract episode id from the URL using _match_id.
+
+2) Download and parse page
+- webpage = _download_webpage(url, episode)
+
+3) Metadata extraction
+- title: extracted from an <h3> tag and cleaned via clean_html.
+- thumbnail: extracted from a JavaScript variable POSTER using _search_regex; not fatal if absent.
+
+4) Video sources extraction (two sources of formats)
+- sources: locate a MEDIA = [...] block in the page, convert it from JavaScript to JSON using:
+  _search_regex(r'(?s)MEDIA\s*=\s*(\[.+?\]);', webpage, 'media'), then js_to_json.
+- For each source in sources:
+  - furl: get 'src'; skip if missing.
+  - Convert to absolute URL with _proto_relative_url.
+  - ext: determine via determine_ext(furl) or fallback to mimetype2ext(source.get('type')).
+  - If ext is 'm3u8':
+    - Use _extract_m3u8_formats with mp4 container and m3u8_native handling.
+    - Pass m3u8_id='hls' and fatal=False (non-fatal on failure).
+  - Else:
+    - Add a simple format dict with 'url': furl and 'format_id': extension.
+
+5) Additional formats from HTML block
+- A second regex block scans for HTML anchor formats with details:
+  - Pattern captures: url, format_id, optional width, height, and filesize in parentheses.
+- For each match:
+  - Add a format dict with:
+    - 'url': durl
+    - 'format_id': format_id
+    - 'width'/'height': parsed via int_or_none
+    - 'filesize': parsed via parse_filesize
+    - 'vcodec': 'none' if format_id starts with 'Audio' else None
+
+6) Normalize/score formats
+- self._sort_formats(formats, ('width', 'height', 'filesize', 'tbr'))
+
+7) Return result
+- id: episode
+- title: extracted title
+- formats: collected formats
+- thumbnail: extracted thumbnail (if any)
+
+Implementation details and utilities used
+- _VALID_URL uses a precise pattern to capture the episode id.
+- _download_webpage fetches the page content.
+- _html_search_regex and clean_html extract and sanitize the title.
+- _search_regex with fatal=False retrieves optional fields (thumbnail).
+- The page is expected to contain a JavaScript MEDIA array; _search_regex + js_to_json converts it into Python objects.
+- _proto_relative_url makes protocol-relative URLs absolute.
+- determine_ext and mimetype2ext are used to infer video format extensions.
+- _extract_m3u8_formats handles HLS streams (m3u8) when encountered.
+- A second, more static-format block is parsed from HTML anchors, capturing size information to populate additional formats.
+- int_or_none converts numeric strings to integers safely.
+- parse_filesize converts human-readable sizes like "1.23 GiB" to integers (bytes).
+- The code ranks formats by width, height, filesize, and tbr to provide sensible default ordering.
+
+Overall
+- The extractor aggregates video formats from both a JavaScript MEDIA array and an HTML block, producing a comprehensive formats list with metadata (id, title, thumbnail). It supports direct video URLs and HLS streams, and handles both video and audio formats.

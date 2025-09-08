@@ -1,0 +1,42 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/tele5.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Tele5 (tele5.de) videos using the DPlay (Disco) API.
+
+- Class and inheritance
+  - Tele5IE inherits from DPlayIE, reusing the Disco API-based extraction flow.
+
+- URL matching and localization
+  - _VALID_URL: Regular expression matching Tele5 video pages, including mediathek and various content paths.
+  - _GEO_COUNTRIES: ['DE'] to constrain geographic access (Germany).
+
+- Test cases
+  - _TESTS contains multiple scenarios:
+    - Direct mediathek video pages returning mp4 with metadata (title, upload_date, timestamp).
+    - Some pages that redirect or are unavailable (DRM-protected or removed).
+    - Entries with only_matching for URLs that should not be extracted.
+    - Examples cover both available content and DRM/redirect cases.
+
+- Core extraction logic (_real_extract)
+  - video_id extraction: Uses _match_id(url).
+  - Webpage fetch: Downloads the page with _download_webpage.
+  - Player info extraction:
+    - Finds the Hyoga player tag via _search_regex(r'(<hyoga-player\b[^>]+?>)').
+    - Parses attributes of the tag into a dict with extract_attributes.
+  - Required attributes:
+    - asset_id, country, realm from the parsed attributes (keys: 'assetid', 'locale', 'realm').
+    - endpoint: URL from 'endpoint' attribute; hostname is extracted via compat_urlparse.urlparse(...).hostname.
+    - Optional source_type ('sourcetype'); if present, endpoint is prefixed as "source_type-endpoint".
+  - API call:
+    - Calls _get_disco_api_info(url, asset_id, endpoint, realm, country) to obtain the actual video information from the Disco API.
+  - DRM handling:
+    - Catches ExtractorError. If the error message equals 'Missing deviceId in context', re-raises as ExtractorError('DRM protected', cause=e, expected=True).
+    - Otherwise, re-raises the original error.
+
+- Important implementation details
+  - Uses compatibility utilities: compat_urlparse for URL parsing, extract_attributes to convert HTML tag attributes to a dict.
+  - Leverages the parent DPlayIE disco API method to fetch final media info, keeping Tele5-specific discovery minimal (primarily extracting needed attributes from the Hyoga player tag).
+  - Handles potential DRM and redirect/unavailability cases gracefully, marking DRM-protected content when appropriate.
+
+- Overall behavior
+  - The extractor locates the Tele5 Hyoga player on a page, reads its internal metadata (asset, locale, realm, endpoint, etc.), builds a suitable Disco API request, and returns the standard YouTube-DL info dict for the video or raises a DRM-protected error when applicable.

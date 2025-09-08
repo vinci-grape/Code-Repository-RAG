@@ -1,0 +1,43 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/fox9.py
+
+Purpose
+- Provides two extractors for Fox9 content:
+  - FOX9IE: extracts direct Fox9 video pages that are served via Anvato.
+  - FOX9NewsIE: extracts Fox9 News pages that embed Anvato videos and delegates extraction to FOX9IE / Anvato.
+
+Key classes and main functionality
+- FOX9IE (InfoExtractor)
+  - _VALID_URL: Matches Fox9 video pages of the form https://{optional www}.fox9.com/video/{id} where id is digits.
+  - _real_extract(url):
+    - Extracts the numeric video_id from the URL using _match_id.
+    - Returns a URL result pointing to an Anvato resource:
+      - URL: 'anvato:anvato_epfox_app_web_prod_b3373168e12f423f41504f207000188daf88251b:' + video_id
+      - extractor: 'Anvato'
+      - id: video_id
+    - This delegates actual media retrieval to the Anvato extractor with a specific product/resource identifier.
+
+- FOX9NewsIE (InfoExtractor)
+  - _VALID_URL: Matches Fox9 News pages of the form https://{optional www}.fox9.com/news/{id} where id is a slug.
+  - _TEST: Provides a sample URL and expected metadata (id, ext, title, description, duration, timestamp, upload_date, uploader, categories, tags) to validate extraction.
+  - _real_extract(url):
+    - display_id = _match_id(url)
+    - Downloads the news page HTML via _download_webpage.
+    - Extracts an anvatoId (digits) from the page with _search_regex(r'anvatoId\s*:\s*[\'"](\d+)', ...).
+    - Returns a URL result pointing to the Fox9 video page for that anvato_id:
+      - URL: 'https://www.fox9.com/video/' + anvato_id
+      - extractor: 'FOX9'
+    - This effectively chains the extraction: Fox9 News page -> inner Fox9 video page -> FOX9IE -> Anvato.
+
+Important implementation details
+- Chaining mechanism:
+  - FOX9NewsIE uses a dynamic link to a Fox9 video page, which is then processed by FOX9IE, and finally delegated to the Anvato extractor for actual media playback.
+- Use of internal resource ID:
+  - FOX9IE builds a specific Anvato resource string: 'anvato:anvato_epfox_app_web_prod_b3373168e12f423f41504f207000188daf88251b:' + video_id to trigger the Anvato extractor.
+- Regex and page parsing:
+  - FOX9NewsIE relies on a straightforward regex to locate anvatoId in the News page HTML.
+- Test coverage:
+  - FOX9NewsIE._TEST provides a concrete example with expected metadata, illustrating how the News page metadata maps to the final extracted video.
+- Compatibility note:
+  - The file uses from __future__ import unicode_literals for Python 2/3 compatibility.
+
+In short, this module enables youtube-dl to fetch Fox9 videos by either directly mapping Fox9 video pages to Anvato (FOX9IE) or by first parsing Fox9 News pages to discover the embedded Anvato video and then resolving it through FOX9’s video page (FOX9NewsIE).

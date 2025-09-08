@@ -1,0 +1,51 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/vrt.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for VRT-related video pages (VRT NWS, Flanders News, Flandern Info and Sporza).
+
+- Class and inheritance
+  - VRTIE(InfoExtractor): main extractor class.
+
+- URL handling
+  - _VALID_URL matches URLs from vrt.be/vrtnws or sporza.be with a two-letter language code and a date path, capturing:
+    - site: either vrt.be/vrtnws or sporza.be
+    - id: the final path component (video slug)
+  - _CLIENT_MAP maps the site to internal client identifiers:
+    - 'vrt.be/vrtnws' -> 'vrtnieuws'
+    - 'sporza.be' -> 'sporza'
+
+- Core extraction logic (_real_extract)
+  - Downloads the page and locates the HTML tag representing the video using a search for a tag containing class="vrtvideo".
+  - Extracts all data- attributes from that tag via extract_attributes:
+    - asset_id from data-videoid
+    - publication_id from data-publicationid (if present, asset_id becomes publicationid$videovid)
+    - thumbnail from data-posterimage
+    - duration from data-duration (converted from ms to seconds using float_or_none with scale 1000)
+    - data-client may override the client; otherwise, uses the _CLIENT_MAP entry for the site
+  - Determines the video title:
+    - First, try an element with class "vrt-title" in the page
+    - If not found, fall back to meta tags (og:title, twitter:title, name)
+  - Determines the description:
+    - From meta tags (og:description, twitter:description, description)
+    - If description is the ellipsis character '…', it is treated as None
+  - Determines the timestamp:
+    - From article:published_time meta, parsed with unified_timestamp
+  - Builds the final downloadable URL for the actual video:
+    - URL: https://mediazone.vrt.be/api/v1/{client}/assets/{asset_id}
+  - Returns a url_transparent entry:
+    - _type: 'url_transparent'
+    - id: asset_id (potentially including publication_id)
+    - display_id: display_id captured from the URL
+    - title, description, thumbnail, timestamp, duration
+    - url: the Canvas API asset URL mentioned above
+    - ie_key: 'Canvas' (delegates to the Canvas extractor for the actual media)
+
+- Important implementation details
+  - The code specifically looks for a video block via a tag with class="vrtvideo" and reads its data attributes.
+  - If a publication ID is present, it concatenates publicationid + '$' + videoid to form the final asset_id, matching the expected test IDs.
+  - The duration is converted from milliseconds to seconds using float_or_none(..., 1000).
+  - The final media URL uses a Canvas-backed API (Canvas extractor handles actual playback).
+  - Title/description extraction includes fallbacks to robust meta tag extraction to handle variations in page structure.
+  - Tests (_TESTS) cover both vrt.nl/vrtnws and Sporza pages, including an example with only_matching for non-video pages.
+
+In short, this extractor locates a VRT video on a page, reads its data attributes to construct a Canvas-based asset URL, and returns a url_transparent result so the Canvas extractor can fetch the actual video, while populating metadata like title, description, timestamp, duration, and thumbnail.

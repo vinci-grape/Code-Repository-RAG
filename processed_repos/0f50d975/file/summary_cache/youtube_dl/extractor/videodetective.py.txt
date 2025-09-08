@@ -1,0 +1,25 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/videodetective.py
+
+- Purpose: A Youtube-dl extractor that handles videodetective.com URLs by delegating to the Internet Video Archive (IVA) extractor. It maps a Videodetective video to IVA’s JSON feed and reuses IVA’s extraction logic.
+
+- Key class:
+  - VideoDetectiveIE(InfoExtractor)
+    - _VALID_URL: Regex that matches Videodetective URLs of the form https://(www.)?videodetective.com/.../<id> where id is a sequence of digits. The id is captured as the video_id.
+    - _TEST: A test case for a sample Videodetective URL (Kick-Ass 2). Specifies expected info_dict fields (id, ext, title, description) and skip_download behavior. Demonstrates the intended integration with IVA.
+    - _real_extract(self, url):
+      - Extracts the numeric video_id from the URL via self._match_id(url).
+      - Builds a query string: customerid=69249&publishedid=<video_id> (uses a fixed customer ID and the extracted published ID).
+      - Calls InternetVideoArchiveIE._build_json_url(query) to construct the full JSON URL for IVA.
+      - Returns a URL result pointing to that IVA JSON URL, using InternetVideoArchiveIE.ie_key() to indicate the nested extractor (ie=InternetVideoArchiveIE.ie_key()).
+
+- Main functionality:
+  - Acts as an adapter/wrapper that converts a Videodetective URL into an IVA JSON feed URL and then delegates extraction to the Internet Video Archive extractor.
+  - Relies on the IVA extractor’s _build_json_url and ie_key to perform the actual video metadata extraction and download handling.
+
+- Notable implementation details:
+  - Uses a fixed customerid (69249) and the publishedid derived from the Videodetective URL for the IVA query.
+  - Delegation is implemented via self.url_result(...) with ie set to InternetVideoArchiveIE.ie_key(), enabling reuse of IVA’s logic for metadata and download.
+  - The __future__ import unicode_literals indicates Python 2/3 compatibility considerations.
+  - The _TEST demonstrates expected behavior and that the final media would be processed as an IVA video (ext mp4) with a specific title and description hash.
+
+In short: VideoDetectiveIE translates videodetective.com video IDs into IVA JSON feeds and defers actual extraction to the Internet Video Archive extractor.

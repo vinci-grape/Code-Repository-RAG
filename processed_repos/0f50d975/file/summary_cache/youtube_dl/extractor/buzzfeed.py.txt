@@ -1,0 +1,46 @@
+Here's a concise, comprehensive summary of the BuzzFeed extractor code.
+
+Purpose
+- Implements BuzzFeed video page extraction for youtube-dl as BuzzFeedIE.
+- Produces a playlist of video entries found on a BuzzFeed article page, including embedded Facebook videos.
+
+Main class and methods
+- Class: BuzzFeedIE(InfoExtractor)
+  - _VALID_URL: Regex to identify BuzzFeed article pages and capture a slug id.
+  - _TESTS: Several test cases verifying behavior with BuzzFeed videos and embedded Facebook videos.
+  - _real_extract(url):
+    - playlist_id = self._match_id(url)
+    - webpage = self._download_webpage(url, playlist_id)
+    - Parses embedded BuzzFeed video data and collects video entries:
+      - Searches for blocks containing bf_bucket_data via the regex:
+        (?s)<div class="video-embed[^"]*"..*?rel:bf_bucket_data=\'([^\']+)\'
+
+        Each matched JSON string is loaded with json.loads.
+        For each bucket dict (bd):
+          - video = bd.get('video') or bd.get('progload_video')
+          - If video exists, append self.url_result(video['url']) to entries.
+    - Also extracts embedded Facebook video URLs from the page:
+      - facebook_urls = FacebookIE._extract_urls(webpage)
+      - Append self.url_result(facebook_url) for each.
+    - Returns a playlist dict:
+      - '_type': 'playlist'
+      - 'id': playlist_id
+      - 'title': self._og_search_title(webpage)
+      - 'description': self._og_search_description(webpage)
+      - 'entries': list of video entries (BuzzFeed videos and Facebook videos)
+
+Key implementation details
+- Data sources:
+  - BuzzFeed bf_bucket_data blocks embedded in the page contain either 'video' or 'progload_video' with a 'url' for the video page (mp4, etc.).
+  - Facebook videos embedded on the page are collected via FacebookIE._extract_urls and converted to entries.
+- Output format:
+  - Returns a playlist with title/description from Open Graph metadata on the page.
+  - Each video entry is created using self.url_result(...) to be processed by youtube-dl’s standard video extraction pipeline.
+- Tests illustrate:
+  - First test: a BuzzFeed article with a single video bucket, expecting a specific mp4 video entry.
+  - Second test: a BuzzFeed article with a different video and a skip_download flag (test scaffolding).
+  - Third test: a BuzzFeed article with a video entry and an embedded Facebook video; “add_ie”: ['Facebook'] indicates the Facebook extractor is involved.
+
+Usage implications
+- This extractor aggregates multiple media sources on BuzzFeed pages into a single playlist: BuzzFeed-hosted videos and any embedded Facebook videos.
+- It relies on Open Graph for title/description and on page-embedded data for video URLs.

@@ -1,0 +1,39 @@
+This is not executable code but a test data fixture: a Netscape-format cookie file used by youtube-dl tests.
+
+Key details:
+- Location: ./youtube-dl/test/testdata/cookies/session_cookies.txt
+- Purpose: Provides sample cookies for tests (loading into a cookie jar, verifying parsing, expiration handling, and secure flags).
+- Format: Netscape HTTP Cookie File
+  - Each non-comment line is a cookie record with fields separated by tabs:
+    - domain
+    - flag (TRUE/FALSE) indicating whether subdomains are included (TRUE) or only exact domain matches (FALSE)
+    - path
+    - secure (TRUE/FALSE) indicating if the cookie is secure
+    - expires (Unix epoch timestamp; empty means a session cookie)
+    - name
+    - value
+  - Comment lines begin with # and note the Netscape cookie format and that the file is generated.
+- Cookies contained:
+  - Cookie 1:
+    - domain: www.foobar.foobar
+    - flag: FALSE (host-only; exact domain)
+    - path: /
+    - secure: TRUE
+    - expires: (empty) -> session cookie
+    - name: YoutubeDLExpiresEmpty
+    - value: YoutubeDLExpiresEmptyValue
+  - Cookie 2:
+    - domain: www.foobar.foobar
+    - flag: FALSE
+    - path: /
+    - secure: TRUE
+    - expires: 0 -> treated as expired in many parsers
+    - name: YoutubeDLExpires0
+    - value: YoutubeDLExpires0Value
+
+Important implications:
+- The first cookie tests handling of a session cookie (no expiration).
+- The second cookie tests handling of an already-expired cookie (expires = 0).
+- Both cookies are marked secure and domain-matched to the given domain, with host-only scope (FLAG FALSE).
+
+Overall, this file serves as a lightweight fixture to validate cookie loading, expiration logic, and secure-flag handling in youtube-dl’s test suite.

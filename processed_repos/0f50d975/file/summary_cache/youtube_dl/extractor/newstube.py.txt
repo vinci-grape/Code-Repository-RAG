@@ -1,0 +1,71 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/newstube.py
+
+Purpose
+- Implement a Youtube-dl extractor for NewsTube (newstube.ru) video pages.
+- Retrieve video metadata and multiple video formats from an encrypted source API.
+
+Main components
+- Class NewstubeIE(InfoExtractor)
+  - _VALID_URL: matches NewsTube media pages: https://(www.)?newstube.ru/media/<id>
+  - _TEST: example test case with expected id, ext, title, description (md5), and duration.
+
+Key methods and workflow
+- _real_extract(self, url)
+  - Extract video_id from URL.
+  - Download the page and extract title from og:title or twitter:title meta tags.
+  - Locate the embedded video GUID from an og:video meta tag using a regex. This GUID is a UUID-like string.
+  - Fetch encrypted source data:
+    - Call https://www.newstube.ru/embed/api/player/getsources2 with query params guid=<video_guid>&ff=3.
+    - The response is base64-encoded; base64-decode to get enc_data.
+  - Derive AES decryption key and perform decryption:
+    - key = PBKDF2-HMAC-SHA1(password=video_guid without dashes, salt=enc_data[:16], 1 iteration)[:16]
+    - IV = enc_data[16:32]
+    - ciphertext = enc_data[32:]
+    - dec_data = AES-CBC decrypt(ciphertext, key, IV)
+  - Decode sources:
+    - dec_data is an intlist; convert to bytes, then truncate by removing the trailing padding length indicated by the last byte (dec_data[-1]).
+    - Parse the resulting JSON to get a list of source entries (sources).
+- Build formats
+  - For each source entry:
+    - Src URL (required)
+    - Height (optional), Width (optional)
+    - format_id set to "http" or "http-<height>p" if height is present
+    - Add width and height fields
+    - If Type is present, extract codecs="..." from Type and convert to a codecs dict via parse_codecs
+  - Collect all formats, then run _check_formats and _sort_formats.
+- Return metadata
+  - id: video GUID
+  - title: extracted title
+  - description: from meta tags (description or og:description)
+  - thumbnail: from og:image/og:image:secure_url or twitter:image
+  - duration: parsed with parse_duration from the duration meta tag
+  - formats: list of constructed format dictionaries
+
+Important implementation details
+- Encryption/ Decryption
+  - The API returns an encrypted payload (enc_data) base64-encoded.
+  - Key derivation uses PBKDF2-HMAC-SHA1 with:
+    - Password: video_guid with dashes removed
+    - Salt: first 16 bytes of enc_data
+    - Iterations: 1
+    - Result trimmed to 16 bytes for the AES key
+  - AES-CBC decryption uses:
+    - IV: bytes 16..32 of enc_data
+    - Ciphertext: bytes 32..end
+  - The decrypted data (dec_data) is an intlist that is converted to bytes. The final byte of dec_data indicates padding length, so dec_data[:-pad] yields the actual JSON for sources.
+- Sources structure
+  - Each source dictionary should include:
+    - Src: URL to the video segment
+    - Height/Width: optional resolution
+    - Type: may contain codecs information (parsed with a regex looking for codecs="...")
+  - Codecs are extracted from Type if present and merged into the format dict.
+- Format handling
+  - Each format has:
+    - url (Src)
+    - format_id: "http" or "http-{height}p"
+    - width and height (as available)
+    - codecs (if parsed)
+  - Formats are validated and sorted for best quality first.
+
+Overall behavior
+- The extractor retrieves a NewsTube video page, derives a unique GUID for the embedded player, securely fetches and decrypts the source list, constructs a set of playable formats, and returns a complete metadata package including id, title, description, thumbnail, duration, and the formats list.

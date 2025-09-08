@@ -1,0 +1,52 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/ninecninemedia.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for NineCNineMedia content, allowing extraction of video metadata, formats, thumbnails, subtitles, and related info from NineCNineMedia.
+
+- Core class
+  - NineCNineMediaIE, subclass of InfoExtractor
+  - Metadata:
+    - IE_NAME = '9c9media'
+    - _GEO_COUNTRIES = ['CA'] (restricts access to Canada)
+    - _VALID_URL = r'9c9media:(?P<destination_code>[^:]+):(?P<id>\d+)' (URL pattern to identify items)
+    - _API_BASE_TEMPLATE = 'http://capi.9c9media.com/destinations/%s/platforms/desktop/contents/%s/'
+
+- Main workflow (_real_extract)
+  1) Parse destination_code and content_id from the URL using _VALID_URL.
+  2) Build the base API URL using _API_BASE_TEMPLATE and fetch the primary content JSON, requesting includes for Media.Name, Season, ContentPackages.Duration, ContentPackages.Id.
+  3) Extract title from content['Name'] and pick the first content package (ContentPackages[0]) to obtain package_id.
+  4) Fetch the content package JSON from api_base_url + 'contentpackages/{package_id}/', requesting HasClosedCaptions.
+  5) DRM check:
+     - If content_package contains Constraints.Security.Type, raise ExtractorError('This video is DRM protected.', expected=True).
+  6) Build manifest URLs based on manifest_base_url = content_package_url + 'manifest.' and collect formats:
+     - HLS (m3u8) via _extract_m3u8_formats(manifest_base_url + 'm3u8', ...), with m3u8_native and hls id, fatal=False
+     - HDS (f4m) via _extract_f4m_formats(manifest_base_url + 'f4m', ...), fatal=False
+     - DASH (mpd) via _extract_mpd_formats(manifest_base_url + 'mpd', ...), fatal=False
+     - Sort formats with _sort_formats
+  7) Thumbnails:
+     - Build from content.get('Images') (or []) by collecting url, width, height (width/height parsed via int_or_none).
+  8) Tags and categories:
+     - Collect Tags into a tags list and Genres into a categories list by reading content['Tags'] and content['Genres'] and pulling their 'Name' values.
+  9) Season/series details:
+     - season = content.get('Season') or {}
+     - series name obtained via content['Media']['Name'] when available
+     - Include season name, season_number, and season_id
+  10) Assemble info dictionary with:
+      - id, title, description (from 'Desc' or 'ShortDesc'), timestamp (parse_iso8601 of 'BroadcastDateTime'),
+        episode_number (int_or_none of 'Episode'), season, season_number, season_id,
+        series, tags, categories, duration (float_or_none from ContentPackages.Duration),
+        formats, thumbnails
+  11) Subtitles (if HasClosedCaptions is true in content_package):
+      - Add subtitles for 'en' with two URLs: manifest_base_url + 'vtt' (ext 'vtt') and manifest_base_url + 'srt' (ext 'srt')
+  12) Return the assembled info dictionary.
+
+- Important implementation details
+  - DRM detection uses try_get to safely probe content_package['Constraints']['Security']['Type']; if present (truthy), an ExtractorError is raised.
+  - Formats are pulled from three streaming protocols (HLS, HDS, DASH) via m3u8, f4m, and mpd manifests; fatal=False ensures the extractor proceeds if some formats are unavailable.
+  - Metadata extraction is robust to missing fields (uses get with fallbacks and int_or_none/float_or_none).
+  - Thumbnails, tags, and categories are built adaptively from the API response (handles missing lists gracefully).
+  - Subtitles are conditionally added only when closed captions are present.
+  - The code relies on utility functions from youtube-dl (parse_iso8601, int_or_none, float_or_none, try_get) and common methods for downloading JSON and extracting formats.
+
+- Typical output
+  - A dict with keys such as id, title, description, timestamp, episode_number, season, season_number, season_id, series, tags, categories, duration, formats, thumbnails, and optionally subtitles.

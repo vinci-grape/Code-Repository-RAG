@@ -1,0 +1,99 @@
+Summary of ./youtube-dl/youtube_dl/extractor/line.py
+
+Purpose
+- Implements YouTube-DL extractors for Line TV (LineTVIE) and Line Live (LineLiveIE and LineLiveChannelIE) to retrieve video/stream formats and metadata from LINE’s TV and live channels.
+
+Key classes and main functionality
+- LineTVIE (video pages on tv.line.me)
+  - URL pattern: https://tv.line.me/v/<series_id>_<segment>-<segment>/… 
+    - _VALID_URL captures id (digits) and segment (epX-Y).
+  - Video identification: video_id is series_id_segment (e.g., 793123_ep1-1).
+  - Data flow:
+    - Downloads the page and extracts WebPlayer parameters using a JS snippet (naver.WebPlayer({ ... })).
+    - Calls an API to get video info using videoId and key from the player params.
+    - Builds formats in two parts:
+      - HLS (m3u8) formats from stream['source'] with an extra query parameter (__gda__=stream['key']['value']); uses m3u8_native, ext mp4, id 'hls'. Appends extra_query to each URL after extraction.
+      - Direct HTTP video formats from video_info['videos']['list'] with bitrate data (audio+video) and size. Each entry includes format_id, height/width (from encodingOption), abr, vbr, and filesize. Duration is taken from the first known duration if available.
+    - Sorts formats, marks the first format as video-disabled if no width is present (vcodec='none').
+    - Title from page metadata (_og_search_title).
+    - Thumbnails from video_info['thumbnails']['list'].
+    - View count from video_info['meta']['count'].
+    - Returns:
+      - id, title, formats, extra_param_to_segment_url (extracted from extra_query), duration, thumbnails, view_count.
+  - Important details:
+    - Uses extra_query to attach authentication-like parameter to HLS URLs and preserves it for HTTP formats.
+    - duration may be sourced from video list entries; if none, it remains None.
+    - Includes a note that like_count would require a separate API call (not implemented here).
+
+- LineLiveBaseIE (shared helpers for Line Live)
+  - Base class for LINE Live extractions.
+  - _API_BASE_URL points to LINE live channel API.
+  - _parse_broadcast_item(item) converts a broadcast item into a consistent dict with:
+    - id, title, is_live
+    - thumbnails (list of {id, url} from thumbnailURLs)
+    - timestamp (createdAt)
+    - channel name and id, channel_url
+    - duration (archiveDuration), view_count (viewerCount), comment_count (chatCount)
+  - Returns a unified info dictionary suitable for both live and archived content.
+
+- LineLiveIE (live broadcasts on LINE Live)
+  - URL pattern: https://live.line.me/channels/<channel_id>/broadcast/<id>
+  - Uses the API to fetch a specific broadcast:
+    - Determines protocol: m3u8 for live, m3u8_native for archived.
+    - Builds formats from:
+      - liveHLSURLs or archivedHLSURLs: for each key/value pair:
+        - If key is abr: uses _extract_m3u8_formats to parse HLS media with abr as a format variant (mp4, hls, with m3u8_id='hls').
+        - Otherwise creates a direct MP4 format with url, format_id='hls-<key>', protocol, and vcodec='none' when key is not all-digits.
+      - Skips empty URLs.
+    - If no formats are produced, checks archiveStatus in item and raises ExtractorError if not ARCHIVED (to indicate unavailable video).
+    - Sorts formats and attaches to info dict.
+    - Returns info from _parse_broadcast_item and the built formats.
+  - Important details:
+    - Handles both live and archived HLS URLs, with abr-based automatic HLS parsing and direct URLs for non-abr entries.
+    - Uses the same helper to build a consistent info dict (title, timestamps, channel info, etc.).
+
+- LineLiveChannelIE (LINE Live channel page listing archived broadcasts)
+  - URL pattern: https://live.line.me/channels/<id> (excludes /broadcast/<id> paths)
+  - _TEST demonstrates a channel page returning a playlist with multiple entries.
+  - Logic:
+    - Fetches channel data from API_BASE_URL + channel_id.
+    - Uses _archived_broadcasts_entries to generate per-broadcast entries:
+      - Iterates through archivedBroadcasts['rows'], for each row with a shareURL:
+        - Builds info via _parse_broadcast_item(row) and stores it as a URL-type entry pointing to LineLiveIE with that share URL.
+        - Yields this entry.
+      - If there are more pages (hasNextPage), fetches the next page by requesting archived_broadcasts with lastId set to the last broadcast id found.
+    - The channel extraction returns a playlist consisting of archived entries, each wrapped to be parsed by LineLiveIE.
+  - Important details:
+    - Enables pagination through archived broadcasts using lastId and hasNextPage.
+    - Each entry delegates to LineLiveIE for actual format extraction.
+
+Implementation details and utilities used
+- Common extraction helpers:
+  - _download_webpage, _download_json: fetch page data and JSON data.
+  - _search_regex: extract substrings with regex.
+  - _parse_json with js_to_json: parse embedded JavaScript objects in HTML.
+  - _extract_m3u8_formats: parse HLS (m3u8) formats, with entry_protocol and m3u8_id.
+  - _og_search_title: derive title from OpenGraph tags in HTML.
+  - _sort_formats: order formats by quality/bitrate.
+  - int_or_none, str_or_none: safe type conversions.
+  - compat_str: ensure consistent string types.
+- Data handling details:
+  - LineTVIE computes an extra_query parameter from stream['key']['value'] and appends it to all video/m3u8 URLs. The extra_query is exposed as extra_param_to_segment_url minus the leading '?'.
+  - For LineTVIE, width is checked on the first HLS format; if absent, vcodec is explicitly set to 'none' to indicate video-less streams (audio-only or placeholder).
+  - Thumbnails are assembled from nested video_info structures, mapping thumbnail URLs to a simple list of dicts with id and URL.
+  - Duration in LineTVIE is optionally derived from video_info['videos']['list']; if multiple entries exist, the last known duration is used.
+  - LineLiveIE dynamically selects protocol (m3u8 vs. m3u8_native) based on live/archived state and handles abr-based HLS parsing as well as non-abr direct URLs.
+  - LineLiveChannelIE relies on an API-driven approach to enumerate archived broadcasts and uses URL-type entries to link to LineLiveIE for individual items.
+
+Tests
+- LineTVIE._TESTS includes:
+  - A real video URL with expected id, ext, title, thumbnail pattern, duration, and view_count.
+  - Another URL marked as only_matching to verify URL pattern.
+- LineLiveIE._TESTS include:
+  - A valid live broadcast URL with metadata like id, title, timestamp, channel, etc.
+  - An archived/deleted broadcast URL marked as only_matching (archiveStatus == 'DELETED').
+- LineLiveChannelIE._TEST provides a channel URL example and expects a playlist of archived broadcasts with proper id/title/description and multiple entries (playlist_mincount).
+
+Overall
+- The module provides comprehensive support for two LINE video sources: Line TV (on tv.line.me) and LINE Live (live.line.me).
+- It combines page scraping, API calls, and HLS/HTTP format extraction to produce a consistent set of formats and metadata, suitable for streaming playback and playlist generation.

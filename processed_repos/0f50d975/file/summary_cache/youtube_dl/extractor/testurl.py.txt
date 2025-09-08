@@ -1,0 +1,31 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/testurl.py
+
+- Purpose
+  - A helper extractor (TestURLIE) that lets you address a specific extractor’s test case via a synthetic URL like test:url:<extractor> or test:url:<extractor>_<num>, and returns the actual test-case URL as a playable result.
+
+- Class and configuration
+  - Class: TestURLIE(InfoExtractor)
+  - IE_DESC = False (do not list in general extractor help)
+  - _VALID_URL: matches test URLs of the form test:url:<id> where id is <extractor>(_<num>)?; extracts groups: id, extractor, num.
+
+- Core functionality (_real_extract)
+  - Dynamically collect all available extractors using gen_extractors().
+  - Find extractors whose IE_NAME matches the provided extractor string (case-insensitive) using a regex derived from the URL.
+  - Handling of matches:
+    - If no matches: raise ExtractorError indicating no matching extractors found (expected=True).
+    - If multiple matches: attempt to pick an exact match by comparing IE_NAME to extractor_id (case-insensitive). If no exact match, raise ExtractorError listing the matching extractors (expected=True).
+    - If exactly one match: use that extractor.
+  - Test case selection:
+    - Build a list of test cases from extractor._TEST (if present) and extractor._TESTS (list).
+    - Parse the optional num group (default to 0 if absent) to index into the test cases.
+    - If the requested index is out of range, raise ExtractorError (expected=True) with a helpful message.
+  - Output and result:
+    - Print the chosen test URL to the screen: "Test URL: <tc['url']>".
+    - Return a url_result for the test case URL, with video_id set to the full id captured from the URL (the extractor identifier plus optional number).
+
+- Key implementation details
+  - Uses dynamic discovery of extractors via gen_extractors and matches on IE_NAME.
+  - Supports selecting a specific test case within an extractor via an optional numeric suffix (e.g., youtube_1).
+  - Combines a single _TEST entry and a list of _TESTS entries to form the complete test suite for the chosen extractor.
+  - Errors are raised as ExtractorError with expected=True to indicate test harness expectations.
+  - The returned result is a standard URL result pointing to the test case URL, enabling use within the normal youtube-dl flow.

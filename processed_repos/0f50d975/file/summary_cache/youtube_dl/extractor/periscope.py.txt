@@ -1,0 +1,65 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/periscope.py
+
+What this file does
+- Implements YouTube-DL extractors for Periscope content.
+- Provides two main extractors:
+  - PeriscopeIE: extracts a single Periscope broadcast video.
+  - PeriscopeUserIE: extracts a user’s recent public broadcasts as a playlist.
+
+Key classes and main functionality
+- PeriscopeBaseIE (InfoExtractor)
+  - _M3U8_HEADERS: HTTP header with Referer set to https://www.periscope.tv/ to satisfy Periscope's anti-hotlinking rules.
+  - _call_api(method, query, item_id): helper to call Periscope API at https://api.periscope.tv/api/v2/{method} and return the JSON.
+  - _parse_broadcast_data(broadcast, video_id): builds a standard info dict for a broadcast:
+    - id, title (with live styling if running), timestamp, uploader/uploader_id, thumbnails, view_count, tags, is_live.
+  - _extract_common_format_info(broadcast): returns (state, width, height) for a broadcast.
+  - _add_width_and_height(f, width, height): fills in missing width/height on a format.
+  - _extract_pscp_m3u8_formats(m3u8_url, video_id, format_id, state, width, height, fatal=True):
+    - Extracts M3U8 formats using _extract_m3u8_formats.
+    - Uses m3u8_native for ended/timed_out states, otherwise m3u8.
+    - Attaches width/height when missing, and ensures http_headers include _M3U8_HEADERS on all formats.
+- PeriscopeIE (single broadcast extractor)
+  - IE_NAME/IE_DESC, _VALID_URL matching periscope.tv or pscp.tv broadcast URLs.
+  - _extract_url(webpage): utility to pull an embedded Periscope URL from an iframe in a page.
+  - _real_extract(url):
+    - Extracts broadcast_id token from URL.
+    - Calls API accessVideoPublic with broadcast_id to get stream data.
+    - Parses broadcast data to info dict via _parse_broadcast_data.
+    - Aggregates available formats across: replay, rtmp, hls, https_hls, lhls, lhlsweb.
+    - For non-rtmp formats, uses _extract_pscp_m3u8_formats to fetch HLS variants with proper headers and state handling.
+    - For RTMP, constructs a simple format dict with appropriate extension (flv for RTMP, mp4 otherwise) and width/height if missing.
+    - Sorts and assigns formats to info, then returns the info dict.
+- PeriscopeUserIE (user’s videos)
+  - _VALID_URL matches periscope.tv/{username}/ (user page).
+  - IE_NAME/IE_DESC set to Periscope user content.
+  - _TEST: includes a test for a user URL with metadata expectations; notes that many Periscope user pages have 0 videos in the last 24 hours.
+  - _real_extract(url):
+    - Extracts username from URL.
+    - Downloads the user page and parses a data-store JSON blob from a data-store attribute.
+    - Retrieves user_id and a session_id from the JSON data.
+    - Calls API getUserBroadcastsPublic with user_id and session_id to obtain broadcasts.
+    - Builds a list of broadcast_ids, constructs titles/descriptions from user data.
+    - Creates playlist entries pointing to individual Periscope broadcast URLs (https://www.periscope.tv/{username}/{broadcast_id}).
+    - Returns a playlist_result with entries, user_id as id, and the user’s title/description.
+
+Important implementation details
+- Live vs VOD handling:
+  - _parse_broadcast_data marks is_live based on state == 'running' and adjusts title with _live_title when live.
+  - _extract_pscp_m3u8_formats selects between native/m3u8 formats depending on broadcast state (ended or timed_out use native; otherwise standard m3u8).
+- Width/height propagation:
+  - Width/height are retrieved from broadcast data and are injected into format dictionaries when missing.
+- HTTP headers:
+  - All HLS-related formats are supplied with Referer header via _M3U8_HEADERS, ensuring Periscope accepts the requests.
+- Robustness:
+  - Duplicate video_url checks to avoid processing the same URL multiple times.
+  - Handles multiple format variants (replay/rtmp/hls/https_hls/lhls/lhlsweb) for a broadcast.
+- Data extraction:
+  - Uses parse_iso8601 and int_or_none for safe timestamp and integer parsing.
+  - Extracts thumbnails from image_url and image_url_small if available.
+  - Handles uploader information from either 'user_display_name' or 'username'.
+
+Tests and expectations
+- PeriscopeIE test includes a real broadcast with expected id, title, timestamp, uploader, and uploader_id, plus a skip condition for expired content.
+- PeriscopeUserIE test covers a user page, ensuring it can assemble a playlist from the user’s broadcasts and populate id/title/description.
+
+Overall, this module provides end-to-end extraction for Periscope content by interfacing with Periscope API endpoints, parsing broadcast/user data, extracting multiple video formats (including various flavors of HLS), and returning well-structured information suitable for youtube-dl.

@@ -1,0 +1,76 @@
+Concise summary of the code in ./youtube-dl/devscripts/make_lazy_extractors.py
+
+Purpose
+- Generate a single Python module that implements lazy-loading wrappers for all YouTube-DL extractors. The goal is to defer importing heavy extractor modules until actually needed, speeding up startup.
+
+What it does (high level)
+- Builds a new module file (path given as a command-line argument) that contains:
+  - A base lazy-loading infrastructure (via a template module).
+  - Lightweight wrapper classes for each real extractor that delegate to the actual extractor when used.
+  - A consolidated _ALL_CLASSES list of the wrapper class names in the same order as the real extractors.
+- Ensures correct class inheritance order so that base extractors are defined before derived ones.
+- Embeds selective method bodies (such as suitable() and _match_valid_url) from the real extractors into the wrappers, while stripping out comments.
+- Optionally compiles the generated file for Jython/Python 2.7 environments to work around JVM module limits.
+
+Key components and their roles
+- Warning and path setup
+  - Prints a warning to stderr that lazy-loading extractors is experimental.
+  - Prepends two levels up from the current file to sys.path so imports of youtube_dl modules succeed.
+
+- File handling
+  - lazy_extractors_filename = sys.argv[1]
+  - Removes any existing target file; on Python 2 also removes stray .pyc remnants.
+
+- Helpers and templates
+  - module_template: loaded from devscripts/lazy_load_template.py (the base lazy-loading infrastructure).
+  - get_source(m): returns the source of a function/method/class with comments stripped (regex removes lines starting with #).
+  - module_contents: initial list containing the module template, cleaned sources for InfoExtractor.suitable and InfoExtractor._match_valid_url, a placeholder LazyLoadSearchExtractor class, and an extra import for parse_qs and variadic (needed for suitable methods).
+
+  - ie_template: template used to define a wrapper class for an extractor, including:
+    - class name
+    - bases (mapped to LazyLoadExtractor/LazyLoadSearchExtractor or the corresponding real base names)
+    - _VALID_URL and _module attributes
+
+  - make_valid_template: adds a classmethod _make_valid_url that returns a valid URL, used when an extractor defines a _make_valid_url.
+
+Functions and logic
+- get_base_name(base)
+  - Maps a real base class to the appropriate lazy wrapper name:
+    - InfoExtractor -> 'LazyLoadExtractor'
+    - SearchInfoExtractor -> 'LazyLoadSearchExtractor'
+    - otherwise uses base.__name__
+
+- build_lazy_ie(ie, name)
+  - Constructs the wrapper class code for a given extractor class (ie) with the given name:
+    - Uses ie_template to declare class name, bases, _VALID_URL, and _module.
+    - If the extractor overrides suitable() (i.e., not the same as InfoExtractor.suitable), embeds the source of that method via get_source.
+    - If the extractor defines _make_valid_url, appends the _make_valid_url classmethod code.
+
+- Ordering and base-class resolution
+  - Extractor classes are taken from _ALL_CLASSES (from youtube_dl.extractor).
+  - A sorting pass determines an order (ordered_cls) such that all base classes appear before their subclasses:
+    - Repeatedly scan classes, place a class only when all of its bases are already in ordered_cls.
+    - If a base is not yet in the list and is not a known allowed base, insert the base earlier in the list.
+    - Special edge case: if a base has the name 'GenericIE', the script exits (safety guard).
+  - After the loop, append the last class _ALL_CLASSES[-1].
+
+- Generation of the final module
+  - For each extractor in ordered_classes, call build_lazy_ie and append the generated code to module_contents.
+  - Collect the names of the wrappers corresponding to the real extractors into names, then append a line that defines _ALL_CLASSES = [Name1, Name2, ...].
+  - Join all parts with newlines to form module_src.
+  - Write module_src to lazy_extractors_filename.
+
+- Optional Jython/Python 2.7 compilation workaround
+  - If running on Jython (Java platform) with Python 2.7, attempts to precompile the generated module using python2.7 -m py_compile to satisfy JVM module limits.
+  - Silent on failure.
+
+Important implementation details
+- The code embeds only necessary parts of extractor methods (e.g., suitable and _match_valid_url) by extracting source with get_source and stripping comments, preserving behavior while avoiding extraneous comments.
+- The wrapper classes reference the real extractor module via the _module attribute, enabling lazy loading of the actual extractor when invoked.
+- _VALID_URL is preserved from the real extractor (if defined) to keep correct URL matching behavior.
+- If an extractor defines _make_valid_url, the generated wrapper provides a corresponding classmethod to reconstruct the valid URL, supporting dynamic URL validation scenarios.
+- The process ensures the generated module has a self-contained _ALL_CLASSES list reflecting the real extractors in the same lazy-wrapped order.
+- The script relies on the repository structure (e.g., devscripts/lazy_load_template.py) and utility functions read_file/write_file to assemble and write the output.
+
+In short
+- This script creates a single generated module that provides lazy-loading wrapper classes for all YouTube-DL extractors. It carefully preserves essential bits of each extractor’s behavior (such as suitability checks and URL validation), orders classes to respect inheritance, and writes a final module that enables on-demand importing of heavy extractor modules to optimize startup time. It includes a small compatibility step for Jython/Python 2.7 environments.

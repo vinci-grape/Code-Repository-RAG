@@ -1,0 +1,93 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/aes.py
+
+Overview
+- Pure-Python AES implementation with support for ECB, CBC, and CTR modes, plus PKCS#7 padding.
+- Operates on blocks as lists of integers (0-255) and uses a 16-byte block size.
+- Includes full key expansion (AES-128/192/256), block cipher rounds, and finite-field operations (S-boxes, MixColumns, ShiftRows).
+- Provides a specific helper for decrypting Base64-encoded text with a password using a counter (CTR) mode.
+
+Key components
+
+Constants and helpers
+- BLOCK_SIZE_BYTES = 16
+- SBOX, SBOX_INV: AES S-box and inverse
+- RCON: Round constants for key expansion
+- MIX_COLUMN_MATRIX and MIX_COLUMN_MATRIX_INV: matrices for MixColumns and its inverse
+- Rijndael tables: MIX, LOG, and other precomputed tables for finite-field operations
+- Sub-functions: sub_bytes, sub_bytes_inv, rotate, key_schedule_core, xor, rijndael_mul, mix_column, mix_columns, mix_columns_inv, shift_rows, shift_rows_inv, inc
+
+Public API (exported)
+- __all__ = ['aes_encrypt', 'key_expansion', 'aes_ctr_decrypt', 'aes_cbc_decrypt', 'aes_decrypt_text']
+
+Main functionality
+
+1) Padding
+- pkcs7_padding(data)
+  - Pads a list of bytes to a 16-byte boundary using PKCS#7 rules.
+
+2) Block encryption/decryption (AES core)
+- aes_encrypt(data, expanded_key)
+  - Encrypts a single 16-byte block using AES with the provided expanded key.
+  - Process: initial AddRoundKey, then for each round: SubBytes, ShiftRows, (MixColumns except final round), AddRoundKey.
+
+- aes_decrypt(data, expanded_key)
+  - Decrypts a single 16-byte block using AES with the expanded key.
+  - Process: inverse rounds: AddRoundKey, (Inverse MixColumns and Inverse ShiftRows and Inverse SubBytes in reverse order), final AddRoundKey.
+
+- key_expansion(data)
+  - Generates the expanded key (176/208/240 bytes) for AES-128/192/256 from the cipher key.
+  - Uses AES key schedule core with S-box, RCON, and XOR with previous words.
+  - Supports 16/24/32-byte input keys.
+
+- Helper routines used by encryption/decryption
+  - sub_bytes / sub_bytes_inv: apply S-box / inverse S-box
+  - rotate: rotate a 4-byte list left by one
+  - xor: element-wise XOR of two equal-length lists
+  - key_schedule_core: applies rotation, SubBytes, and RCON to a 4-byte word
+
+3) Modes of operation
+
+- aes_ecb_encrypt(data, key)
+  - Pads input using PKCS#7, then encrypts each 16-byte block independently with AES-128/192/256 depending on key length, returning concatenated ciphertext.
+
+- aes_cbc_encrypt(data, key, iv)
+  - CBC mode with PKCS#7 padding.
+  - For each block: pad to 16 bytes if needed, XOR with previous ciphertext (or IV for first block), then encrypt.
+  - Updates previous_cipher_block with the resulting ciphertext block.
+
+- aes_cbc_decrypt(data, key, iv)
+  - CBC mode decryption.
+  - For each block: decrypt block, then XOR with previous ciphertext block (IV for first block).
+  - Returns plaintext truncated to original data length (as written, it slices to len(data)).
+
+4) Counter mode with password-based key derivation
+
+- aes_ctr_decrypt(data, key, counter)
+  - Decrypts data in CTR mode.
+  - For each 16-byte block: obtain next counter block, encrypt it with AES (using the expanded key), and XOR with the ciphertext block.
+  - Handles partial final block by padding, then truncates to original data length.
+
+- aes_decrypt_text(data, password, key_size_bytes)
+  - Specialized helper to decrypt Base64-encoded text using a password.
+  - Steps:
+    - data: Base64 string decoded to a list of bytes.
+    - password: UTF-8 encoded to a byte list.
+    - Key derivation: derive a key of length key_size_bytes by encrypting a 16-byte key (padded from password) with AES using the initial key expansion; replicate to fill key_size_bytes.
+    - Nonce: first 8 bytes of the decoded data.
+    - Cipher: remaining bytes after the nonce.
+    - Counter: an object whose next_value returns the current counter block and increments the internal counter (initially nonce + zero padding to 16 bytes).
+    - Decrypts via aes_ctr_decrypt(cipher, key, Counter()) and returns plaintext as bytes.
+
+Dependencies and data formats
+- Uses compat_b64decode to decode Base64 strings, and bytes_to_intlist / intlist_to_bytes to convert between byte strings and lists of integers 0-255.
+- Core operations are performed on lists of integers, not Python bytes objects, for all AES steps.
+
+Implementation details worth noting
+- Padding: PKCS#7 is applied for ECB and CBC encryptions; decryptors simply truncate to the original data length.
+- CTR mode: implemented with a Counter object pattern providing next_value, enabling streaming decryption block-by-block.
+- Key expansion: supports 128/192/256-bit keys via key_expansion and derived expanded keys used by aes_encrypt/aes_decrypt.
+- Self-contained AES primitives: all essential AES steps are implemented in pure Python (SubBytes, ShiftRows, MixColumns, and their inverses) with precomputed tables (SBOX, SBOX_INV, MIX/MATRIX_INV, etc.).
+- API surface: the module exposes high-level functions aes_encrypt, aes_ctr_decrypt, aes_cbc_decrypt, and aes_decrypt_text, along with key_expansion for obtaining the expanded key.
+
+In short
+- This module implements a complete, self-contained AES codec in Python with ECB/CBC/CTR modes, PKCS#7 padding, key expansion for 128/192/256-bit keys, and a specialized CTR-based decrypt_text helper that derives a key from a password to perform decryption. It operates on integer lists representing bytes and relies on a Base64/byte conversion layer from other utility modules.

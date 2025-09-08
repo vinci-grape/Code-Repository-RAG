@@ -1,0 +1,67 @@
+Here is a concise but comprehensive summary of the file at ./youtube-dl/CONTRIBUTING.md.
+
+Purpose
+- This document provides contributor guidelines for youtube-dl: how to report issues, how to develop and contribute new extractors, and the coding conventions to follow.
+
+What the file covers
+
+1) Issue reporting guidelines
+- Emphasizes including full verbose output from youtube-dl when reproducing bugs (the -v output).
+- Advises including an exact example URL for site support requests.
+- Recommends verifying you’re on the latest version with youtube-dl -U.
+- Suggests diagnostic options for hard-to-diagnose issues (e.g., --dump-pages, --call-home, --write-pages with logs).
+- Stresses providing complete debugging information; without it, bug reports are often hard to reproduce.
+
+2) Developer workflow and testing
+- Describes how to run youtube-dl for development without building:
+  - python -m youtube_dl
+- Lists test execution options:
+  - python -m unittest discover
+  - python test/test_download.py
+  - nosetests
+- Points to how to run extractor-specific tests and the general approach for adding tests.
+
+3) Adding support for a new site (step-by-step template)
+- Presents a concrete template for a new extractor file (yourextractor.py) using a class YourExtractorIE that inherits from InfoExtractor.
+- Shows a minimal _VALID_URL, a _TEST dict, and a _real_extract method with basic parsing (example code for title, etc.).
+- Instructions to register the new extractor by adding it to youtube_dl/extractor/extractors.py (class must end with IE).
+- Provides a hands-on, step-by-step workflow (fork, clone, create branch, add files, run tests, style checks, etc.) with illustrative git commands.
+- Emphasizes starting with a simple extractor and gradually expanding it with tests.
+
+4) Youtube-dl coding conventions
+- Highlights mandatory and optional metafields (info dict):
+  - Mandatory: id, title, and either url or formats.
+  - Optional fields should be tolerant to missing data and future changes.
+- Provides guidance on robust data extraction:
+  - Use fallbacks when possible (e.g., meta data plus og:title).
+  - Use safe extraction patterns with fatal=False or default values to avoid breaking on missing data.
+  - Example patterns for optional fields and fallbacks.
+- Regex and data handling best practices:
+  - Don’t capture unused groups; only include capturing groups you actually use.
+  - Write flexible, resilient regexes (tolerate quote differences, minor attribute variations).
+  - Prefer non-capturing groups when the captured data isn’t used.
+- Long line policy:
+  - Avoid overly long lines; keep lines under ~80 characters when possible without harming readability.
+- Inline values vs. extracted constants:
+  - Avoid over-abstracting; inline simple expressions when it improves readability.
+- Collapse fallbacks:
+  - Demonstrates using a list of patterns for fallbacks (e.g., multiple sources for a field) to keep code concise.
+- Trailing parentheses:
+  - Move trailing parentheses after the last argument to keep code tidy.
+- Use of utility parsing helpers (from youtube_dl/utils.py):
+  - int_or_none, float_or_none, url_or_none, try_get, unified_strdate, unified_timestamp, parse_filesize, parse_count, parse_resolution, parse_duration, parse_age_limit, etc.
+  - Examples show how to safely extract and convert data using these helpers.
+- Examples provided:
+  - Safe extraction from parsed JSON with try_get.
+  - Optional fields using dict.get or fatal=False / default=None.
+
+5) Practical guidance and examples
+- Includes concrete examples illustrating:
+  - Safe extraction of optional fields from JSON.
+  - Use of fallbacks combining multiple sources (e.g., meta + og:title).
+  - Relaxed regex patterns with group handling.
+  - Safe conversion and parsing helpers for numeric, date, and size fields.
+- Emphasizes future-proofing extractors to minimize breakage from host changes.
+
+Overall takeaway
+- CONTRIBUTING.md is a comprehensive guide for contributing to youtube-dl, with a strong emphasis on: robust, future-proof extractor development; practical testing procedures; a ready-to-use extractor template; and detailed coding conventions aimed at maintaining stability across changes in source sites and layouts. It balances practical steps (how to add a site) with principled guidelines (how to write resilient, maintainable extractors).

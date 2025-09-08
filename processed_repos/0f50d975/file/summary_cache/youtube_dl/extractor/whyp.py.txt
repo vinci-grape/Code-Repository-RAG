@@ -1,0 +1,60 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/whyp.py
+
+What it does
+- Implements an InfoExtractor for tracks on whyp.it (WhypIE).
+- Extracts audio track information from a track page, returning a standard YouTube-dl info dict.
+
+Key components
+- Class: WhypIE(InfoExtractor)
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?whyp\.it/tracks/(?P<id>\d+)'
+  - Matches track pages like https://www.whyp.it/tracks/18337
+- Data source: _real_extract pulls embedded Nuxt data from the page via _download_webpage and _search_nuxt_data, then uses data['rawTrack'] as the source of metadata.
+
+Main functionality
+- Extracts:
+  - url: data['audio_url'] (the direct audio file)
+  - id: the numeric track id from the URL
+  - title: data['title']
+  - description: data['description']
+  - duration: data['duration'] cast to float via T(float_or_none)
+  - uploader: data['user']['username']
+  - uploader_id: data['user']['id'] cast to string via T(str_or_none)
+  - thumbnail: data['artwork_url'] converted to a proper URL via T(url_or_none)
+- Static/required fields:
+  - ext: 'mp3'
+  - vcodec: 'none' (audio-only)
+  - http_headers: {'Referer': 'https://whyp.it/'} (helps hotlinking protections)
+- Merging strategy:
+  - Uses merge_dicts to combine:
+    - Base dict with 'url' and 'id'
+    - Mapped metadata from data via traverse_obj
+    - Static fields (ext, vcodec, headers)
+  - rev=True to control precedence of overlapping keys
+
+Implementation details
+- Uses utilities:
+  - float_or_none, str_or_none for conversions
+  - T for type conversion wrappers
+  - traverse_obj to map nested JSON-like data into flat dict keys
+  - url_or_none to validate/normalize URLs
+  - merge_dicts to combine dictionaries with controlled precedence
+- Data access pattern:
+  - data = self._search_nuxt_data(webpage, unique_id)['rawTrack']
+  - Then maps:
+    - 'title': 'title'
+    - 'description': 'description'
+    - 'duration': ('duration', T(float_or_none))
+    - 'uploader': ('user', 'username')
+    - 'uploader_id': ('user', 'id', T(str_or_none))
+    - 'thumbnail': ('artwork_url', T(url_or_none))
+
+Tests
+- _TESTS includes:
+  - A real example with URL https://www.whyp.it/tracks/18337/home-page-example-track-b4kq7
+    - md5 of the audio URL provided
+    - info_dict with expected url, id, title, description regex, ext, duration, uploader, uploader_id, and thumbnail
+  - A second test with only_matching for https://www.whyp.it/tracks/18337 to ensure the URL pattern matches even if extraction isn’t run.
+
+Notes
+- The extractor targets Nuxt-based pages and relies on embedded data under the 'rawTrack' key.
+- It outputs an mp3/audio-only stream with a fixed Referer header to satisfy server checks.

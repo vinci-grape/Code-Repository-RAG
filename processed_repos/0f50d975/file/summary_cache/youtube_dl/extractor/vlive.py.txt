@@ -1,0 +1,97 @@
+Here is a concise but comprehensive summary of the code in youtube-dl/youtube_dl/extractor/vlive.py.
+
+Overview
+- Implements extractors for the V LIVE platform (vlive.tv).
+- Main classes:
+  - VLiveBaseIE: shared base for V LIVE extractors, holds APP_ID.
+  - VLiveIE: handles individual video pages (VOD and LIVE) and login state.
+  - VLivePostIE: handles post pages that may contain one or more videos (attachments or SOS/V segments).
+  - VLiveChannelIE: handles channel pages, listing videos within a channel.
+- Uses a LOGIN flow when credentials are provided to access restricted content.
+
+Key implementation details
+
+1) VLiveBaseIE
+- Inherits from NaverBaseIE.
+- Defines _APP_ID used for API calls to V LIVE services.
+
+2) VLiveIE (main video extractor)
+- IE_NAME: 'vlive', and _VALID_URL matches vlive.tv/video or vlive.tv/embed URLs with a numeric ID.
+- _NETRC_MACHINE = 'vlive' supports netrc login if configured.
+- _real_initialize: calls _login() to ensure session credentials are available before extraction.
+- _login():
+  - Retrieves email and password via _get_login_info().
+  - If credentials provided, checks login status via /auth/loginInfo; if not logged in, performs login by posting to /auth/email/login with credentials.
+  - Raises ExtractorError if login fails.
+- _call_api(path_template, video_id, fields=None):
+  - Builds a query with appId, gcc='KR', platformType='PC' and optional fields.
+  - Calls the API at https://www.vlive.tv/globalv-web/vam-web/ + path_template % video_id.
+  - Handles HTTP 403 by raising a login-required error with the server message.
+- _real_extract(url):
+  - Extracts video_id from URL.
+  - Fetches post data via post/v1.0/officialVideoPost-%s with fields including author, channel, officialVideo.
+  - Builds a common field set from the post and video data:
+    - title, creator, channel, channel_id, duration, view_count, like_count, comment_count.
+  - Branches on video_type:
+    - VOD:
+      - Fetch inkey via video/v1.0/vod/%s/inkey and vodId.
+      - Merge common fields with results of _extract_video_info(video_id, vod_id, inkey).
+    - LIVE:
+      - If status == ON_AIR:
+        - Fetch playInfo via old/v3/live/%s/playInfo and extract adaptiveStreamUrl.
+        - Build formats via _extract_m3u8_formats, sort formats, and return a live info dict with:
+          - title (possibly reformatted with _live_title), id, formats, is_live=True.
+      - If ENDED/RESERVED/CANCEL states: raise ExtractorError with user-friendly messages.
+      - Other statuses: raise generic error.
+
+Notes on live processing
+- Live extraction uses HLS/m3u8 formats and marks the result as is_live.
+- Uses _live_title(video['title']) to derive a user-friendly title for live streams.
+
+3) VLivePostIE (post pages)
+- IE_NAME: 'vlive:post', _VALID_URL matches vlive.tv/post/<id> with id like "1-20088044".
+- _real_extract(url):
+  - Fetches post data via post/v1.0/post-%s with attachments, officialVideo, and title.
+  - If post contains officialVideo.videoSeq, redirects to the corresponding video page (VLiveIE) using that sequence.
+  - Otherwise, builds a playlist from post attachments:
+    - Iterate over attachments.video entries.
+    - For each video entry:
+      - If uploadType == 'SOS':
+        - Fetch download URLs via SOS endpoint (fvideo/sosPlayInfo).
+        - Build formats list from the download map, where format_id is the key and height derived from the numeric part of the key.
+      - If uploadType == 'V':
+        - Use uploadInfo.videoId as vod_id; fetch inKey via fvideo/v1.0/fvideo-sosPlayInfo or inKey endpoint.
+        - Use _extract_video_info(video_id, vod_id, inkey) to build the entry.
+      - Name each entry as "<post title>_part<idx>" and aggregate into a playlist.
+  - Returns a playlist_result with the assembled entries, post_id, title, and optional description.
+
+4) VLiveChannelIE (channel pages)
+- IE_NAME: 'vlive:channel', _VALID_URL matches channel URLs (channels.vlive.tv or vlive.tv/channel/<code>).
+- _call_api(path, channel_key_suffix, channel_value, note, query):
+  - Builds a request to http://api.vfan.vlive.tv/vproxy/channelplus/ + path with query parameters:
+    - app_id (APP_ID)
+    - channel{Code, etc} depending on suffix
+  - Returns the 'result' field from the API response.
+- _real_extract(url):
+  - Decodes channel code to channelSeq via decodeChannelCode endpoint.
+  - Iterates pages via getChannelVideoList with maxNumOfRows=100 and pageNo increments.
+  - Extracts channelName from first page if not already known.
+  - For each video in videoList, collects videoSeq and converts to a normal URL: http://www.vlive.tv/video/<videoSeq>, using VLiveIE as the extractor for each item.
+  - Builds a playlist_result with the aggregated entries and channel details.
+
+Testing and data expectations
+- _TESTS provide example URLs and expected metadata:
+  - VLiveIE tests for video 1326 and others, asserting fields like id, ext, title, creator, view_count, subtitles, uploader_id, etc.
+  - Some tests require skip_download or indicate CH+ restrictions.
+  - VLivePostIE tests verify single-video posts and multi-part playlists.
+  - VLiveChannelIE tests verify channel code decoding and playlist generation (e.g., 110+ videos).
+
+Important usage notes
+- Login is optional but necessary for access to some content; _login() respects missing credentials by skipping login.
+- API calls include proper Referer headers and return detailed JSON used to build final results.
+- Error handling covers common states for live/broadcasts and restricted content, with informative messages for users.
+
+In short
+- The file implements a full set of V LIVE extractors: single videos (VOD and LIVE), posts with multiple attachments, and channels with paginated video lists.
+- It uses a common API helper (_call_api) and specialized endpoints to gather metadata, formats (including m3u8 for live streams), and playlist composition.
+- It includes robust login handling, error messages for various broadcast states, and tests demonstrating expected outputs.

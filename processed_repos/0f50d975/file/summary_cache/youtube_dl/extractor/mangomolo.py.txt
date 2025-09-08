@@ -1,0 +1,74 @@
+concisely but comprehensively:
+
+Summary of purpose
+- This file implements YouTube-DL extractors for Mangomolo, handling both on-demand video streams and live streams. It uses Mangomolo’s v1 API to locate the media manifest (M3U8/Wowza) and exposes common video metadata (id, title, uploader, duration) along with formats.
+
+Key classes
+- MangomoloBaseIE (InfoExtractor)
+  - Base extractor for Mangomolo, provides the shared extraction flow.
+  - _BASE_REGEX: matches Mangomolo analytics embedding or player v1 endpoints.
+  - _get_real_id(page_id): default identity passthrough (can be overridden).
+  - _real_extract(url): core extraction logic:
+    - Derives page_id from URL, possibly transformed by _get_real_id.
+    - Downloads page data from https://player.mangomolo.com/v1/{TYPE}?{query}, where TYPE is provided by subclasses and query is the portion after '?' from the original URL.
+    - Extracts hidden form inputs (e.g., userid, duration) via _hidden_inputs for metadata.
+    - Chooses m3u8_entry_protocol: 'm3u8' for live streams, 'm3u8_native' for on-demand.
+    - Finds a format URL either:
+      - a direct M3U8 manifest (playlist.m3u8) referenced by file/src, or
+      - an RTSP URL found in an anchor tag.
+    - Uses _extract_wowza_formats(format_url, page_id, m3u8_entry_protocol, ['smil']) to produce formats.
+    - Sorts formats with _sort_formats.
+    - Returns a dictionary with:
+      - id: page_id
+      - title: live title via _live_title(page_id) if live, else page_id
+      - uploader_id: userid from hidden inputs
+      - duration: duration from hidden inputs (int)
+      - is_live: whether this is a live stream
+      - formats: the extracted formats
+
+- MangomoloVideoIE (inherits MangomoloBaseIE)
+  - _TYPE = 'video'
+  - IE_NAME: 'mangomolo:video'
+  - _VALID_URL: base Mangomolo regex + video-specific query including id
+  - _IS_LIVE = False
+
+- MangomoloLiveIE (inherits MangomoloBaseIE)
+  - _TYPE = 'live'
+  - IE_NAME: 'mangomolo:live'
+  - _VALID_URL: base Mangomolo regex + live/index query including channelid
+  - _IS_LIVE = True
+  - _get_real_id(self, page_id): decodes a base64-encoded, URL-encoded channel id:
+    - page_id is URL-unquoted, then base64-decoded, then UTF-8 decoded to string
+
+Important implementation details
+- URL handling and identifiers
+  - The base regex matches two Mangomolo entry points: admin analytics embed and player v1 endpoints.
+  - For video, the id is taken directly from the URL and passed through.
+  - For live, the id is encoded in the channelid parameter; _get_real_id decodes it from base64 after URL-unquoting to obtain the real channel id.
+
+- API interaction
+  - The extractor constructs a request to https://player.mangomolo.com/v1/{TYPE}?{query}, where TYPE is 'video' or 'live', and the query is the portion of the original URL after '?'.
+  - The page content is parsed for hidden inputs to gather uploader (userid) and duration.
+
+- Format extraction
+  - The extractor searches the page for a format URL in two ways:
+    - A direct M3U8 manifest: either file: "https://.../playlist.m3u8" or src: "https://.../playlist.m3u8"
+    - An RTSP URL found in an anchor tag: href="rtsp://..."
+  - The found URL is passed to _extract_wowza_formats with:
+    - page_id as the video id
+    - m3u8_entry_protocol set to 'm3u8' for live or 'm3u8_native' for on-demand
+    - A list containing 'smil' (likely for extra formats or sources)
+  - Formats are then sorted via _sort_formats.
+
+- Metadata and output
+  - Title: for live streams, uses _live_title(page_id); otherwise uses the page_id as the title.
+  - uploader_id: pulled from hidden input named userid.
+  - duration: parsed via int_or_none from hidden input named duration.
+  - is_live: derived from _IS_LIVE in the concrete class.
+  - id, formats: as described above.
+
+Usage patterns
+- Video example URL would resemble: base_regex + "video?...&id=12345"
+- Live example URL would resemble: base_regex + "live?..." or "index?..." with channelid containing a base64-encoded id.
+
+Overall, the code provides a clean separation between the common extraction path (MangomoloBaseIE) and the two specific entry points (video and live), handling ID decoding for live channels and assembling a consistent set of formats and metadata via Mangomolo’s v1 API.

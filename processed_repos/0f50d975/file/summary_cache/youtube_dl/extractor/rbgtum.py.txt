@@ -1,0 +1,67 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/rbgtum.py
+
+What it does
+- Provides two extractors for the RBG-TUM live streaming site:
+  - RbgTumIE: extracts a single video from the live page /w/{id}.
+  - RbgTumCourseIE: extracts a course page and builds a playlist of all individual lecture video pages linked from that course.
+
+Key classes and main methods
+- RbgTumIE (InfoExtractor)
+  - _VALID_URL: https://live.rbg.tum.de/w/(?P<id>.+)
+  - _real_extract(url):
+    - video_id = captured id from URL.
+    - Downloads the video page HTML.
+    - m3u8 = first matching https://... .m3u8 URL found in the page.
+    - title = text inside the first <h1>...</h1>.
+    - series = text extracted from the <title> tag, allowing for an optional “TUM-Live |” prefix.
+    - Formats are built from the m3u8 playlist via _extract_m3u8_formats with:
+      - container: mp4
+      - entry_protocol: m3u8_native
+      - m3u8_id: 'hls'
+    - Formats are sorted with _sort_formats.
+    - Returns a dict: id, title, series, formats.
+  - _TESTS: 3 test cases covering:
+    - Combined view (Lecture with video + slides)
+    - Presentation only
+    - Camera only
+  - Key implementation details:
+    - Uses _html_search_regex to extract m3u8 URL, title, and series.
+    - Uses _extract_m3u8_formats for HLS/m3u8-based video formats.
+    - Returns metadata fields: id, title, series, formats.
+
+- RbgTumCourseIE (InfoExtractor)
+  - _VALID_URL: https://live.rbg.tum.de/course/(?P<id>.+)
+  - _real_extract(url):
+    - course_id = captured id from URL.
+    - Downloads the course page HTML.
+    - lecture_series_title = text inside the first <h1>...</h1>.
+    - Scans the page for lecture links with a regex that finds href="/w/{...}" but excludes trailing /cam, /pres, /chat.
+    - For each found lecture URL, creates a result that delegates extraction to RbgTumIE by using:
+      self.url_result('https://live.rbg.tum.de/w/' + lecture_url, ie=RbgTumIE.ie_key())
+    - Returns a playlist via playlist_result(lecture_urls, course_id, lecture_series_title).
+  - _TESTS: 2 test cases for course pages, verifying playlist_count and basic info.
+  - Key implementation details:
+    - Aggregates a list of lecture pages into a single playlist.
+    - Delegates actual video extraction to RbgTumIE, ensuring consistent handling of individual video formats and metadata.
+    - Uses a regex with a negative lookbehind to avoid non-video links (e.g., /cam, /pres, /chat).
+
+Important implementation details and behavior
+- URL handling:
+  - Single video: https://live.rbg.tum.de/w/{id}
+  - Course page: https://live.rbg.tum.de/course/{id}
+  - From a course, the extractor collects links to individual videos under /w/ without ending in /cam, /pres, or /chat.
+- Video formats:
+  - Based on an m3u8 playlist found on the video page.
+  - Uses HLS with mp4 container and native HLS handling (entry_protocol='m3u8_native').
+  - Formats are stored under 'formats' after _sort_formats.
+- Metadata:
+  - Title is extracted from an <h1> tag.
+  - Series/title information is extracted from the page title tag with a regex that tolerates optional prefixes like "TUM-Live |".
+- Playlists:
+  - A course page yields a playlist of individual video entries, each processed by RbgTumIE.
+  - The playlist has an id equal to the course id and a title derived from the <h1> in the course page.
+- Tests:
+  - RbgTumIE tests cover combined view, presentation-only, and camera-only videos.
+  - RbgTumCourseIE tests verify playlist extraction and basic metadata (title, id, and count).
+
+Overall, the code adds support for extracting both individual video streams and course-based playlists from the RBG-TUM live site, delegating per-video extraction to a dedicated extractor and aggregating multiple videos into a playlist for courses.

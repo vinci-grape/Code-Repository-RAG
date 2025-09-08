@@ -1,0 +1,70 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/ximalaya.py.
+
+Overview
+- Implements two extractors for the Ximalaya (喜马拉雅FM) site:
+  - XimalayaIE: extracts individual tracks.
+  - XimalayaAlbumIE: extracts albums, yielding each track as a separate XimalayaIE entry.
+- Base class XimalayaBaseIE sets a geo-restriction: CN.
+- Focus is on main functionality, key classes/functions, and important implementation details (URLs, formats, thumbnails, descriptions, pagination).
+
+Key classes
+- XimalayaBaseIE(InfoExtractor)
+  - Provides GEO_COUNTRIES = ['CN'].
+- XimalayaIE(XimalayaBaseIE)
+  - IE_NAME: 'ximalaya'
+  - IE_DESC: '喜马拉雅FM'
+  - _VALID_URL: matches track page URLs like
+    - http(s)://(www.|m.)ximalaya.com/<uid>/sound/<id>
+  - _USER_URL_FORMAT: template for uploader URL
+  - _TESTS: three tests covering desktop and mobile URLs, with expected info_dict fields (id, ext, uploader, uploader_id, uploader_url, title, description, thumbnails, categories, duration, view_count, like_count)
+  - _real_extract(url):
+    - Determines if URL is mobile (contains 'm.ximalaya') and selects scheme (http/https).
+    - Extracts audio_id from URL, downloads the track page.
+    - Downloads track info JSON from scheme://m.ximalaya.com/tracks/<id>.json.
+    - Builds formats from play_path_32 (24k) and play_path_64 (64k) if present.
+    - Collects thumbnails from all keys starting with 'cover_url' (adds width/height for cover_url_142).
+    - uploader_id from audio_info.uid; uploader URL via _USER_URL_FORMAT if present.
+    - Title, description (two-site specific regexes for mobile/desktop), with a fallback to a rich_intro file if the description is not found on the page.
+    - Categories from category_name or category_title in audio_info.
+    - Duration, view_count (play_count), like_count (favorites_count).
+    - Returns a dict with id, uploader, uploader_id, uploader_url, title, thumbnails, description, categories, duration, view_count, like_count, and formats.
+- XimalayaAlbumIE(XimalayaBaseIE)
+  - IE_NAME: 'ximalaya:album'
+  - IE_DESC: '喜马拉雅FM 专辑'
+  - _VALID_URL: matches album URLs like
+    - http(s)://(www.|m.)ximalaya.com/<uid>/album/<id>
+  - _TEMPLATE_URL: album page template used to fetch the initial page
+  - _BASE_URL_TEMPL: base URL template used to build full URLs
+  - _LIST_VIDEO_RE: regex to extract individual track links within an album page
+  - _TESTS: tests for an album URL, expecting title and id, and playlist_count
+  - _real_extract(url):
+    - Determines scheme (http/https).
+    - Extracts uid and playlist_id from URL using _VALID_URL.
+    - Downloads the album page via the template URL.
+    - Extracts album title (if present) and returns a playlist result built from entries and the title.
+  - _entries(page, playlist_id, uid):
+    - Iterates over pages of the album using a loop (pagination supported).
+    - For each page, yields entries from _process_page(html, uid).
+    - Detects next page via a rel="next" link; follows and continues until no next link.
+  - _process_page(html, uid):
+    - Looks for the section containing album_soundlist and uses _LIST_VIDEO_RE to find each track entry.
+    - Yields a URL result pointing to the track URL, with track id and title, using XimalayaIE.ie_key() as the extractor.
+
+Important implementation details
+- Formats construction: from audio_info JSON, collect play_path_32 (24k) and/or play_path_64 (64k) into a list of formats with format_id ('24k'/'64k') and the corresponding URL.
+- Thumbnails extraction: collects all keys starting with 'cover_url', including special handling for 'cover_url_142' by adding width and height (180).
+- Description handling:
+  - Mobile: attempts to extract from a <section class="content">...</section>.
+  - Desktop: attempts to extract from a <div class="rich_intro">...</div>.
+  - If not found, falls back to downloading a rich_intro page/file and stripping whitespace.
+- Uploader info: uses 'nickname' for uploader name and 'uid' for uploader_id; uploader_url is built from _USER_URL_FORMAT.
+- Categories: uses either category_name or category_title from the track JSON, filtering out None.
+- Album pagination: _entries iterates through pages by following next links until none remain.
+- Album-to-track mapping: entries yield as URL results pointing to XimalayaIE (ie_key()), effectively aggregating individual track extractors into a playlist.
+- GEO restriction: only allows extraction within CN, via XimalayaBaseIE.
+
+What this enables
+- Downloading individual Ximalaya tracks with full metadata (title, uploader, thumbnails, description, duration, views/likes, and audio formats).
+- Downloading Ximalaya albums as playlists, with each track resolved via the track extractor, and proper handling of pagination.
+
+In short, the file provides robust extraction support for both single tracks and albums on Ximalaya, including formats, thumbnails, descriptions, uploader info, categories, and pagination.

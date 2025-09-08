@@ -1,0 +1,85 @@
+Here is a concise, feature-focused summary of this code file.
+
+Purpose
+- Implement YouTube-DL extractors for Laola1.tv and related sites (Laola1.tv, EHFTV, and ITTF video pages).
+- Support both standard video pages and embed pages, handling live streams and premium/abo token flows to obtain Akamai/HD streaming formats.
+
+Key classes
+1) Laola1TvEmbedIE (InfoExtractor)
+- IE_NAME: laola1tv:embed
+- _VALID_URL: Matches Laola1 embed URLs with videoid parameter.
+- Main flow:
+  - Extract videoid from the embed URL.
+  - Download the page and parse flashvars from the page to obtain various parameters (streamid, partnerid, portalid, sprache, premium, timestamp, auth, etc.).
+  - Fetch HD metadata via http://www.laola1.tv/server/hd_video.php using those flashvar values.
+  - Build a token URL:
+    - If premium is present, use the URL from metadata and append timestamp and auth.
+    - Otherwise, prepare a data payload (data_abo) from req_liga_abos and request a token from the stream-access API endpoint to get the token URL.
+  - Retrieve the token document (XML), ensure status is 0, then construct the final token URL with hdnea using the token’s url and auth.
+  - Fetch Akamai formats using _extract_akamai_formats on the token URL, then sort formats.
+- Output:
+  - video id, title (live titles are prefixed via _live_title if is_live), uploader, upload_date, is_live, and the list of formats.
+
+2) Laola1TvBaseIE (Laola1TvEmbedIE subclass)
+- Provides common logic for Laola1.tv pages that contain video configurations.
+- _extract_video(url):
+  - Get display_id from URL and download the page.
+  - If the page indicates a finished livestream, raise ExtractorError.
+  - Parse a JSON-like conf object from the page (convert to proper JSON with js_to_json after removing shareurl).
+  - Obtain video_id from conf, then fetch configUrl with required query params (videoid, partnerid, language, portal).
+  - If config contains an error, raise ExtractorError.
+  - Extract video data (title, isLivestream, isLive, metaInformation, sports).
+  - Build categories from sports, and determine is_live.
+  - Obtain token_url via _extract_token_url using video_data['streamAccess'] and abo requirements.
+  - Retrieve formats via _extract_formats.
+  - Return a dict with id, display_id, title (live title if is_live), description, thumbnail, categories, formats, is_live.
+
+3) Laola1TvIE (Laola1TvBaseIE)
+- IE_NAME: laola1tv
+- _VALID_URL: Matches Laola1.tv standard video pages with an id slug.
+- _real_extract(url): Delegates to _extract_video(url) in Laola1TvBaseIE.
+
+4) EHFTVIE (Laola1TvBaseIE)
+- IE_NAME: ehftv
+- _VALID_URL: Matches ehftv.com video pages.
+- _real_extract(url): Delegates to _extract_video(url) in Laola1TvBaseIE.
+
+5) ITTFIE (InfoExtractor)
+- _VALID_URL: tv.ittf.com/video/… with a numeric id
+- _TEST: only_matching test to indicate it should map to the embed flow
+- _real_extract(url):
+  - Builds an Laola1.tv titanplayer embed URL using the ITTF video id and fixed parameters (type=V, lang=en, portal=int, customer=1024).
+  - Returns that URL as a result pointing to Laola1TvEmbedIE for extraction.
+
+Important implementation details
+- Token and format retrieval
+  - The code uses a two-stage token retrieval for streaming:
+    - Premium flow: if premium parameters are present, token URL is derived directly from hd_video metadata and augmented with timestamp/auth.
+    - ABO flow: otherwise, constructs a data payload from req_liga_abos and queries a premium stream-access endpoint to obtain a token URL, then fetches token XML and ensures status is 0.
+  - The final streaming URL is built by appending hdnea to the token’s url, using data from the token XML.
+  - Formats are fetched via _extract_akamai_formats and then sorted with _sort_formats.
+
+- Data extraction and parsing
+  - Uses various helper methods (xpath_text, xpath_element) to parse XML data from the token endpoint.
+  - Extracts video metadata from either the embed’s flashvars or from a config JSON retrieved from Laola1’s server.
+  - Live handling: title is adjusted with _live_title when is_live is True.
+  - Categories are derived from sports metadata, with fallbacks to an empty list if not present.
+
+- Error handling
+  - Token errors raise ExtractorError with the provided comment.
+  - Config errors raise ExtractorError including the extractor name for context.
+  - If a live stream has finished (for Laola1 pages), a specific ExtractorError is raised with a user-friendly message.
+
+- Compatibility and mapping
+  - ITTF pages are mapped to the Laola1 embed flow by constructing a titanplayer URL with the proper parameters, leveraging Laola1TvEmbedIE.
+  - EHFTV and Laola1TV pages share the same base extraction logic via Laola1TvBaseIE.
+
+Usage notes
+- The code is designed to support both standard pages and embedded players, handling premium and non-premium access paths.
+- It returns standard YouTube-DL info dicts: id, display_id (where applicable), title, uploader (where available), upload_date, is_live, categories, formats, and optional description/thumbnail for Laola1 pages.
+
+Overall
+- This module provides a robust integration for Laola1.tv and related networks by:
+  - Handling multiple access patterns (embed vs page), live vs VOD, and premium vs abo-based token flows.
+  - Fetching Akamai/HLS formats through tokenized URLs.
+  - Exposing consistent metadata (title, dates, categories, live status) across the supported sites.

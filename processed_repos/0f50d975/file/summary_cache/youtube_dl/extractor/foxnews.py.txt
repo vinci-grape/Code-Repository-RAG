@@ -1,0 +1,56 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/foxnews.py
+
+Overview
+- Implements two extractors for Fox News video content: FoxNewsIE (video pages) and FoxNewsArticleIE (article pages that embed videos).
+- Uses the AMP-based flow (AMPIE) to fetch and parse video metadata and formats from Fox’s video feed endpoints.
+- Handles direct video pages (video.foxnews.com, video.insider.foxnews.com, foxnews.com, foxbusiness.com) and articles that embed video players.
+
+Key classes and main functionality
+- FoxNewsIE (extends AMPIE)
+  - IE_NAME: 'foxnews'
+  - IE_DESC: 'Fox News and Fox Business Video'
+  - _VALID_URL: Captures host (video.foxnews.com, video.insider.foxnews.com, foxnews.com, foxbusiness.com) and a numeric video_id. Supports URLs like /v/VIDEO_ID and optional video_id query in video_embed.html.
+  - _extract_urls(webpage): Static helper that scans a page for iframe/amp-iframe embeds whose src points to a Fox News video embed with a video_id. Returns a list of matched embed URLs.
+  - _real_extract(url): 
+    - Extracts host and video_id from the URL using _VALID_URL.
+    - Builds a feed URL: http://HOST/v/feed/video/VIDEO_ID.js?template=fox
+    - Calls _extract_feed_info on this feed URL (inherited from AMPIE) to obtain an InfoDict with metadata and formats.
+    - Sets info['id'] to VIDEO_ID and returns the info dict.
+
+- FoxNewsArticleIE (extends InfoExtractor)
+  - IE_NAME: 'foxnews:article'
+  - _VALID_URL: Matches Fox News article URLs (excluding direct /v paths). Designed for insider.foxnews.com and standard foxnews.com article pages.
+  - _TESTS: Includes tests for a data-video-id case (direct video) and an iframe embed case; also a test for a non-video article URL (only_matching).
+  - _real_extract(url):
+    - Downloads the article webpage.
+    - Tries to locate a data-video-id attribute: data-video-id=..."ID"... via _html_search_regex.
+    - If a video_id is found, returns a URL result pointing to FoxNewsIE with http://video.foxnews.com/v/VIDEO_ID (thus delegating to FoxNewsIE for extraction).
+    - If no data-video-id is found, extracts potential video embed URLs using FoxNewsIE._extract_urls(webpage) and returns the first such URL via FoxNewsIE.ie_key(), effectively delegating to FoxNewsIE for extraction of the embedded video.
+
+Important implementation details
+- URL patterns:
+  - FoxNewsIE supports multiple Fox-branded video hosts: video.foxnews.com, video.insider.foxnews.com, foxnews.com, foxbusiness.com.
+  - FoxNewsArticleIE targets article pages (not direct video pages) and uses a separate extraction flow to locate embedded video or a direct video ID.
+- Video ID extraction:
+  - FoxNewsIE uses the URL’s captured video_id to fetch metadata from the feed endpoint: /v/feed/video/{video_id}.js?template=fox.
+  - FoxNewsArticleIE first attempts to read data-video-id from the article page; if found, constructs a FoxNews video URL to hand off to FoxNewsIE. If not found, it falls back to embedded video URLs found by scanning for iframes.
+- Feed-based extraction:
+  - The feed URL format is http://HOST/v/feed/video/{video_id}.js?template=fox.
+  - The extraction relies on the AMPIE mixin’s _extract_feed_info to return a complete InfoDict (including formats, title, description, duration, timestamps, thumbnails, etc.) based on the feed.
+  - The FoxNewsIE adds the id field explicitly to the returned info.
+- AMP/embedded support:
+  - The _extract_urls helper is designed to capture AMP/iframe embed URLs that reference Fox News video embeds with a video_id, enabling the article extractor to route to the correct feed-based extractor.
+
+Tests (highlights)
+- FoxNewsIE tests cover:
+  - Direct video pages with metadata (title, description, duration, timestamps, upload_date, thumbnail) and expected extensions (flv or mp4).
+  - A test case with skip_download for m3u8, illustrating alternative stream formats.
+  - A couple of “only_matching” URLs for non-video pages or embed patterns to ensure proper URL matching behavior.
+- FoxNewsArticleIE tests cover:
+  - A page with data-video-id, asserting it resolves to FoxNewsIE and extracts proper metadata.
+  - A page with an iframe/embed, asserting it handles embedding and returns appropriate video data (skip_download where appropriate).
+  - An article URL that should be treated as non-video (only_matching).
+
+In short
+- The module provides two extractors to handle Fox News video content: FoxNewsIE for direct Fox News video pages via a feed endpoint, and FoxNewsArticleIE to handle article pages that either contain a video_id or embed a video, delegating to FoxNewsIE when needed.
+- It leverages AMP-based feed info for metadata and formats, and includes robust handling of embedded video URLs found in articles.

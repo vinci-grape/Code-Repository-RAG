@@ -1,0 +1,68 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/giantbomb.py
+
+Overview
+- Implements a YouTube-DL extractor for Giant Bomb videos/shows.
+- Primary class: GiantBombIE, a subclass of InfoExtractor.
+- Extracts video metadata and available formats from Giant Bomb pages and associated data.
+
+Key components
+- _VALID_URL
+  - Regexp for Giant Bomb video/show URLs:
+    - http(s)://www.giantbomb.com/videos/<display_id>/<id>
+    - http(s)://www.giantbomb.com/shows/<display_id>/<id>
+  - Captures display_id and id (format like digits-digits, e.g., 2300-9782).
+
+- _TESTS
+  - Provides two tests:
+    1) A real Giant Bomb video URL with expected id, display_id, extension, title, description, duration, and thumbnail.
+    2) A shows URL with only_matching=True (ensures URL matching works for non-video pages).
+
+- _real_extract(self, url)
+  Main extraction workflow:
+  1) Parse video_id and display_id from URL using _VALID_URL.
+  2) Download the page HTML via _download_webpage.
+  3) Extract metadata using Open Graph helpers:
+     - title = _og_search_title(webpage)
+     - description = _og_search_description(webpage)
+     - thumbnail = _og_search_thumbnail(webpage)
+  4) Retrieve data-video JSON from the page:
+     - Locate data-video attribute with _search_regex('data-video="([^"]+)"', ...).
+     - Unescape HTML (unescapeHTML) and json.loads to get a Python dict named video.
+  5) duration = int_or_none(video.get('lengthSeconds')).
+  6) Define quality ordering via qualities(['f4m_low', 'progressive_low', 'f4m_high', 'progressive_high', 'f4m_hd', 'progressive_hd']).
+  7) Build formats list from video['videoStreams']:
+     - Skip entries with format_id 'f4m_stream'.
+     - ext = determine_ext(video_url).
+     - If ext == 'f4m':
+       - Use _extract_f4m_formats(video_url + '?hdcore=3.3.1', display_id).
+       - If formats found, set quality on first format as quality(format_id) and extend formats.
+     - If ext == 'm3u8':
+       - Use _extract_m3u8_formats(video_url, display_id, ext='mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False).
+     - Else:
+       - Append a simple format dict: {'url': video_url, 'format_id': format_id, 'quality': quality(format_id)}.
+  8) Fallback to YouTube if no formats found:
+     - If video.get('youtubeID') exists, return a Youtube URL result via self.url_result(youtube_id, 'Youtube').
+  9) Sort formats with self._sort_formats(formats).
+  10) Return a dict with:
+     - 'id': video_id
+     - 'display_id': display_id
+     - 'title': title
+     - 'description': description
+     - 'thumbnail': thumbnail
+     - 'duration': duration
+     - 'formats': formats
+
+Important implementation details
+- Data source: Giant Bomb page contains a data-video attribute containing a JSON blob. The code extracts this blob with a regex, unescapes it, and parses it with json.loads.
+- Video streams handling:
+  - Recognizes multiple formats through video['videoStreams'].
+  - Supports f4m (Flash Media / Flash streaming), m3u8 (HLS), and direct URLs.
+  - For f4m streams, uses _extract_f4m_formats with a hdcore parameter and sets quality on the first extracted format.
+  - For m3u8 streams, uses _extract_m3u8_formats with m3u8_native protocol and labels as hls.
+  - Other direct URLs are added with their format_id and computed quality.
+- Quality ordering: Uses a predefined list to set a consistent quality ranking across formats.
+- Fallback behavior: If no formats are found but a YouTube ID is provided, the extractor defers to the YouTube extractor (Youtube) by returning self.url_result(youtubeID, 'Youtube').
+- Metadata extraction: Title, description, and thumbnail are sourced from Open Graph tags in the page via helper methods (_og_search_title, _og_search_description, _og_search_thumbnail).
+- Robustness: Ignores f4m_stream entries, which are not usable for extraction in this context.
+
+Overall, this extractor retrieves a Giant Bomb video’s metadata and multiple streaming formats from the page’s embedded data, supports Flash (f4m) and HLS (m3u8) formats, falls back to YouTube if needed, and returns a structured dict suitable for YouTube-DL consumption.

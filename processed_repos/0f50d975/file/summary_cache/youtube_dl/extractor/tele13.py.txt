@@ -1,0 +1,52 @@
+Concise summary of tele13.py
+
+Purpose
+- Implement a Tele13 video extractor (Tele13IE) for youtube-dl.
+- It parses video pages on t13.cl to extract available video formats by reading the JWPlayer setup embedded in the page.
+
+Key components
+- Tele13IE (inherits InfoExtractor)
+  - _VALID_URL: Regexp for t13.cl video pages, capturing the video id slug.
+  - _TESTS: Includes two example test cases:
+    - A direct page with an mp4 (expected md5 and title).
+    - A page whose sources point to a YouTube URL (expects Youtube extractor to handle it).
+
+Main extraction flow (_real_extract)
+- Determine display_id from URL and download the page HTML.
+- Locate the JWPlayer setup object in the page via regex:
+  - Looks for jwplayer('player-vivo').setup({ ... })
+- Extract the JSON inside the setup() using a regex and parse it safely with js_to_json:
+  - Specifically pulls the sources array: sources: [{ file: ..., label: ... }, ...]
+- Build formats from the sources:
+  - For each source entry:
+    - Skip if no file URL or if already processed (deduplicate with a list of seen URLs).
+    - Determine the file extension with determine_ext(format_url).
+    - If ext is 'm3u8':
+      - Use _extract_m3u8_formats to import HLS formats (mp4 container, m3u8_native, m3u8_id='hls', fatal=False).
+    - If the URL is a YouTube link (YoutubeIE.suitable(format_url)):
+      - Return a Youtube extractor result immediately (delegate to YoutubeIE).
+    - Otherwise:
+      - Append a direct format dict with: url, format_id (from label), preference (based on the order defined by qualities), and ext.
+  - Sort the accumulated formats with _sort_formats.
+- Build and return the result dictionary:
+  - id: display_id
+  - title: extracted from the setup JS (title: "..." pattern)
+  - description: from the page meta description (using _html_search_meta)
+  - thumbnail: optional value from setup JS (image: "..." pattern)
+  - formats: list of gathered formats
+
+Implementation details worth noting
+- JSON handling:
+  - The code extracts a snippet of the JWPlayer setup and converts embedded JSON (via js_to_json) to a Python object for robust parsing.
+- Source handling:
+  - Supports multiple formats per video, including direct URLs and HLS (m3u8).
+  - Deduplication of format URLs to avoid duplicates.
+- Format preferences:
+  - Uses qualities(['Móvil', 'SD', 'HD']) to assign a preference to each format label, enabling correct sorting when multiple qualities exist.
+- Cross-extractor behavior:
+  - If a source URL is a YouTube link, this extractor defers to YouTubeIE by returning self.url_result(format_url, 'Youtube'), allowing seamless integration with the YouTube extractor.
+- Robustness:
+  - Handles potential 404/page issues via test setup (skip_download in tests).
+  - Title and thumbnail extraction rely on patterns within the setup JSON and page metadata, respectively.
+
+In short, Tele13IE scrapes the embedded JWPlayer setup on t13.cl pages to collect all available video sources (HLS, direct URLs, or YouTube links), formats them appropriately, and returns a standard video information structure containing id, title, description, thumbnail, and formats.

@@ -1,0 +1,70 @@
+Here is a concise, focused summary of the Viqeo extractor code.
+
+Purpose
+- Implement a YouTube-Dl extractor (ViqeoIE) for Viqeo video sources.
+- Retrieve video formats and metadata from Viqeo embed data.
+
+Key components
+- Class ViqeoIE(InfoExtractor)
+  - Inherits standard extraction helpers from youtube_dl’s common InfoExtractor.
+
+- _VALID_URL
+  - Regex that matches:
+    - viqeo: scheme shortcuts
+    - Viqeo embed URLs containing a vid query parameter (e.g., https://cdn.viqeo.tv/embed/?vid=...)
+    - Viqeo API startup data URLs that contain video[] parameter
+  - Captures the video id as (?P<id>[\da-f]+)
+
+- _TESTS
+  - Includes a real embed URL test returning:
+    - id equals the video id
+    - ext = mp4
+    - duration, title (same as id), and a thumbnail URL
+  - Also tests for only_matching with viqeo: and API startup data URLs
+
+- _extract_urls(webpage)
+  - Static method to discover Viqeo embed URLs inside a page.
+  - Uses a regex to extract iframe src attributes that point to cdn.viqeo.tv/embed/?vid=[id] and returns the full URLs.
+
+- _real_extract(self, url)
+  - Core extraction logic:
+    - Determine video_id via _match_id(url)
+    - Download the embed page: https://cdn.viqeo.tv/embed/?vid=<video_id>
+    - Extract slot data: search for SLOT_DATA = { ... } and parse it as JSON
+    - Build formats and thumbnails from data['mediaFiles']:
+      - Validate each media_file as a dict with a usable 'url' starting with http or //
+      - Determine media kind from media_file['type'] (first segment before '/')
+      - Build a format dict with:
+        - url, width, height (if present)
+        - format_id derived from media_file['quality']
+        - For images: add as a thumbnail (id set to format_id)
+        - For video/audio:
+          - format_id set to 'audio' if audio, otherwise the quality
+          - fps from media_file['fps'] (if present)
+          - vcodec set to 'none' for audio, otherwise None
+      - Append to formats and, for images, to thumbnails
+    - Sort formats with self._sort_formats(formats)
+    - duration = int_or_none(data.get('duration'))
+    - Return a dictionary with:
+      - id: video_id
+      - title: video_id
+      - duration
+      - thumbnails
+      - formats
+
+Important implementation details
+- Robust helper usage:
+  - int_or_none, str_or_none, url_or_none to safely parse optional fields.
+- Data source:
+  - Uses the embed page’s SLOT_DATA JSON to extract mediaFiles and metadata.
+- Media handling:
+  - Distinguishes image vs video vs audio from MIME type.
+  - For audio, marks format_id as 'audio' and sets vcodec to 'none'.
+  - For video, preserves the provided quality as format_id and may set fps.
+- Thumbnails:
+  - Images from mediaFiles are added to thumbnails with width/height when available.
+- Output:
+  - Returns id, title (same as id), duration, thumbnails, and a list of formats suitable for ffmpeg/players.
+
+Overall
+- The extractor fetches Viqeo embed data, parses media files, and builds a list of playable formats and thumbnails, providing standard metadata like id, title, and duration.

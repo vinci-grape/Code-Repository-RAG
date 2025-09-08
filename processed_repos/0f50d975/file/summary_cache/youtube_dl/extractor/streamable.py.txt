@@ -1,0 +1,64 @@
+Here's a concise, high-level summary of the code in ./youtube-dl/youtube_dl/extractor/streamable.py:
+
+- Purpose
+  - Implement an extractor for videos hosted on Streamable, integrated into youtube-dl as StreamableIE.
+
+- Key class
+  - StreamableIE(InfoExtractor)
+    - Inherits common extraction behavior from InfoExtractor.
+
+- URL matching and tests
+  - _VALID_URL = r'https?://streamable\.com/(?:[es]/)?(?P<id>\w+)'
+    - Matches Streamable URLs, including optional subpaths like /e/ or /s/ before the video id.
+  - _TESTS
+    - Contains multiple test cases:
+      - Valid video URLs with expected metadata (title, thumbnail, uploader, timestamp, duration, view_count, etc.) and an md5 for the MP4.
+      - An older video without some fields (bitrate, width/height) to ensure graceful handling.
+      - Some entries with only_matching to test URL matching behavior.
+
+- URL extraction from pages
+  - @staticmethod _extract_url(webpage)
+    - Scans a webpage for an iframe src pointing to streamable.com and returns that URL if found.
+    - Useful for cases where the video is embedded in a page.
+
+- Main extraction logic
+  - _real_extract(self, url)
+    - video_id = self._match_id(url)
+    - Fetches video metadata via the AJAX Streamable API:
+      - API endpoint: https://ajax.streamable.com/videos/{video_id}
+      - Uses _download_json to retrieve a JSON object, stored in variable video.
+    - Availability check:
+      - The API returns a status; 2 means ready. Other values indicate uploading/processing/unavailable.
+      - If status != 2, raises ExtractorError with an informative message (video may still be uploading or processing).
+    - Title selection:
+      - Uses video['reddit_title'] if present, otherwise falls back to video['title'].
+    - Formats construction:
+      - Iterates over video['files'].items() and builds a list of format dictionaries for entries that have a 'url'.
+      - For each file:
+        - format_id: key
+        - url: self._proto_relative_url(info['url']) to normalize to a protocol-relative URL
+        - width / height: int_or_none(info.get('width')) / int_or_none(info.get('height'))
+        - filesize: int_or_none(info.get('size'))
+        - fps: int_or_none(info.get('framerate'))
+        - vbr: float_or_none(info.get('bitrate'), 1000)  (bitrate converted to kbps if needed)
+      - self._sort_formats(formats) to order formats logically (e.g., by quality).
+    - Return metadata dictionary:
+      - id: video_id
+      - title: determined title
+      - description: video.get('description')
+      - thumbnail: self._proto_relative_url(video.get('thumbnail_url'))
+      - uploader: video.get('owner', {}).get('user_name')
+      - timestamp: float_or_none(video.get('date_added'))
+      - duration: float_or_none(video.get('duration'))
+      - view_count: int_or_none(video.get('plays'))
+      - formats: the list of constructed formats
+
+- Important implementation details
+  - Uses the AJAX Streamable API to reliably fetch title, duration, and format information (instead of the public API).
+  - Handles multiple formats per video, deriving width/height, filesize, framerate, and bitrate when available.
+  - Robust numeric parsing with int_or_none and float_or_none to gracefully handle missing fields.
+  - Converts URLs to protocol-relative form via _proto_relative_url for compatibility.
+  - Provides user-facing error when the video is not yet ready (status != 2).
+
+- Overall function
+  - The extractor retrieves a Streamable video’s metadata and available formats, normalizes URLs, and returns a structured dictionary compatible with youtube-dl’s downstream processing and output.

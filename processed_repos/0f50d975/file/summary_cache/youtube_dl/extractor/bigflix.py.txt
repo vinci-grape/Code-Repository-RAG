@@ -1,0 +1,67 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/bigflix.py
+
+Purpose
+- Implement a YouTube-DL extractor (BigflixIE) for bigflix.com movie pages. It discovers video formats embedded in the page, decodes the obfuscated URLs, and returns a structured info dictionary.
+
+Key components
+- Class: BigflixIE(InfoExtractor)
+  - _VALID_URL: Regexp matching Bigflix movie pages. Captures the numeric video id at the end of the URL.
+  - _TESTS: Example test cases to validate extraction:
+    - First test: a page with 2 formats; expects id, extension mp4, title, description (md5 placeholder), and formats count.
+    - Second test: page matching pattern but not fully tested (only_matching=True).
+
+- _real_extract(self, url)
+  Core extraction workflow:
+  1) video_id = self._match_id(url)
+     - Extracts the numeric ID from the URL using _VALID_URL.
+  2) webpage = self._download_webpage(url, video_id)
+     - Downloads the page HTML for parsing.
+  3) title = self._html_search_regex(...)
+     - Extracts the movie title from a div with class "pagetitle".
+  4) decode_url(quoted_b64_url)
+     - Nested helper that decodes a URL-quoted Base64 string:
+       - First unquote (URL-decode) using compat_urllib_parse_unquote
+       - Then base64 decode using compat_b64decode
+       - Finally decode to utf-8 string
+  5) Build formats list
+     - Uses a regex to find all content URLs encoded in the page:
+       - Pattern: ContentURL_<height>p... = <encoded_url>, capturing height (3-4 digits) and the encoded URL.
+       - For each match:
+         - video_url = decode_url(encoded_url)
+         - f = {'url': video_url, 'format_id': '<height>p', 'height': int(height)}
+         - If video_url starts with 'rtmp', set f['ext'] = 'flv'
+         - Append f to formats
+  6) Fallback file URL
+     - file_url = self._search_regex(r'file=([^&]+)', webpage, 'video url', default=None)
+     - If present:
+       - video_url = decode_url(file_url)
+       - If this URL is not already in formats, append {'url': video_url} (no explicit height/format_id)
+  7) self._sort_formats(formats)
+     - Sorts the collected formats by quality/criteria defined in the downloader.
+  8) description = self._html_search_meta('description', webpage)
+     - Extracts meta description if present.
+  9) Return dict with:
+     - 'id': video_id
+     - 'title': title
+     - 'description': description
+     - 'formats': formats
+
+Important implementation details
+- URL decoding/decoding pipeline:
+  - Encoded video URLs are embedded in the page as Base64 strings that are also URL-quoted. The code decodes them by:
+    - compat_urllib_parse_unquote to revert the URL-quoting
+    - compat_b64decode to decode the Base64
+    - .decode('utf-8') to get a regular string
+- Format extraction:
+  - Looks for ContentURL_<height>p... entries, where height is 3–4 digits (e.g., 360p, 720p) and the value is an encoded URL.
+  - For each format, the format_id is set to "<height>p" and height to the integer value.
+  - If the decoded URL starts with rtmp, the extension is explicitly set to 'flv'.
+- Redundancy handling:
+  - After decoding the optional file= parameter URL, the code ensures it isn’t already present in the formats list before appending.
+- Robustness:
+  - Uses multiple helper methods from InfoExtractor to extract title, description, and to handle potential missing data gracefully.
+
+What this enables
+- Extraction of video formats from Bigflix movie pages where URLs are obfuscated in the HTML.
+- Support for multiple formats (varying resolutions) and a fallback URL if present.
+- Returning a consistent info dictionary with id, title, description, and a list of decoded, sorted formats.

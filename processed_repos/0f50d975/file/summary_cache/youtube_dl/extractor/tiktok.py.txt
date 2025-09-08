@@ -1,0 +1,73 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/tiktok.py
+
+Overview
+- Implements TikTok extractors for youtube-dl:
+  - TikTokIE: extracts individual TikTok video pages.
+  - TikTokUserIE: (older/disabled) extracts user page playlists (not currently working in this codebase).
+  - TikTokBaseIE: shared logic for parsing video data and building formats/metadata.
+
+Main classes and responsibilities
+- TikTokBaseIE(InfoExtractor)
+  - Core helper to convert TikTok API data into a standardized video info dictionary.
+  - _extract_video(self, data, video_id=None):
+    - Expects data to contain at least data['video'] and data['author'] with nested fields.
+    - Extracts:
+      - Basic fields: id (aweme_id), title (fallback to aweme_id if no uploader), description, thumbnail, duration, timestamp, uploader, uploader_id.
+      - Stats: view_count, like_count, comment_count, repost_count via a small helper function stats(key) that reads data['stats']['<key>Count'].
+    - Video format extraction:
+      - Iterates format_id in ('download', 'play') and builds format URLs from video['downloadAddr'] / video['playAddr'].
+      - Deduplicates URLs, assumes MP4 extension, records height/width when available.
+      - Sets HTTP header Referer to https://www.tiktok.com/ for each format (anti-hotlinking/cookie/session consistency).
+      - Collects all formats and sorts them via self._sort_formats(formats).
+    - Returns a dict with:
+      - id, title, description, thumbnail, duration, uploader, uploader_id, timestamp,
+        view_count, like_count, comment_count, repost_count, and formats.
+
+- TikTokIE(TikTokBaseIE)
+  - _VALID_URL: matches typical TikTok video URLs like https://www.tiktok.com/@user/video/12345
+  - _TESTS: includes a sample URL and expected info_dict fields (ext mp4, title, various metadata).
+  - _real_initialize(self):
+    - Sets up a session by loading https://www.tiktok.com/ (cookies needed for subsequent requests).
+  - _real_extract(self, url):
+    - Extracts video_id from URL.
+    - Downloads the video page and parses JSON from a script tag containing __NEXT_DATA__.
+    - Navigates to props/pageProps and obtains data = page_props['itemInfo']['itemStruct'] (or empty dict if missing).
+    - If data is empty and page_props.get('statusCode') == 10216, raises ExtractorError('This video is private', expected=True).
+    - Delegates to _extract_video(data, video_id) to build the final info dict.
+
+- TikTokUserIE(TikTokBaseIE)
+  - _VALID_URL: matches user pages like https://www.tiktok.com/@username
+  - _TESTS: includes a sample user URL and expected playlist info (min 24 items).
+  - _WORKING = False (indicates this extractor is not fully functional in current code).
+  - suitable(cls, url): overridden to avoid clashing with TikTokIE; returns False if TikTokIE would match, otherwise delegates to base suitability.
+  - _real_extract(self, url):
+    - Extracts user_id from URL.
+    - Fetches JSON from https://m.tiktok.com/h5/share/usr/list/<user_id>/ with a query param _signature='_'. This is a mobile/share API endpoint.
+    - Iterates aweme_list; for each item, calls _extract_video(aweme) to build an entry.
+    - Skips items that raise ExtractorError (robust against private/unavailable items).
+    - Sets entry['extractor_key'] = TikTokIE.ie_key() to tag the entry with the TikTok video extractor.
+    - Returns a playlist_result of all collected entries with the user_id as the playlist id.
+
+Key implementation details
+- Data extraction and safety:
+  - Uses try_get and dict-safe access to navigate nested structures (e.g., data['video'], data['author']['nickname']).
+  - Handles missing fields gracefully with compat_str, str_or_none, int_or_none, float_or_none.
+  - Detects private videos via statusCode 10216 and raises a dedicated ExtractorError.
+- Formats:
+  - Two potential sources for video data: 'downloadAddr' and 'playAddr' (for download and streaming).
+  - Formats are deduplicated and annotated with width/height when available.
+  - Each format includes an HTTP Referer header to emulate a browser request from TikTok.
+- Metadata extraction:
+  - Title derived from uploader (author nickname) or falls back to video id.
+  - Timestamp parsed from createTime, with upload_date derived by default handling elsewhere.
+  - Stats extracted using a helper to read counts, enabling fields like view_count, like_count, comment_count, repost_count.
+- Media identifiers:
+  - aweme_id is derived from data['id'] or the provided video_id fallback.
+- Session setup:
+  - _real_initialize in TikTokIE performs a preliminary page load to establish cookies/session state required by TikTok endpoints.
+- User extractor behavior:
+  - TikTokUserIE is marked as not working (_WORKING = False) and uses a different API path (mobile share endpoint) for listing videos.
+  - The extractor attaches extractor_key to entries to indicate they come from TikTokIE logic.
+
+In short
+- This file provides a TikTok video extractor (TikTokIE) that pulls video formats and metadata from TikTok's page data, with session setup and private-video handling. It also contains a (mostly non-functional) user-page extractor (TikTokUserIE) that would assemble a playlist of videos for a user using a mobile API endpoint. The core logic is in TikTokBaseIE._extract_video, which converts the TikTok data structure into a standardized, richly described video object with formats suitable for download/playback.

@@ -1,0 +1,91 @@
+Concise summary of the file: youtube-dl/youtube_dl/extractor/rice.py
+
+Purpose
+- Implement an InfoExtractor for Rice University’s MediaHub video URLs, extracting metadata and multiple possible video formats (RTSP, RTMP, HLS/M3U8, and direct file URLs).
+
+Key class
+- RICEIE (subclass of InfoExtractor)
+
+Main URL pattern
+- _VALID_URL matches mediahub.rice.edu portal video pages:
+  https://mediahub.rice.edu/app/Portal/video.aspx?(query parameters)
+
+Test data
+- _TEST provides a sample URL, expected MD5, and info_dict with id, ext, title, upload_date, and timestamp to verify extraction.
+
+Namespace handling
+- _NS defines the XML namespace used when parsing API responses.
+- Uses XPath helpers (xpath_text, xpath_element) with the given _NS to extract values from XML responses.
+
+Core extraction flow (_real_extract)
+1) Parse and validate query parameters
+   - Extract query string from URL, parse with compat_parse_qs.
+   - Require PortalID, DestinationID, ContentID; otherwise raise ExtractorError.
+
+2) Fetch content metadata
+   - Call GetContentTitle API with content_id, portalId, playlistId to obtain content metadata.
+   - From content_data, extract:
+     - title via metadata/primaryTitle
+     - thumbnails and assets via contentAssets
+     - duration and description via metadata fields
+     - dateUpdated to compute timestamp via parse_iso8601
+
+3) Fetch player configuration
+   - Call GetPlayerConfig API with content_id and temporaryLinkId (from encodings/t-Id) to obtain player_data.
+
+4) Build common format attributes
+   - If dimensions exist in encodings, parse width/height and store in common_fmt.
+
+5) Build video formats
+   - RTSP path (if present): add a format with url=RtspPath, format_id='rtsp', include common_fmt.
+
+   - Iterate over Source elements in player_data:
+     - Get File URL (video_url). If missing, skip.
+     - If URL is an HLS/M3U8 stream (contains .m3u8):
+       - Extend formats with _extract_m3u8_formats(video_url, content_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+     - Else (direct or RTMP URL):
+       - Create a format dict with url=video_url, format_id derived from the part before the first colon (e.g., 'rtmp' or 'http').
+       - Merge in common_fmt (width/height if present).
+       - If RTMP URL matches the pattern: rtmp://host/app/.../mp4:...
+         - Extract url, play_path, app, and set ext='flv' (RTMP-flv fallback).
+       - Add the format dict to formats.
+
+6) Sort formats
+   - Call self._sort_formats(formats)
+
+7) Build thumbnails
+   - Iterate over contentAssets; for assets with type 'image', collect:
+     - id from asset's ID
+     - url from httpPath
+   - Append to a list as dicts {'id': ..., 'url': ...}
+
+8) Return metadata
+   - id: content_id
+   - title: extracted title
+   - description: metadata/abstract
+   - duration: int_or_none(metadata/duration)
+   - timestamp: parse_iso8601(metadata/dateUpdated)
+   - thumbnails: collected list
+   - formats: assembled formats list
+
+Notable implementation details
+- XML parsing heavily relies on a defined namespace (_NS) and helper methods:
+  - xpath_text: extract text content
+  - xpath_element: extract elements
+- Robust handling of multiple formats:
+  - RTSP, RTSP-like paths, HLS/M3U8, and RTMP/file-based sources are supported.
+  - HLS streams are retrieved via _extract_m3u8_formats with m3u8_id='hls' and fatal=False to be resilient if some variants are unavailable.
+  - RTMP URLs are parsed to extract url, play_path, and app, with extension forced to 'flv' for RTMP-driven streams.
+- Common format attributes (dimensions) are extracted once and applied to all formats to keep consistency.
+- Metadata extraction includes title, description (abstract), content duration, and timestamp derived from dateUpdated.
+- Thumbnails are pulled from contentAssets where type equals 'image', using httpPath as the image URL.
+
+Example expectations (from _TEST)
+- id: YEWIvbhb40aqdjMD1ALSqw
+- ext: mp4
+- title: Active Learning in Archeology
+- upload_date: 20140616
+- timestamp: 1402926346
+
+Overall
+- The extractor integrates Rice MediaHub APIs to assemble a comprehensive set of media formats and metadata for a given content ID, handling various streaming protocols and providing robust fallbacks for missing data.

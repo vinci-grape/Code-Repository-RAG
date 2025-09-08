@@ -1,0 +1,42 @@
+Concise summary of youtube-dl extractor file: youtube_dl/extractor/tunepk.py
+
+- Purpose
+  - Implements a dedicated extractor TunePkIE for fetching video metadata and streaming formats from tune.pk (and its embedded players).
+
+- Key class
+  - TunePkIE(InfoExtractor): Main extractor class.
+
+- URL matching
+  - _VALID_URL uses a verbose regex to match:
+    - tune.pk video pages: https://tune.pk/video/<id> or https://www.tune.pk/video/...
+    - embedded players: https://tune.pk/player/embed_player.php?...vid=<id>
+    - embedded play pages: https://embed.tune.pk/play/<id>
+  - _TESTS includes a normal page, and two alternate embed URLs (only_matching).
+
+- Core logic (_real_extract)
+  - Extract video_id from the URL with self._match_id(url).
+  - Download the main video page: https://tune.pk/video/<video_id>.
+  - Locate the TunePlayer JSON payload via regex: r'new\s+TunePlayer\(({.+?})\)\s*;\s*\n'.
+  - Parse the JSON payload and access the details section.
+  - video = details['video']:
+    - Title: prefer video['title']; fallback to OpenGraph title, then HTML meta title (fatal if not found).
+    - Description: prefer OpenGraph description, then HTML meta description.
+    - Thumbnail: prefer video['thumb']; else OpenGraph thumbnail, then HTML meta thumbnail.
+    - Date: timestamp via unified_timestamp(video['date_added']).
+    - Uploader: first try video['uploader']['name']; else HTML meta 'author'.
+    - Duration: int_or_none(video['duration']).
+    - View count: int_or_none(video['views']).
+  - Formats:
+    - Use details['player']['sources'] and parse with self._parse_jwplayer_formats(..., video_id).
+    - Sort formats with self._sort_formats(formats).
+  - Return metadata dictionary:
+    - id, title, description, thumbnail, timestamp, uploader, duration, view_count, formats.
+
+- Important implementation details
+  - Robust fallbacks for title/description/thumbnail/uploader.
+  - Uses JWPlayer-format parsing to build available streams.
+  - Utilizes helper functions: int_or_none, try_get, compat_str, unified_timestamp, _parse_json, _search_regex, _og_search_title/description/thumbnail, _html_search_meta.
+  - Handles both direct video pages and embedded player URLs via the same extractor.
+
+- Output
+  - A dict containing id, title, description, thumbnail, timestamp, uploader, duration, view_count, and formats for downstream downloading.

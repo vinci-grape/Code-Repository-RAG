@@ -1,0 +1,26 @@
+- Purpose: SeekerIE is a youtube-dl extractor for Seeker article pages that host videos (via JWPlatform). It builds a playlist of JWPlatform videos found on the page.
+
+- URL pattern: Validates URLs like http(s)://www.seeker.com/<slug>-<article_id>.html, capturing display_id and article_id.
+
+- Main workflow (_real_extract):
+  - Download the article page using the display_id for naming.
+  - Find all video IDs on the page with the pattern data-video-id="([a-zA-Z0-9]{8})".
+  - For each found video ID:
+    - Create a YouTube-dl entry via self.url_result('jwplatform:' + jwp_id, 'JWPlatform', jwp_id). This defers to the JWPlatform extractor for actual video info.
+  - Return a playlist_result consisting of:
+    - entries: the list of JWPlatform entries discovered on the page
+    - id: article_id from the URL
+    - title: page title obtained from _og_search_title(webpage)
+    - description: subtitle text (class subtitle__text) if present (stripped with strip_or_none); otherwise falls back to the page OG description via _og_search_description(webpage)
+
+- Key implementations and details:
+  - Uses _VALID_URL with a regex to extract display_id and article_id.
+  - Finds video IDs using re.findall on the page: data-video-id="([a-zA-Z0-9]{8})".
+  - Builds JWPlatform entries with the scheme jwplatform:<video_id> and extractor name JWPlatform.
+  - Description handling prioritizes a subtitle__text element and falls back to OpenGraph description.
+  - Relies on utilities get_element_by_class and strip_or_none for robust subtitle extraction.
+  - Tests demonstrate two scenarios:
+    - A single video page (non-playlist) returning a single-entry playlist with metadata (title, description, timestamps, etc.).
+    - A multi-video page (playlist) returning a playlist of JWPlatform entries with corresponding metadata.
+
+- Overall: The extractor is a thin wrapper that scrapes JWPlatform video IDs from Seeker articles and delegates actual video extraction to the JWPlatform extractor, while assembling article-level metadata (title/description) for the playlist.

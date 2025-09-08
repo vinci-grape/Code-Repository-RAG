@@ -1,0 +1,110 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/telequebec.py
+
+Overview
+- This module implements multiple extractors for Télé-Québec content, all built on a common base that routes through Brightcove video playback when applicable.
+- Key concept: many Télé-Québec pages ultimately point to Brightcove-hosted videos. The extractors construct Brightcove URLs (with geo restriction to Canada) and delegate actual video extraction to Brightcove-related extractors via url_transparent results.
+
+Main components
+
+1) TeleQuebecBaseIE (base class)
+- Inherits from InfoExtractor.
+- BRIGHTCOVE_URL_TEMPLATE: template for constructing Brightcove player URLs.
+- _brightcove_result(brightcove_id, player_id, account_id='6150020952001')
+  - Static helper that returns a url_transparent result pointing to a BrightcoveNew extractor.
+  - Builds the URL using the template and wraps it with smuggle_url to apply geo_countries: ['CA'].
+  - Sets ie_key to 'BrightcoveNew'.
+  - Purpose: centralizes how Brightcove videos are returned from Télé-Québec sources.
+
+2) TeleQuebecIE
+- _VALID_URL matches:
+  - zonevideo.telequebec.tv/media/{id}
+  - coucou.telequebec.tv/videos/{id}
+  (id is digits)
+- _TESTS: includes sample URLs with expected metadata, formats, and an instruction to apply the BrightcoveNew extractor.
+- _real_extract(self, url)
+  - media_id = matched id from URL.
+  - Downloads media metadata from https://mnmedias.api.telequebec.tv/api/v3/media/{media_id} and selects the 'media' object.
+  - Finds the Brightcove sourceId by scanning media['streamInfos'] for an entry where source == 'Brightcove'.
+  - Builds a Brightcove result with _brightcove_result(source_id, '22gPKdt7f') (hard-coded Brightcove player id).
+  - Extracts additional metadata:
+    - description from media['descriptions'][-1]['text'] if present
+    - series from season['serie']['titre'] if available
+    - season name, season_number
+    - episode title and episode_number
+  - Merges these fields into the Brightcove result and returns it.
+
+3) TeleQuebecSquatIE
+- _VALID_URL: https://squat.telequebec.tv/videos/{id}
+- _TESTS: sample with id 9314; expects full metadata (title, description, duration, timestamps, series, season/episode info).
+- _real_extract(self, url)
+  - video_id = matched id.
+  - Download video data from https://squat.api.telequebec.tv/v1/videos/{video_id}.
+  - media_id = video['sourceId'].
+  - Returns a url_transparent result:
+    - url: http://zonevideo.telequebec.tv/media/{media_id}
+    - ie_key: TeleQuebecIE (delegates to TeleQuebecIE extractor)
+    - id, title, description, timestamp, series, season, season_number, episode_number based on the video JSON.
+  - Effectively rewrites Squat videos to the zonevideo Brightcove-backed media via TeleQuebecIE.
+
+4) TeleQuebecEmissionIE
+- _VALID_URL matches Télé-Québec emission pages. Accepts multiple URL patterns including non-dir domain paths.
+- _TESTS: several samples; first one expects a typical emission page to resolve to a Brightcove-backed video via zonevideo.
+- _real_extract(self, url)
+  - display_id = matched id.
+  - Downloads the page HTML.
+  - Extracts mediaId using a regex on the page.
+  - Returns a url_result pointing to http://zonevideo.telequebec.tv/media/{media_id} with ie_key TeleQuebecIE.
+  - Purpose: convert emission pages into direct zonevideo media references.
+
+5) TeleQuebecLiveIE
+- _VALID_URL: zonevideo.telequebec.tv/endirect
+- _TEST: checks live video extraction metadata (is_live, timestamp, etc.).
+- _real_extract(self, url)
+  - Returns a Brightcove-based result via _brightcove_result('6159095684001', 'skCsmi2Uw').
+  - Uses the base class helper with hard-coded IDs to represent Télé-Québec live content.
+
+6) TeleQuebecVideoIE
+- _VALID_URL matches: https://video.telequebec.tv/player(-live)?/{id}
+- _TESTS: one standard video test; another sample that is only_matching (live player).
+- Helpers:
+  - _call_api(self, path, video_id)
+    - Fetches data from the Brightcove beacon API:
+      http://beacon.playback.api.brightcove.com/telequebec/api/assets/{path}
+    - Includes query parameters device_layout=web and device_type=web
+    - Returns the 'data' field from the response.
+- _real_extract(self, url)
+  - asset_id = matched id.
+  - asset = self._call_api(asset_id, asset_id)['asset']
+  - stream = self._call_api(asset_id + '/streams/' + asset['streams'][0]['id'], asset_id)['stream']
+  - stream_url = stream['url']
+  - account_id = stream['video_provider_details']['account_id'] if present, else default '6101674910001'
+  - info = _brightcove_result(stream_url, 'default', account_id)
+  - Augments info with:
+    - description: asset['long_description'] or asset['short_description']
+    - series: asset['series_original_name']
+    - season_number: int_or_none(asset['season_number'])
+    - episode: asset['original_name']
+    - episode_number: int_or_none(asset['episode_number'])
+  - Returns the assembled info dict.
+  - This extractor directly links to Brightcove assets via the beacon API and builds a complete metadata profile from the asset and streams data.
+
+Key implementation details
+- Brightcove integration:
+  - Central mechanism to obtain actual video data via BrightcoveNew, with geo restriction to Canada.
+  - Multiple extractors converge on Brightcove-based results, sometimes with hard-coded account/player IDs.
+- Metadata extraction:
+  - Uses try_get to safely fetch optional fields from nested dicts.
+  - Uses int_or_none to parse numeric fields (season_number, episode_number, etc.).
+  - Uses unified_timestamp to convert publication dates to Unix timestamps.
+- URL handling and chaining:
+  - Uses url_transparent results to hand off to BrightcoveNew or to other internal extractors (TeleQuebecIE, etc.).
+  - Some extractors (Squat) produce a transparent URL to TeleQuebecIE, effectively chaining extraction paths.
+- Tests:
+  - Each extractor includes _TESTS with sample URLs and expected output fields, illustrating typical data structure and integration points.
+
+In short
+- This file provides a set of extractors for Télé-Québec content, all routed through Brightcove when appropriate.
+- It includes:
+  - A shared base for constructing Brightcove-backed results with Canada geo-restriction.
+  - Extractors for standard media pages, squat pages, emissions pages, live streams, and video player assets.
+  - Robust metadata extraction and safe handling of optional fields.

@@ -1,0 +1,73 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/rds.py
+
+What it does
+- Implements an InfoExtractor for RDS.ca video pages. It parses a RDS web page to extract enough metadata and then delegates actual video extraction to the NineCNineMedia (9c9media) backend.
+
+Main class and entry points
+- Class: RDSIE(InfoExtractor)
+  - IE_DESC: "RDS.ca"
+  - _VALID_URL: Regex matching RDS video URLs (supports accented/european variants in the path, e.g. é, %C3%A9). Captures the slug-like display ID as the id group.
+  - _TESTS: Two tests
+    - Test 1: A typical RDS video page. Expected info_dict includes id, display_id, ext (flv), title, description (md5 placeholder), timestamp, upload_date, duration.
+    - Test 2: A different RDS URL that should match the extractor but is marked only_matching to ensure URL regex matches (no full test).
+
+Core functionality (_real_extract)
+- Display ID and page retrieval
+  - display_id = self._match_id(url)
+  - webpage = self._download_webpage(url, display_id)
+
+- Metadata extraction from embedded JSON
+  - item = self._parse_json(self._search_regex(r'(?s)itemToPush\s*=\s*({.+?});', webpage, 'item'), display_id, js_to_json)
+  - video_id = compat_str(item['id'])
+
+- Title and description
+  - title = item.get('title') or self._og_search_title(webpage) or self._html_search_meta('title', webpage, 'title', fatal=True)
+  - description = self._og_search_description(webpage) or self._html_search_meta('description', webpage)
+
+- Thumbnail
+  - thumbnail = item.get('urlImageBig') or self._og_search_thumbnail(webpage) or fallback via regex for thumbnailUrl meta properties
+
+- Timestamp and duration
+  - timestamp: extracted from an uploadDate content attribute in a span with itemprop="uploadDate" and parsed via parse_iso8601
+  - duration: extracted from a duration content attribute in a span with itemprop="duration" and parsed via parse_duration
+  - Both are optional (fatal=False on regex search)
+
+- Age rating
+  - age_limit = self._family_friendly_search(webpage)  # checks for age restrictions
+
+Return value
+- The extractor returns a URL-transparent entry:
+  {
+    '_type': 'url_transparent',
+    'id': video_id,
+    'display_id': display_id,
+    'url': '9c9media:rds_web:%s' % video_id,
+    'title': title,
+    'description': description,
+    'thumbnail': thumbnail,
+    'timestamp': timestamp,
+    'duration': duration,
+    'age_limit': age_limit,
+    'ie_key': 'NineCNineMedia',
+  }
+- This means the actual video details are resolved by the NineCNineMedia extractor using the constructed key '9c9media:rds_web:<video_id>'.
+
+Implementation details and notable points
+- The code relies on a JS-to-JSON conversion helper (js_to_json) when parsing the itemToPush JSON embedded in the page.
+- It uses multiple fallbacks for title and thumbnail to robustly handle variations in the page.
+- The _VALID_URL regex is designed to handle both ASCII and percent-encoded accented characters in the path (e.g., é, %C3%A9) and captures the slug part as display_id.
+- The returned URL is a 9c9media shortcut (rds_web) rather than a direct video URL; this delegates the actual media extraction to the NineCNineMedia backend, which is appropriate for RDS content packaging.
+- The code gracefully handles optional fields (timestamp, duration) by using fatal=False in the searches and then parsing only if present.
+- The tests demonstrate both a typical page and a URL that should match regex but doesn’t necessarily run a full extraction.
+
+Key implementation helpers used
+- _download_webpage, _search_regex, _parse_json
+- _og_search_title, _og_search_description, _og_search_thumbnail
+- _html_search_meta
+- parse_iso8601, parse_duration
+- _family_friendly_search
+- compat_str for consistent string typing
+- js_to_json for converting embedded JS object to JSON for parsing
+
+In short
+This extractor targets RDS.ca video pages, pulls a JSON object from the page to obtain the video id and metadata, builds a URL that delegates to NineCNineMedia for actual playback, and returns a structured metadata dictionary (title, description, thumbnail, timestamp, duration, age limit) along with an internal video id and display id.

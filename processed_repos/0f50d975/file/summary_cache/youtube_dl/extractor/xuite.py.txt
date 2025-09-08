@@ -1,0 +1,60 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/xuite.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for Xuite video/audio hosted on vlog.xuite.net. It handles both /play/ and /embed/ URLs (normalizing embed to play).
+
+- Main class
+  - XuiteIE(InfoExtractor)
+    - IE_DESC: Chinese description for Xuite影音.
+    - _VALID_URL: Matches URLs like http(s)://vlog.xuite.net/(play|embed)/<base64-id>.
+    - _REGEX_BASE64: Used to validate the base64-like ID in the URL.
+    - _TESTS: Several test cases for audio, video (with one or two formats), encoded IDs, and an embed URL example.
+
+- Core functionality (_real_extract)
+  - URL normalization: Replaces /embed/ with /play/ to unify processing.
+  - video_id extraction: Uses _match_id on the URL, then later overwrites it with mediaInfo['MEDIA_ID'] from the page.
+  - Webpage download: Fetches the page content.
+  - Error handling: Searches for an error message in <div id="error-message-content"> and raises ExtractorError if present.
+  - Metadata extraction:
+    - mediaInfo: Extracts a JSON-like object from a JavaScript snippet using the pattern var mediaInfo = { ... };
+    - mediaInfo is parsed into a Python dict via _parse_json.
+    - video_id is updated to mediaInfo['MEDIA_ID'].
+  - Formats extraction:
+    - Checks mediaInfo for html5Url and html5HQUrl.
+    - For each present URL, extracts a format_id from the query parameter q in the URL.
+    - Creates format entries with:
+      - 'url': video_url
+      - 'ext': 'mp4' if format_id is numeric, else use format_id
+      - 'format_id': format_id
+      - 'height': numeric value of format_id if numeric, else None
+    - Sorts formats with _sort_formats.
+  - Timestamps and date:
+    - timestamp = mediaInfo.get('PUBLISH_DATETIME'); if present, parses with parse_iso8601(timestamp + ' +0800', ' ').
+  - Categories:
+    - category = mediaInfo.get('catName')
+    - categories = [category] if present else []
+  - Uploader information:
+    - uploader = mediaInfo.get('NICKNAME')
+    - uploader_url initialized to None
+    - Tries to locate an author block via get_element_by_attribute('itemprop', 'author', webpage)
+    - If found, optionally updates uploader and extracts uploader_url from a link tag within the author block.
+  - Description and other fields:
+    - title: mediaInfo['TITLE']
+    - description: remove_end(mediaInfo.get('metaDesc'), ' (Xuite 影音)')
+    - thumbnail: mediaInfo.get('ogImageUrl')
+    - uploader_id: mediaInfo.get('MEMBER_ID')
+    - uploader_url: as determined above
+    - duration: float_or_none(mediaInfo.get('MEDIA_DURATION'), 1000000)
+    - id: final video_id (MEDIA_ID)
+    - formats: as assembled above
+
+- Implementation details and nuances
+  - Uses a robust approach to extract embedded media information from a JavaScript variable (mediaInfo).
+  - Supports both standard and HQ HTML5 video URLs by reading html5Url and html5HQUrl.
+  - Infers format type and height from the q parameter in the URL, handling both numeric and non-numeric format IDs.
+  - Handles potential missing metadata gracefully, using defaults and fallbacks (e.g., uploader info via HTML parsing if available).
+  - Cleans description by removing a trailing suffix common to Xuite descriptions.
+  - Timezone handling for PUBLISH_DATETIME uses +0800 (Taiwan/Jakarta region).
+  - Includes tests for various scenarios including audio, video with one or two formats, and an encoded/masked ID case.
+
+Overall, this extractor fetches Xuite media pages, parses embedded mediaInfo data, builds available formats, and returns a structured info dictionary with id, title, description, thumbnail, duration, timestamp, uploader details, categories, and formats.

@@ -1,0 +1,65 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/servus.py
+
+- Purpose
+  - Implements a YouTube-DL extractor (ServusIE) for Servus TV/servus.com video pages. It fetches a video’s metadata and available streaming formats by authenticating against an external token service and then querying a video assets API.
+
+- Key class
+  - ServusIE(InfoExtractor)
+    - Inherits core extraction utilities from InfoExtractor.
+
+- URL matching
+  - _VALID_URL defines a regex that matches current and legacy Servus URLs, extracting the video id (named group id). Supported patterns cover servustv.com, pm-wissen.com, and servus.com variations.
+  - The id can be an AA-... style code or a numeric-dash code, which is uppercased for consistency.
+
+- Testing
+  - _TESTS includes:
+    - A test for the new URL schema with complete metadata (title, description, thumbnail, duration, timestamp, series, season, episode, etc.).
+    - Several old URL patterns marked as only_matching to ensure correct URL recognition.
+
+- Core extraction logic (_real_extract)
+  - Extracts video_id from URL and converts to uppercase (e.g., AA-1T6VBU5PW1W12).
+  - Token acquisition:
+    - Calls https://auth.redbullmediahouse.com/token with client_credentials grant type.
+    - Uses a static Basic Authorization header.
+    - Retrieves access_token and token_type (defaulting to Bearer).
+  - Video metadata fetch:
+    - Requests https://sparkle-api.liiift.io/api/v1/stv/channels/international/assets/{video_id} with Bearer token.
+    - Receives a video JSON object containing resources and attributes.
+
+  - Formats construction:
+    - Iterates video['resources'] (ignoring non-dicts).
+    - Skips resources without a URL.
+    - If resource is a thumbnail (extension 'jpg' or type 'reference_keyframe'), sets thumbnail and continues.
+    - For streaming resources:
+      - If type is 'dash' or URL ends with .mpd -> uses _extract_mpd_formats to add MPD formats.
+      - If type is 'hls' or URL ends with .m3u8 -> uses _extract_m3u8_formats (container 'mp4', entry_protocol 'm3u8_native', m3u8_id 'hls').
+      - If extension is 'mp4' or URL extension resolves to 'mp4' -> adds a direct MP4 format with width/height when available (via resource['width'], resource['height']).
+    - Finally sorts formats with _sort_formats.
+
+  - Metadata extraction:
+    - Collects attributes from video['attributes'] (each dict with fieldKey and fieldValue) into attrs.
+    - Title logic:
+      - title = attrs.get('title_stv') or video_id
+      - alt_title = attrs.get('title')
+      - description = attrs.get('long_description') or attrs.get('short_description')
+      - series = attrs.get('label')
+      - season = attrs.get('season')
+      - episode = attrs.get('chapter')
+    - duration = float_or_none(attrs.get('duration'), scale=1000)  # converts ms to seconds
+    - season_number = int_or_none(self._search_regex(r'Season (\d+)', season or '', 'season number', default=None))
+    - episode_number = int_or_none(self._search_regex(r'Episode (\d+)', episode or '', 'episode number', default=None))
+
+  - Return data structure:
+    - id, title, alt_title, description, thumbnail, duration, timestamp, series, season, season_number, episode, episode_number, formats
+
+- Important implementation details
+  - Two-step API access: first obtain an access token from a token service, then fetch video metadata from a separate Sparkle/LIIIFT API using that token.
+  - Format extraction supports multiple streaming protocols:
+    - MPD (DASH) via _extract_mpd_formats
+    - HLS via _extract_m3u8_formats
+    - Direct MP4 URLs (with width/height if provided)
+  - Thumbnail handling: picks a thumbnail resource when encountering a JPEG or a reference_keyframe.
+  - Metadata source is a mixture of the attributes array (fieldKey/fieldValue) and top-level video fields (e.g., lastPublished for timestamp).
+  - Robustness: guards against non-dict items in resources and attributes, uses fallbacks, and safely parses integers/floats.
+
+Overall, the extractor implements Servus TV’s new/old URL handling, token-based API access, resource-based format extraction (DASH/HLS/MP4), and comprehensive metadata assembly to produce a standard YouTube-DL video info dictionary.

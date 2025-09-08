@@ -1,0 +1,49 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/esri.py
+
+- Purpose
+  - Defines EsriVideoIE, an information extractor for Esri video pages hosted at video.esri.com.
+
+- Key class
+  - EsriVideoIE(InfoExtractor)
+    - _VALID_URL: Matches URLs like http(s)://video.esri.com/watch/{id}
+    - _TEST: Provides a sample URL with expected metadata (id, ext, title, description, thumbnail, duration, upload_date)
+
+- Main functionality (_real_extract)
+  - Extracts video_id from the URL.
+  - Downloads the page HTML content.
+  - Formats extraction:
+    - Parses the HTML list items that describe available video formats using a regex:
+      - Structure expected: <li><strong>WxH:</strong> ...</li> (width x height)
+    - For each content block inside the list item, finds video links using another regex:
+      - Matches anchor tags with href, link text containing the extension, and a filesize in parentheses.
+    - Builds a formats list with dicts containing:
+      - url: absolute URL to the video file (URL joined with base page URL)
+      - ext: file extension (lowercased)
+      - format_id: combination of ext and height (e.g., mp4-720)
+      - width, height: integers
+      - filesize_approx: parsed file size via parse_filesize
+  - Sorts formats using _sort_formats for optimal preference order.
+
+- Metadata extraction
+  - title: from HTML meta tag 'title' (via _html_search_meta)
+  - description: from meta 'description' (optional)
+  - thumbnail: from meta 'thumbnail' (optional); normalizes thumbnail filename by converting patterns like _st.jpg or _xt.jpg to _x.jpg
+  - duration: tries to extract via two patterns in the page:
+    - var videoSeconds = <n>
+    - 'duration': <n>
+    - Uses _search_regex with fatal=False, converts to int via int_or_none
+  - upload_date: derived from the 'last-modified' meta tag, converted with unified_strdate
+
+- Return value
+  - A dict with id, title, description, thumbnail, duration, upload_date, formats
+
+- Implementation details
+  - Uses compat_urlparse.urljoin to build absolute video URLs.
+  - Utilizes helper functions:
+    - parse_filesize to handle human-readable sizes
+    - int_or_none for safe integer conversion
+    - unified_strdate to normalize dates
+    - _html_search_meta and _search_regex for robust metadata extraction
+  - Robust to missing optional fields (description, thumbnail, duration) due to fatal=False on some lookups.
+
+Overall, the extractor targets Esri video watch pages, parses a structured list of available video formats, and gathers standard metadata (title, description, thumbnail, duration, upload date) to output a consolidated video information dictionary.

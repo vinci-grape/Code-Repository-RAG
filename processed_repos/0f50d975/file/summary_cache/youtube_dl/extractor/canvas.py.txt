@@ -1,0 +1,110 @@
+Concise functional summary of the code in ./youtube-dl/youtube_dl/extractor/canvas.py
+
+Overview
+- This module contains multiple extractors for VRT-related video content, including:
+  - CanvasIE: primary extractor for assets served by VRT’s mediazone API, handling both old and new REST endpoints, building all available formats, and collecting subtitles.
+  - CanvasEenIE: a wrapper that resolves a Canvas/Een page to a Canvas asset URL via a transparent URL, enabling reuse of CanvasIE’s logic.
+  - VrtNUIE: extractor for VRTNU content (requires login via Gigya), which navigates a login flow, obtains a token, and resolves to a Canvas asset via a transparent URL.
+  - DagelijkseKostIE: extractor for a specific Een.be page that points to a Dako asset via a transparent URL.
+
+Key classes and main functionality
+- CanvasIE (InfoExtractor)
+  - Purpose: Retrieve and normalize video assets from VRT mediazone endpoints.
+  - URL pattern: _VALID_URL matches various site IDs (canvas,een,ketnet,vrtvideo,vrtnieuws,sporza,dako) and asset IDs.
+  - Endpoints:
+    - Old API (if site_id != vrtvideo): https://mediazone.vrt.be/api/v1/{site_id}/assets/{id}
+    - New API: uses a token issued from REST API base and then fetches video data from /videos/{id}
+  - Token/auth flow (new API):
+    - Get vrtPlayerToken from REST API base: /tokens
+    - Request video JSON: /videos/{id}?vrtPlayerToken=...&client={site_id}@PROD
+    - Handles authentication and geo-restriction:
+      - AUTHENTICATION_REQUIRED -> prompt login
+      - INVALID_LOCATION -> geo_restricted(countries=['BE'])
+      - Other errors raise ExtractorError with server-provided message
+  - Metadata extraction:
+    - title, description, duration, posterImageUrl
+  - Formats:
+    - Iterates data['targetUrls'], building formats for types:
+      - HLS/HLS_AES -> HLS formats (m3u8)
+      - HDS -> f4m
+      - MPEG_DASH -> mpd
+      - HSS -> ism (MSS)
+      - Others: direct format with format_id and URL
+    - Uses _extract_m3u8_formats, _extract_f4m_formats, _extract_mpd_formats, _extract_ism_formats as appropriate
+    - Falls back to a basic {format_id, url} entry for unknown types
+    - _sort_formats(formats)
+  - Subtitles:
+    - subtitleUrls with type 'CLOSED' are added as nl subtitles
+  - Return:
+    - id/display_id, title, description, formats, duration (milliseconds to seconds), thumbnail, subtitles
+
+- CanvasEenIE (InfoExtractor)
+  - Purpose: For canvas.be and een.be, resolve to a Canvas asset via a standard endpoint and delegate to CanvasIE for actual extraction.
+  - URL pattern: _VALID_URL matches https://{www.}(canvas|een).be/... with an ID.
+  - real_extract:
+    - Scrape title from video header or og:title
+    - Extract video_id from data-video attribute in the page
+    - Return a url_transparent pointing to:
+      https://mediazone.vrt.be/api/v1/{site_id}/assets/{video_id}
+    - ie_key: CanvasIE.ie_key() to reuse CanvasIE
+    - id/display_id/title/description populated accordingly
+
+- VrtNUIE (GigyaBaseIE)
+  - Purpose: Access VRTNU content that requires login via Gigya and token exchange.
+  - URL pattern: https://vrt.be/vrtnu/a-z/.../{id}
+  - _real_initialize: calls _login() to authenticate before extraction
+  - _login():
+    - Reads credentials from netrc (machine vrtnu)
+    - Builds Gigya-based auth payload and performs login via _gigya_login
+    - Retrieves a token by POSTing to https://token.vrt.be with user info
+    - Handles retry on 401 (authentication hiccups), with a brief delay
+  - _real_extract():
+    - Display_id from URL
+    - Downloads page, extracts:
+      - video_id from nui-media element attributes
+      - publication_id (if present) to form video_id = publicationid + '$' + videoid
+      - optional page data from digitalData JSON blob (page)
+      - info from JSON-LD
+    - Returns a url_transparent pointing to:
+      https://mediazone.vrt.be/api/v1/vrtvideo/assets/{video_id}
+    - ie_key: CanvasIE.ie_key() to reuse the Canvas asset logic
+    - id, display_id, season_number derived from page data
+    - Merges JSON-LD info into the returned dict
+
+- DagelijkseKostIE (InfoExtractor)
+  - Purpose: Fetch Dagelijkse Kost (een.be) videos that point to Dako assets.
+  - URL pattern: https://dagelijksekost.een.be/gerechten/{id}
+  - real_extract():
+    - Extracts display_id from URL
+    - Scrapes title and description from page (title from dish-metadata__title class, description from dish-description or meta tags)
+    - Finds video_id in data-url attribute
+    - Returns a url_transparent to:
+      https://mediazone.vrt.be/api/v1/dako/assets/{video_id}
+    - Reuses CanvasIE by setting ie_key to CanvasIE.ie_key()
+    - id/display_id/title/description populated accordingly
+
+Important implementation details
+- Consistent use of helper methods from base extractor:
+  - _download_json, _download_webpage, _html_search_regex, _search_regex, _search_json_ld, _og_search_title/description, etc.
+  - _extract_m3u8_formats, _extract_f4m_formats, _extract_mpd_formats, _extract_ism_formats for various stream types
+  - _sort_formats to order formats
+  - merge_dicts to combine metadata dictionaries
+- Robust error handling in new API flow:
+  - If asset JSON lacks a title or returns specific codes, proper ExtractorError is raised or login/geo checks are triggered.
+- Geo restrictions:
+  - Geo check uses self.raise_geo_restricted with BE country code when appropriate.
+- Subtitles handling:
+  - Subtitles are collected if subtitleUrls exists and type is 'CLOSED', language 'nl' is assumed.
+- Transparent URL patterning:
+  - CanvasEenIE and VrtNUIE return a _type of 'url_transparent' pointing to a Canvas asset URL, promoting reuse of CanvasIE’s asset extraction logic.
+- Login and token flow:
+  - For VrtNUIE, credentials are optional in some test cases; if provided, the extractor logs in via Gigya and obtains a token by POSTing to token.vrt.be, handling potential 401 errors with retry.
+- Data extraction strategy:
+  - Uses a mix of JSON API responses (old and new) and HTML parsing (webpage, data attributes, JSON-LD) to obtain video IDs, titles, descriptions, and durations.
+
+Tests
+- The file includes _TESTS for CanvasIE, CanvasEenIE, and VrtNUIE to validate URL matching, metadata extraction, format handling, and some error conditions.
+- Some tests expect skipping downloads or specific warnings about unsupported codecs, illustrating handling of non-transcoded formats.
+
+In short
+- This file provides a set of extractors to fetch VRT/CANVAS-based videos from several sites, supporting both old and new API endpoints, multiple streaming formats, optional subtitles, and complex login workflows for protected content. It emphasizes reuse of a central CanvasIE for asset handling and uses transparent URL wrappers to route various sites through the same underlying asset extraction logic.

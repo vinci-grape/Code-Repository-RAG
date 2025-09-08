@@ -1,0 +1,52 @@
+- Purpose: BreakIE is a youtube-dl information extractor for Break.com video pages. It handles direct Break videos and embedded YouTube videos on Break, returning standardized metadata and format information.
+
+- Key class:
+  - BreakIE(InfoExtractor)
+
+- URL matching:
+  - _VALID_URL = r'https?://(?:www\.)?break\.com/video/(?P<display_id>[^/]+?)(?:-(?P<id>\d+))?(?:[/?#&]|$)'
+  - Captures display_id and an optional numeric id from the Break video URL.
+
+- Tests:
+  - Includes cases for:
+    - A direct Break video with known id, title, ext, and age_limit.
+    - A Break page with an embedded YouTube video; expects YouTube-derived metadata (id, title, description, upload_date, uploader, etc.) and skip_download in tests.
+    - A Break URL that should only be matched (only_matching).
+
+- Main extraction flow (_real_extract):
+  1) Extract display_id and video_id from the URL using the _VALID_URL regex.
+  2) Download the webpage.
+  3) Try to find an embedded YouTube URL via YoutubeIE._extract_url(webpage). If found, return a YoutubeIE extraction result via self.url_result(youtube_url, ie=YoutubeIE.ie_key()).
+  4) If no YouTube embed is found, locate a JavaScript content array with the regex (?s)content["']\s*:\s*(\[.+?\])\s*[,\n], then parse it as JSON to get content (a list of video entries).
+  5) Build formats:
+     - For each video entry, get video_url from video['url'].
+     - Skip if no URL.
+     - Extract bitrate from the URL using (\d+)_kbps and convert to int (tbr).
+     - Create a format dict with:
+       - 'url': video_url
+       - 'format_id': 'http-<bitrate>' if bitrate exists, otherwise 'http'
+       - 'tbr': bitrate (if available)
+  6) Sort formats with _sort_formats.
+  7) Extract title using two patterns (tries both):
+     - title["']\s*:\s*(["'])(?P<value>(?:(?!\1).)+)\1
+     - or <h1[^>]*>(?P<value>[^<]+)
+  8) Helper function get(key, name) to extract integer values from the page, using a regex like %s["']\s*:\s*["'](\d+) and returning int or None.
+  9) Derive metadata:
+     - age_limit = get('ratings', 'age limit')
+     - video_id = video_id or get('pid', 'video id') or display_id
+  10) Return a result dict with:
+     - 'id': video_id
+     - 'display_id': display_id
+     - 'title': title
+     - 'thumbnail': og:image from the page (via _og_search_thumbnail)
+     - 'age_limit': age_limit
+     - 'formats': formats
+
+- Important implementation details:
+  - If a YouTube URL is embedded on the Break page, the extractor delegates to YoutubeIE (returns a YoutubeIE extraction result) instead of parsing Break-specific JSON.
+  - The content data is extracted from a JavaScript JSON-like array embedded in the page; parsing is performed with _parse_json on the matched snippet.
+  - Formats are derived from the content array; bitrate is parsed from the video URL using a _kbps pattern, and used to label format_id as http-<bitrate> and to set tbr.
+  - Title can come from a JSON-like title field or from a page <h1> tag.
+  - The thumbnail is obtained via _og_search_thumbnail.
+  - The code is resilient to missing per-entry URLs (skips entries without 'url').
+  - The _TESTS cover both direct Break videos and embedded YouTube videos, ensuring both code paths work.

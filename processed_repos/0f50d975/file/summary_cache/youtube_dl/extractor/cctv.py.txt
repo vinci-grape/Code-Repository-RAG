@@ -1,0 +1,53 @@
+Concise summary of youtube-dl extractor file: youtube-dl/youtube_dl/extractor/cctv.py
+
+- Purpose
+  - Implement CCTVIE, an extractor for CCTV-related pages (cntv/cctv domains and ncpa-classic), to fetch video metadata and direct access URLs/formats.
+
+- Key class and workflow
+  - CCTVIE(InfoExtractor)
+    - _VALID_URL: Regular expression matching CCTV-related URLs across cntv/cctv domains and ncpa-classic, capturing a video id from the URL.
+    - _TESTS: Several test cases with expected metadata (id, title, description, duration, uploader, timestamp, upload_date) and sample URLs showing various page structures, including skip_download flags and some only_matching tests.
+    - _real_extract(url):
+      - Derives an initial video_id from the URL, downloads the page, and then tries multiple JS-embedded patterns to extract the real video id (e.g., guid, videoCenterId, changePlayer, loadVideo, initMyAray, ids).
+      - Calls the API endpoint http://vdn.apps.cntv.cn/api/getHttpVideoInfo.do with:
+        - pid: video_id
+        - url: original page URL
+        - idl/idlr modifiers (32), modifyed=false
+      - Retrieves video data from the API response.
+
+- Main functionality
+  - Title: data['title'] from the API response.
+  - Formats:
+    - Extracts video URLs from the API data:
+      - If data['video'] is a dict, considers two quality paths: lowChapters and chapters. For each, takes the first item’s 'url' if present and adds a format with:
+        - url: the retrieved URL
+        - format_id: 'http'
+        - quality: enumerated (0 for first, 1 for second)
+        - preference: -1
+      - If data['hls_url'] is present:
+        - Strips maxbr parameter from the URL
+        - Extends formats with HLS formats parsed via _extract_m3u8_formats using entry_protocol 'm3u8_native' and m3u8_id 'hls'. fatal=False to avoid failing if m3u8 parsing encounters issues.
+    - _sort_formats(formats) to order by quality/preference.
+  - Metadata:
+    - uploader: data.get('editer_name')
+    - description: extracted from the page’s meta description via _html_search_meta
+    - timestamp: unified_timestamp(data.get('f_pgmtime'))
+    - duration: float_or_none(try_get(video, lambda x: x['totalLength']))
+  - Return dict:
+    - id: video_id
+    - title
+    - description
+    - uploader
+    - timestamp
+    - duration
+    - formats
+
+- Important implementation details
+  - Robust video-id extraction: multiple regex alternatives cover various page scripts that initialize or reference the actual video id.
+  - Safe data access: try_get is used to extract nested fields without raising on missing keys.
+  - Format handling: supports both direct HTTP URLs (lowChapters/chapters) and HLS streams (hls_url) with m3u8 parsing.
+  - Metadata extraction: uses _html_search_meta for description, unified_timestamp for a standardized timestamp, and float_or_none for duration.
+  - Compatibility helpers: compat_str to normalize string extraction; proper handling of potential missing fields.
+  - Tests demonstrate handling of diverse page structures, including cases with skip_download and cases that should only match URLs without extracting data.
+
+Overall, the extractor focuses on retrieving a CCTV video’s direct formats (HTTP and HLS) and essential metadata by reverse-engineering the page to get a video identifier, querying CNTV’s video info API, and normalizing the results for YouTube-dl’s standard InfoDict.

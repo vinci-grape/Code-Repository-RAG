@@ -1,0 +1,33 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/spiegel.py
+
+Overview
+- This extractor targets Spiegel (and manager-magazin) video pages. It discovers the embedded JW Platform video ID from the page and returns a transparent URL pointing to JWPlatformIE, effectively delegating actual video extraction to JW Platform.
+
+Key components
+- SpiegelIE class (subclass of InfoExtractor)
+  - _UUID_RE: Regular expression for a UUID, used to recognize IDs in URLs.
+  - _VALID_URL: Regex to identify Spiegel or Manager Magazin video pages. It matches URLs containing a path with an ID that is either numeric or a UUID, and allows optional -embed or -iframe segments and an optional .html suffix.
+  - _TESTS: Examples verifying matching and extraction behavior. The first test checks full extraction (id, display_id, title, duration, upload date, etc.). Other tests ensure various Spiegel URLs are recognized (only_matching).
+
+Main extraction flow (_real_extract)
+- video_id = self._match_id(url): Extracts the id portion from the URL (digits or UUID as per _VALID_URL).
+- webpage = self._download_webpage(url, video_id): Downloads the HTML content of the video page.
+- media_id = self._html_search_regex(..., webpage, 'media id', group='id'):
+  - Uses a regex to locate a JSON-like field mediaId within the page. It accounts for HTML-escaped quotes (&#34;) and double quotes, extracting the value inside mediaId.
+  - The pattern handles both quoted styles and returns the matched media ID.
+- Return value: a dict that instructs youtube-dl to fetch the video via JW Platform
+  - '_type': 'url_transparent' — delegates to another extractor.
+  - 'id': video_id — internal video identifier from the page URL.
+  - 'display_id': video_id — user-friendly display id (same as id in tests).
+  - 'url': 'jwplatform:%s' % media_id — points to JW Platform using the discovered media_id.
+  - 'title': self._og_search_title(webpage, default=None) — attempts to extract the OpenGraph title from the page.
+  - 'ie_key': JWPlatformIE.ie_key() — explicitly uses JWPlatformIE for extraction.
+
+Important implementation details
+- The extractor does not fetch the actual video URL itself; instead, it creates a url_transparent entry that redirects extraction to JWPlatformIE with the discovered media_id.
+- Extraction of media_id is robust to different quote styles in the page's JSON-like data (handles both &#34; and " and their preceding/following quotes).
+- Title is obtained from OpenGraph metadata if available; otherwise None is allowed (default=None).
+- The _TESTS include an example that yields a full set of metadata (id, display_id, title, duration, upload_date, timestamp) to demonstrate the integration with JW Platform data.
+
+What it achieves
+- Enables youtube-dl to download Spiegel video content by leveraging JW Platform's video hosting, without needing to parse or download the video directly from Spiegel’s site.

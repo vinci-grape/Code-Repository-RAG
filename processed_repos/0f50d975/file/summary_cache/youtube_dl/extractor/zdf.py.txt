@@ -1,0 +1,99 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/zdf.py.
+
+Overview
+- This module implements ZDF extraction support for youtube-dl (yt-dlp style).
+- It provides three main classes:
+  - ZDFBaseIE: common base with utilities for ZDF video extraction.
+  - ZDFIE: the main extractor for individual ZDF content (regular web pages and mobile paths).
+  - ZDFChannelIE: extractor for ZDF channel pages (playlist of videos).
+
+Key functionality and flow
+- GEO and quality settings
+  - ZDFBaseIE defines _GEO_COUNTRIES = ['DE'], restricting availability to Germany.
+  - _QUALITIES = ('auto', 'low', 'med', 'high', 'veryhigh', 'hd') used to map quality levels.
+
+- API access and headers
+  - _call_api(url, video_id, item, api_token=None, referrer=None) builds HTTP headers:
+    - If api_token is provided, sets Api-Auth: Bearer <token>.
+    - If referrer is provided, sets Referer.
+  - It fetches JSON data via _download_json and returns parsed data.
+
+- Subtitles
+  - _extract_subtitles(src) parses captions from the source structure.
+  - Builds a dict mapping language to a list of subtitle dicts with 'url'.
+
+- Formats extraction
+  - _extract_format(video_id, formats, format_urls, meta) creates a video format entry from a metadata blob.
+  - Handles: 
+    - HLS: mimeType application/x-mpegURL or .m3u8 extension → _extract_m3u8_formats
+    - Smooth streaming: mimeType application/f4m+xml or .f4m → _extract_f4m_formats
+    - Other HTTP formats: constructs a format dict with fields like 'url', 'format_id', 'tbr', and codec information.
+  - It creates a robust format_id from type and quality, and attempts to derive tbr from the URL (pattern _<digits>k_).
+  - Adds metadata fields to each format:
+    - format_note, language, language_preference (10 for main, -10 for ad, else -1), quality (mapped via _QUALITIES).
+  - Ensures no duplicate formats via a format_urls set.
+
+- PTMD (player/transmission metadata) handling
+  - _extract_ptmd(ptmd_url, video_id, api_token, referrer) fetches a ptmd manifest.
+  - content_id is ptmd['basename'] or last path segment.
+  - Iterates over ptmd['priorityList'], for each formitaeten, and each quality, collects audio tracks.
+  - For each track, calls _extract_format to add to formats.
+  - Sorts formats with _sort_formats.
+  - Computes duration from ptmd['attributes']['duration']['value'] (milliseconds to seconds).
+  - Returns a dict with extractor_key, id, duration, formats, and subtitles (via _extract_subtitles).
+
+- Player extraction
+  - _extract_player(webpage, video_id, fatal=True) extracts JSON from a data-zdfplayer-jsb attribute in the page via a regex, and parses it with _parse_json.
+
+- ZDFIE: main video extractor
+  - _REAL_FLOW: In _real_extract(url), extract video_id, fetch page, try to extract the player JSON. If a player config is found, use _extract_regular; otherwise fall back to _extract_mobile.
+  - Regular content flow (_extract_regular):
+    - Calls the content API via _call_api(player['content'], video_id, 'content', token, url).
+    - Delegates to _extract_entry(player['content'], player, content, video_id).
+  - _extract_entry(url, player, content, video_id):
+    - Determines title from content['title'] or content['teaserHeadline'].
+    - Locates ptmd_path from various relations in content['mainVideoContent'].
+      - Checks 'streams/default' and falls back to templates, replacing {playerId} as needed.
+    - If ptmd_path cannot be determined, raises ExtractorError.
+    - Calls _extract_ptmd on the resolved ptmd URL (joined with base url) using video_id, API token, and page URL as referrer.
+    - Builds thumbnails from content['teaserImageRef']['layouts'] with width/height parsed from layout keys if possible.
+    - Returns merged dict with info from ptmd plus title, description, duration, timestamp, and thumbnails.
+  - Mobile content flow (_extract_mobile):
+    - Downloads a mobile document JSON from zdf-cdn.live.cellular.de using the video_id.
+    - Extracts document and formitaeten; for each formitaeten entry, calls _extract_format to add formats.
+    - Sorts formats, builds thumbnails from document['teaserBild'] (if present) with width/height.
+    - Returns dict with id, title, description, duration, timestamp, thumbnails, subtitles (via _extract_subtitles), and formats.
+  - _extract_subtitles, _extract_format, and PTMD-related logic are shared between flows.
+
+- ZDFChannelIE: channel/playlist extractor
+  - _VALID_URL matches ZDF channel pages (channel/category pages).
+  - _TESTS provide channel IDs and expected playlist behavior (min counts, titles).
+  - suitable(cls, url) ensures this is chosen only when ZDFIE.suitable(url) is False, i.e., channel pages not handled by the main extractor.
+  - _og_search_title trims trailing “- ZDFmediathek” suffix from OpenGraph title to get clean channel title.
+  - _real_extract(url):
+    - Extracts channel_id from URL.
+    - Downloads page and searches for plusbar blocks using a regex that captures data-plusbar-id and a data-plusbar-url that must be a URL matching ZDFIE’s _VALID_URL.
+    - If --no-playlist is used (noplaylist), it returns just the main video URL (the first match) as a single entry; otherwise, it builds a playlist.
+    - check_video filters out entries that are marked as non-video via data-target-video-type (skips novideo).
+    - Uses playlist_from_matches to build a playlist of the video URLs with channel_id as title, using _og_search_title for the playlist title.
+
+Notes on tests and behavior
+- The _TESTS sections in ZDFIE provide representative URLs and expected metadata, and include skip entries for non-available pages.
+- The channel extractor uses a combination of page parsing and data-plusbar attributes to discover playable videos on a channel page.
+- The code handles both desktop regular pages and mobile document endpoints, choosing between them based on what the page provides.
+- The implementation uses a mix of direct HTTP format extraction and metadata-driven extraction (ptmd, content API) to assemble a complete set of video formats with proper language, quality, and encoding information.
+
+Main implementation details and utilities used
+- Uses helper methods from yt-dlp/youtube-dl utils:
+  - determine_ext, urljoin, url_or_none, update_url_query, try_get, merge_dicts, merge, parse_codecs, qualities, unified_timestamp, int_or_none, float_or_none, NO_DEFAULT, ExtractorError.
+- Uses _download_json/_download_webpage for fetching JSON and pages.
+- Uses _search_regex to extract JSON blob for the player config and ptmd paths.
+- Uses _extract_m3u8_formats and _extract_f4m_formats to parse HLS/F4M formats.
+- Uses _sort_formats and _extract_subtitles for final output normalization.
+- Honors geographic restriction and quality ranking through class-level constants and helpers.
+
+In short
+- ZDFBaseIE provides core utilities for API access, subtitle extraction, and format normalization.
+- ZDFIE handles two data paths for ZDF content: a regular API-driven flow (ptmd-based) and a mobile document flow; it assembles a full formats list, metadata, thumbnails, and subtitles.
+- ZDFChannelIE handles channel/playlist pages by extracting playable videos from page metadata and building a playlist, with support for --no-playlist mode.
+- The code emphasizes robust parsing of ZDF’s ptmd manifests, flexible handling of formats (HLS, F4M, and HTTP), and careful extraction of titles, descriptions, durations, timestamps, and thumbnails.

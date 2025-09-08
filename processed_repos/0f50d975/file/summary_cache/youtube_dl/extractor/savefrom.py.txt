@@ -1,0 +1,26 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/savefrom.py
+
+Purpose:
+- Implement a youtube-dl extractor for savefrom.net that extracts the real video URL embedded in SaveFrom’s page and delegates extraction to the appropriate corresponding extractor (e.g., YouTube).
+
+Key components:
+- Class: SaveFromIE(InfoExtractor)
+  - IE_NAME = 'savefrom.net'
+  - _VALID_URL: Regex that matches URLs of the form http(s)://<subdomain>.savefrom.net/#url=<target_url> and captures the inner URL as group 'url'.
+  - _TEST: Includes a sample SaveFrom URL and the expected result (video id, extension, title, uploader, upload_date, description) and a hint to skip actual download.
+
+Main functionality:
+- _real_extract(self, url)
+  - Uses re.match with _VALID_URL to obtain the captured inner URL (the actual video URL) from the SaveFrom URL.
+  - Derives a video_id by taking the last path segment of the provided URL and stripping the extension (though in practice, given the SaveFrom URL structure this yields a value like '#url=http:...' which is unused for actual download, and the real id is effectively taken from the inner URL later).
+  - Returns self.url_result(mobj.group('url'), video_id=video_id), which delegates the extraction to the appropriate extractor for the inner URL (e.g., YouTube).
+
+Implementation details:
+- Dependency on InfoExtractor base class from youtube-dl.
+- Uses Python standard libraries: re for regex matching, os.path for simple path processing to derive video_id.
+- The inner URL captured by the _VALID_URL regex (group 'url') is the URL that youtube-dl will process next.
+- The _TEST’s info_dict expects properties typical of a YouTube video (id, ext, title, upload_date, uploader, uploader_id, description) demonstrating that the inner URL resolves to a standard video resource.
+- Param 'skip_download': True is specified in _TEST to avoid downloading during tests.
+
+Overall:
+- This extractor acts as a bridge: it recognizes SaveFrom URLs that embed the actual video URL, extracts that inner URL, and forwards extraction to the appropriate dedicated extractor for that video platform.

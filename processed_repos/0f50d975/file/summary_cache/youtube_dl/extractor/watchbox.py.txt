@@ -1,0 +1,68 @@
+Summary of the code in youtube-dl/youtube_dl/extractor/watchbox.py
+
+- Purpose
+  - Implement an InfoExtractor (WatchBoxIE) for the German streaming site watchbox.de, capable of extracting metadata and video formats for both films (filme) and TV series episodes (serien).
+
+- URL pattern and tests
+  - _VALID_URL matches URLs like:
+    - https://www.watchbox.de/filme/…-<id>
+    - https://www.watchbox.de/serien/…/staffel-<n>/<episode>-<id>
+  - _TESTS includes:
+    - A film example with expected id, title, description, thumbnail, duration, age_limit, release_year, and a request for bestvideo format (skip_download).
+    - An episode example with series/season/episode metadata.
+    - A non-matching series URL test to ensure only_matching is handled.
+
+- Main workflow (_real_extract)
+  - Parse kind (serien or filme) and id from the URL using the _VALID_URL regex.
+  - Download the page HTML.
+  - Extract player configuration:
+    - First try: data-player-conf attribute containing a JSON-like object. Uses _search_regex to find data, then _parse_json with unescapeHTML.
+    - If unavailable, try alternative pattern playerConf = { ... }; convert with js_to_json.
+  - Resolve source and video_id:
+    - source = player_config.get('source') or {}
+    - video_id is taken from source.get('videoId') or the originally captured id.
+  - Retrieve dev API metadata:
+    - Fetch http://api.watchbox.de/devapi/id/<video_id> with query parameters format=json and apikey=hbbtv (fatal=False).
+    - item is the first entry of devapi['items'] if present.
+  - Resolve title:
+    - item['title'] or item['movie']['headline_movie'] (fallback) or source['title'].
+  - Build video formats:
+    - HLS (MP4 container): from item['media_videourl_hls'] or source['hls'], parsed with _extract_m3u8_formats (entry_protocol='m3u8_native', id 'hls').
+    - DASH (MP4 container): from item['media_videourl_wv'] or source['dash'], parsed with _extract_mpd_formats (mpd_id 'dash').
+    - MP4 fallback: from item['media_videourl'] if present; include width/height/tbr when available.
+  - Sort formats with _sort_formats.
+  - Metadata extraction:
+    - description = item['descr']
+    - thumbnail = item['media_content_thumbnail_large'] or source['poster'] or item['media_thumbnail']
+    - duration = item['media_length'] or source['length']
+    - timestamp = unified_timestamp(item['pubDate'])
+    - view_count = item['media_views']
+    - age_limit = item['movie']['fsk']
+    - release_year = item['movie']['rel_year']
+  - Assemble info dict with:
+    - id, title, description, thumbnail, duration, timestamp, view_count, age_limit, release_year, formats
+  - Series-specific metadata (only when kind is serien):
+    - series = item['special']['title'] or source['format']
+    - season_number: try to extract from title using pattern ^SXX EYY or from URL path /staffel-<n>/; convert to int if found.
+    - episode = source['title']
+    - episode_number: extract from title pattern SXX EYY
+    - Update info with series, season_number, episode, episode_number
+
+- Key implementation details
+  - Robust player config extraction: supports both data-player-conf JSON and a secondary playerConf pattern; uses unescapeHTML/js_to_json as needed; fatal ingestion is non-fatal to tolerate missing data.
+  - Video sources handling: supports HLS, DASH, and direct MP4 URLs; formats are collected and then sorted.
+  - Metadata extraction is defensive: uses try_get and default fallbacks to avoid failing when some fields are missing.
+  - Season/episode parsing logic:
+    - Attempts to derive season/episode numbers from the page title (regex on SXX EYY) or from the URL segment (staffel-<n>).
+  - Uses YouTube-dl utility helpers:
+    - int_or_none, strip_or_none, compat_str, try_get, unescapeHTML, unified_timestamp
+    - _download_json, _download_webpage, _parse_json, _search_regex
+    - _extract_m3u8_formats, _extract_mpd_formats, _sort_formats
+
+- Output
+  - Returns a single info dict containing:
+    - id, title, description, thumbnail, duration, timestamp, view_count, age_limit, release_year
+    - formats (list of available video formats)
+    - For series: series, season_number, episode, episode_number
+
+This extractor enables YouTube-dl to fetch and assemble video streams and rich metadata from watchbox.de for both movies and TV episodes, with careful handling of varying page structures and embedded player configurations.

@@ -1,0 +1,60 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/lcp.py
+
+Purpose
+- Provide extractors for the LCP (La Chaîne Parlementaire) site:
+  - LcpPlayIE: handles the Arkena/LCP embed player on play.lcp.fr.
+  - LcpIE: handles LCP pages that may embed the LcpPlayIE player and forwards extraction to that embedded player when present.
+
+Key classes and functionality
+- LcpPlayIE (ArkenaIE)
+  - Inherits from ArkenaIE.
+  - _VALID_URL matches embed URLs of the form:
+    http(s)://play.lcp.fr/embed/{id}/{account_id}/.../...
+    Captures id and account_id.
+  - _TESTS contains a test that exercises extracting an mp4 from a LCP embed (with metadata like id, title, timestamp).
+  - Purpose: extract information for videos hosted behind the Arkena embed on play.lcp.fr. The actual video extraction logic is provided by the ArkenaIE base class.
+
+- LcpIE (InfoExtractor)
+  - Inherits from InfoExtractor.
+  - _VALID_URL matches LCP site pages:
+    http(s)://www.lcp.fr/... (path components arbitrary)
+  - _TESTS includes:
+    - A page with an Arkena embed (expected to resolve to the embedded player and metadata).
+    - A page with a live Dailymotion stream (expected metadata including uploader, timestamp, etc.).
+    - An example page where only_matching is True (ensures URL pattern matches but no extraction is performed in tests).
+  - _real_extract(url):
+    - display_id = self._match_id(url) (extracts the URL’s id portion according to _VALID_URL).
+    - webpage = self._download_webpage(url, display_id) (loads the page HTML).
+    - Attempts to locate an iframe whose src matches LcpPlayIE._VALID_URL using a regex:
+      <iframe ... src="(url to LcpPlayIE embed)"`
+      This uses a pattern that extracts the iframe URL into the variable play_url.
+    - If no such iframe is found, returns a generic extractor result: self.url_result(url, 'Generic').
+    - If the embed URL is found:
+      - title = self._og_search_title(webpage, default=None) or self._html_search_meta('twitter:title', webpage, fatal=True)
+      - description = self._html_search_meta(('description', 'twitter:description'), webpage)
+      - Returns a dict for a transparent, chained extraction:
+        {
+          '_type': 'url_transparent',
+          'ie_key': LcpPlayIE.ie_key(),
+          'url': play_url,
+          'display_id': display_id,
+          'title': title,
+          'description': description,
+        }
+      - This delegates the actual video extraction to LcpPlayIE (Arkena-powered embed) while propagating metadata.
+
+Important implementation details
+- The LcpPlayIE class is used as the target for the url_transparent flow from LcpIE, enabling the main extraction to be focused on finding the embed URL and metadata from the parent page, while the embedded player handles the actual video retrieval.
+- The iframe URL extraction is tightly scoped to only match URLs that conform to LcpPlayIE._VALID_URL, avoiding unrelated iframes.
+- Fallback behavior: if no embed iframe is found, the code falls back to the Generic extractor for the page.
+- Metadata extraction order: tries OpenGraph title first, then twitter:title meta as a fallback; description is pulled from description or twitter:description meta tags.
+- Tests cover:
+  - Successful extraction via Arkena embed (with expected mp4 and metadata).
+  - A live stream case (expecting mp4 with uploader/description/etc).
+  - A page that matches the URL pattern but is not exercised for extraction (only_matching).
+
+Overall flow
+- User visits an LCP page.
+- LcpIE._real_extract searches for an LcpPlayIE-embedded iframe.
+- If found, it returns a url_transparent result pointing to the embedded player (LcpPlayIE) with title/description preserved.
+- If not found, it defers to the Generic extractor for the page.

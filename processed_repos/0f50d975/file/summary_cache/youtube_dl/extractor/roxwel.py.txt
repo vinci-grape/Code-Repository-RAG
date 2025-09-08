@@ -1,0 +1,43 @@
+Concise summary:
+
+- Purpose: Implement a YouTube-DL extractor for Roxwel videos. It discovers a video URL and metadata from Roxwel’s API and provides a downloadable RTMP URL along with metadata.
+
+- Key class:
+  - RoxwelIE(InfoExtractor): Defines the extraction logic for Roxwel.
+
+- URL pattern:
+  - _VALID_URL matches http(s)://www.roxwel.com/player/<filename> followed by a dot, ?, or end.
+  - filename is captured and used to query metadata.
+
+- Test data:
+  - _TEST contains an example URL and the expected info_dict (id, ext, title, uploader, uploader_id, upload_date, description, etc.) and a hint to skip actual download (RTMP).
+
+- Main functionality (_real_extract):
+  1) Extract filename from the URL using the _VALID_URL regex.
+  2) Fetch video metadata: info_url = http://www.roxwel.com/api/videos/<filename>; info = _download_json(info_url, filename).
+  3) Choose best RTMP/FLV quality:
+     - Collect media_rates entries that start with 'flv_' and convert to integers (strip 'flv_').
+     - Sort and pick the maximum rate as best_rate.
+  4) Obtain a temporary page URL to retrieve the actual RTMP URL:
+     - url_page_url = http://roxwel.com/pl_one_time.php?filename=<filename>&quality=<best_rate>
+     - rtmp_url = _download_webpage(url_page_url, filename, 'Downloading video url').
+  5) Determine file extension from rtmp_url using determine_ext.
+     - If ext is 'f4v', convert to a usable MP4-based RTMP URL by replacing the filename with 'mp4:<filename>'.
+  6) Return the final video info:
+     - id: filename
+     - title: info['title']
+     - url: rtmp_url
+     - ext: 'flv' (as expected by test data, even if the URL may indicate f4v/converted form)
+     - description: info['description']
+     - thumbnail: info.get('player_image_url') or info.get('image_url_large')
+     - uploader: info['artist']
+     - uploader_id: info['artistname']
+     - upload_date: unified_strdate(info['dbdate'])
+
+- Important implementation details:
+  - Uses unified_strdate to format the upload date from info['dbdate'].
+  - The final URL is an RTMP link derived via a one-time PHP endpoint and adjusted for f4v to mp4 URLs when necessary.
+  - The _TEST config sets skip_download to True to avoid downloading during tests.
+  - The extractor relies on Roxwel’s API structure: /api/videos/<filename> for metadata and /pl_one_time.php for the actual RTMP stream URL.
+
+Overall, RoxwelIE fetches video metadata, selects the best available FLV quality, retrieves a temporary RTMP URL, adjusts the URL if needed, and returns a structured info dictionary suitable for youtube-dl downstream processing.

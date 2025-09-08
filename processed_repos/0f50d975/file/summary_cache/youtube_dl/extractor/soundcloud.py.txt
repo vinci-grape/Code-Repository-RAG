@@ -1,0 +1,109 @@
+Overview
+- This file implements multiple SoundCloud extractors for youtube-dl (a.k.a. yt-dlp style). It handles tracks, playlists, user pages, stations, embedded players, and search results by talking to SoundCloud APIs (not just the public HTML pages).
+
+Key classes and responsibilities
+- SoundcloudEmbedIE
+  - Purpose: Extracts embedded SoundCloud players from a page.
+  - Key methods:
+    - _extract_urls(webpage): finds iframe embeds that load the SoundCloud player and capture their URLs.
+    - _real_extract(url): parses the encoded API URL from the embed URL (url=...), optionally preserves secret_token, and delegates to the URL result.
+
+- SoundcloudIE
+  - Core extractor for soundcloud.com tracks and related media.
+  - Key fields:
+    - _API_V2_BASE, _BASE_URL: base endpoints for API v2 and standard SoundCloud site.
+    - _CLIENT_ID management: _CLIENT_ID is loaded from cache or discovered dynamically via _update_client_id. This client_id is required for API requests.
+  - Key methods:
+    - _store_client_id / _update_client_id: fetches a valid client_id by inspecting SoundCloud homepage and scripts; caches it for future use.
+    - _download_json: overridden to automatically attach client_id to requests; on 401 it refreshes the client_id and retries.
+    - _real_initialize: initializes _CLIENT_ID from cache or a default value.
+    - _resolv_url(url): builds a resolve URL to the API v2 for a given SoundCloud URL.
+    - _extract_info_dict(info, full_title=None, secret_token=None): core logic to transform a track’s API response into the final info dictionary yt-dlp expects.
+      - Builds formats from two sources:
+        - New API transcodings: each item’s format URL is fetched, parsed, and turned into a format dict with proper protocol (http/m3u8), extension, bitrate (abr), etc. Special handling for HLS.
+        - Downloadable tracks: if downloadable, may hit a download endpoint to obtain a redirect URL and content-length; this is added as a separate format (format_id "download").
+      - Helper add_format(...) consolidates format fields, derives IDs like protocol/ext/abr, marks previews, and adjusts for HLS vs HTTP.
+      - Handles legacy/older formats and ensures vcodec = 'none' (audio-only).
+      Handles privacy and geo-restrictions (BLOCK policy triggers geo restriction error).
+      Thumbnails: builds multiple sizes if artwork_url is an image URL with a size token; falls back to user avatar or single thumbnail otherwise.
+      Counts: view_count, like_count, comment_count, repost_count extracted via helper extract_count.
+      Returns a dict with id, uploader info, timestamps, title, description, thumbnails, duration (ms to seconds), license, view/like/comment/repost counts, and the list of formats.
+    - _real_extract(url): matches against _VALID_URL. If a track_id is present, uses tracks/{track_id} endpoint; otherwise builds a title-based resolve URL and fetches info JSON. Delegates to _extract_info_dict.
+
+- SoundcloudPlaylistBaseIE
+  - Helper base for playlist-like results (playlists, user streams, etc.).
+  - _extract_set(playlist, token=None): builds a canonical playlist result from a playlist JSON object.
+    - If tracks are missing permalink URLs and a token is provided, fetches tracks via API to resolve missing URLs.
+    - Creates entries as SoundcloudIE results for each track, using either the track permalink URL or a constructed API URL.
+    - Returns a playlist containing id, title, description, and entries.
+
+- SoundcloudSetIE
+  - Subclass of SoundcloudPlaylistBaseIE for SoundCloud sets (playlists).
+  - _VALID_URL matches a user’s set URL.
+  - _real_extract(url): derives full_title from uploader/sets/slug and optional token; fetches the set info; delegates to _extract_set, passing token if present. Handles API errors by raising an ExtractorError with readable messages.
+
+- SoundcloudPagedPlaylistBaseIE
+  - Helper base for paged playlists (stream-like endpoints with offset/next_href).
+  - _extract_playlist(base_url, playlist_id, playlist_title):
+    - Uses SoundCloud’s linked_partitioning pagination (limit up to 200 per page).
+    - Iterates pages, collecting entries by resolving candidate items to either permalink URLs or API-backed track/playlist URLs.
+    - Builds a list of entries (each as a SoundcloudIE result) and returns a _type 'playlist' with id, title, and entries.
+
+- SoundcloudUserIE
+  - Extracts “user pages” (e.g., /soft-cell-official) or a specific resource (tracks, albums, sets, reposts, likes, spotlight).
+  - Uses SoundCloud’s API v2 endpoints corresponding to the resource to fetch playlists/tracks.
+  - Delegates to SoundcloudPagedPlaylistBaseIE to build and return the final playlist.
+
+- SoundcloudTrackStationIE
+  - Extracts “Track stations” (stations/track/...).
+  - Resolves the station, extracts the internal track id, and uses the API to fetch tracks for the station as a playlist.
+
+- SoundcloudPlaylistIE
+  - Extracts playlists from the API endpoint api.soundcloud.com/playlists/{id} (optionally with secret_token).
+  - Delegates to _extract_set to normalize into a standard playlist result.
+
+- SoundcloudSearchIE
+  - Search integration (scsearch:…).
+  - Inherits from SoundcloudIE and SearchInfoExtractor.
+  - _get_collection(endpoint, collection_id, **query): iterates through search results via API (search/tracks) with linked_partitioning and pagination, yielding results as SoundcloudIE entries until limit is reached.
+  - _get_n_results(query, n): delegates to _get_collection for tracks with limit n and returns a playlist with the results.
+  - Used for the special scsearch: namespace (e.g., scsearch15:query).
+
+Important implementation details and behaviors
+- Client ID management:
+  - SoundCloud API requires a client_id parameter. The code caches a client_id and tries to discover a valid one dynamically by inspecting SoundCloud’s homepage scripts. If a request returns 401, it refreshes the client_id and retries.
+  - _update_client_id fetches a new client_id by scanning script sources; _CLIENT_ID is persisted across runs via cache.
+
+- API usage and endpoints:
+  - Uses API v2 base: https://api-v2.soundcloud.com/ for most data (tracks, playlists, transcoding URLs, etc.).
+  - Uses resolve endpoints to translate user-friendly URLs to API resources.
+  - Handles both new (transcodings) and legacy (downloadable) media formats.
+  - Supports private/downloadable media via secret_token and private endpoints.
+
+- Formats handling:
+  - Builds a list of formats from transcodings (HTTP or HLS) and a separate downloadable URL when available.
+  - For each format, derives a format_id by combining protocol, extension, and bitrate (abr). Sets protocol to http/m3u8 or m3u8_native depending on type.
+  - Special case: if extension is aac, abr defaults to 256 kbps.
+  - vcodec is forced to 'none' (audio-only).
+  - Sorts formats and handles geo- restrictions if necessary.
+
+- Thumbnails/artwork:
+  - If artwork_url is present and is an image URL, the code builds multiple thumbnail sizes by replacing the filename suffix with a mapped size (from _ARTWORK_MAP).
+  - Uses original artwork as a high-priority thumbnail when available.
+
+- Metadata extraction:
+  - Gathers id, title, description, uploader and uploader_id, timestamps (converted to upload_date and timestamp), duration (ms to seconds), webpage_url, license, view/like/comment/repost counts, and genre.
+  - Converts timestamps using unified_timestamp and formats duration with float conversion as needed.
+
+- Edge cases and testing:
+  - Handles geo-restricted and private links (including tokenized variants).
+  - Handles no album art by falling back to avatar image when available.
+  - Includes tests for various types of SoundCloud URLs (tracks, sets, playlists, user pages, private links, etc.).
+
+- Playlists and paging:
+  - Playlist extraction is supported via multiple bases: SoundcloudPlaylistBaseIE, SoundcloudPagedPlaylistBaseIE, and SoundcloudSetIE.
+  - User-related and station-related pages support pagination and large collections through linked_partitioning or offset-based paging.
+
+In short
+- This module provides a comprehensive set of extractors for SoundCloud within youtube-dl, covering tracks, sets, user streams, stations, embedded players, and search results.
+- It relies on SoundCloud’s API (with client_id) to fetch metadata and streaming URLs, supports both new and legacy media formats, handles private and geo-restricted content, and builds rich metadata (thumbnails, durations, counts, etc.) along with properly constructed formats for playback.

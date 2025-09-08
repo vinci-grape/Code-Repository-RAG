@@ -1,0 +1,61 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/bloomberg.py
+
+Overview
+- Implements a YouTube-DL information extractor for Bloomberg video pages.
+- Class: BloombergIE(InfoExtractor)
+
+URL matching
+- _VALID_URL: Matches Bloomberg article/video pages and captures a portion of the path as id. Allows both www and non-www with various path segments.
+- _TESTS: Includes several sample URLs and expected results, with one test using HDS format selection. Some URLs are marked only_matching to indicate they aren’t direct video pages.
+
+Main extraction flow (_real_extract)
+1) Identify video and page
+- name = self._match_id(url): extracts the id portion from URL using _VALID_URL.
+- webpage = self._download_webpage(url, name): fetches HTML of the page.
+
+2) Discover Bloomberg video_id
+- Tries multiple regex patterns on the page to extract a video_id:
+  - bmmrId or videoId patterns
+  - data-bmmrid attribute
+- If none found, attempts to parse a BPlayer data object embedded in the page:
+  - BPlayer(null, { ... }); extract id from the JSON payload.
+- Fallbacks ensure handling of different Bloomberg page formats.
+
+3) Title handling
+- title = re.sub(': Video$', '', self._og_search_title(webpage)):
+  - Retrieves the title from OpenGraph tags and strips a trailing ": Video" suffix if present.
+
+4) Retrieve embed information
+- embed_info = self._download_json('http://www.bloomberg.com/api/embed?id=%s' % video_id, video_id)
+- The embed API returns a JSON object with a list of streams.
+
+5) Build formats from streams
+- For each stream in embed_info['streams']:
+  - stream_url = stream.get('url'); skip if missing.
+  - If stream['muxing_format'] == 'TS':
+    - Use self._extract_m3u8_formats(stream_url, video_id, 'mp4', m3u8_id='hls', fatal=False) to collect HLS formats (m3u8).
+  - Else (assumed non-TS, e.g., HDS/F4M):
+    - Use self._extract_f4m_formats(stream_url, video_id, f4m_id='hds', fatal=False) to collect F4M/HDS formats.
+- Accumulate all formats and sort them with self._sort_formats(formats).
+
+6) Return basic info dictionary
+- id: video_id
+- title: title (from OpenGraph, cleaned)
+- formats: aggregated formats list
+- description: self._og_search_description(webpage)
+- thumbnail: self._og_search_thumbnail(webpage)
+
+Key implementation details
+- Robust video_id discovery: checks for multiple possible JavaScript/OpenGraph patterns (bmmrId/videoId/data-bmmrid) and falls back to parsing embedded BPlayer JSON to obtain the id.
+- Uses Bloomberg’s embed API: http://www.bloomberg.com/api/embed?id=VIDEO_ID to fetch stream information.
+- Handles two main streaming formats:
+  - TS with HLS (m3u8): collected via _extract_m3u8_formats, with m3u8_id='hls', non-fatal on failure.
+  - Non-TS (likely HDS/F4M): collected via _extract_f4m_formats, with f4m_id='hds', non-fatal on failure.
+- Final result includes standard fields: id, title, formats, description, thumbnail.
+
+Notes on tests
+- Tests include two real Bloomberg video pages with expected video IDs, titles, and descriptions.
+- Tests use best[format_id^=hds] selection to emphasize non-TS HD formats.
+- Some URLs are marked only_matching to indicate they aren’t direct video pages or stable video endpoints.
+
+In short, BloombergIE scrapes Bloomberg video pages, resolves an internal video_id via several page patterns, fetches stream metadata from Bloomberg’s embed API, converts streams to youtube-dl format objects (supporting HLS and F4M), and returns a standard video info dictionary.

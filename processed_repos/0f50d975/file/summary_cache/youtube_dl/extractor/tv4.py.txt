@@ -1,0 +1,69 @@
+Summary of code: ./youtube-dl/youtube_dl/extractor/tv4.py
+
+Purpose
+- Implement a YouTube-DL extractor (TV4IE) for TV4 content from tv4.se and tv4play.se.
+- Retrieve video metadata and all available streaming formats (HLS, DASH, HDS, ISM) via TV4’s playback API, handle geo-restrictions, and return structured video information.
+
+Key components
+- TV4IE (subclass of InfoExtractor)
+  - IE_DESC: Description string for TV4 sources.
+  - _VALID_URL: Regex to identify TV4-related video pages on tv4.se and tv4play.se and capture a numeric video id.
+  - _GEO_COUNTRIES: List of countries (SE) where geo-restrictions may apply.
+  - _TESTS: A set of tests including real extraction examples (with expected metadata) and only_matching cases for various URL patterns.
+
+Main functionality (in _real_extract)
+1) Extract video_id
+   - Uses self._match_id(url) to obtain the numeric video identifier.
+
+2) Fetch video metadata
+   - Calls a playback API endpoint: https://playback-api.b17g.net/asset/{video_id}
+   - Query parameters include service=tv4, device=browser, protocol=hls,dash, drm=widevine
+   - Reads metadata from the response: title, description, broadcast_date_time, duration, image, seriesTitle, seasonNumber, episodeTitle, episodeNumber, isLive, is_geo_restricted, etc.
+
+3) Retrieve manifest URL
+   - Calls https://playback-api.b17g.net/media/{video_id} with service, device, protocol=hls
+   - Extracts manifestUrl from playbackItem
+
+4) Collect available formats
+   - HLS formats: _extract_m3u8_formats(manifest_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+   - DASH formats: _extract_mpd_formats(manifest_url with .m3u8 replaced by .mpd, video_id, mpd_id='dash', fatal=False)
+   - HDS formats: _extract_f4m_formats(manifest_url with .m3u8 replaced by .f4m, video_id, f4m_id='hds', fatal=False)
+   - ISM formats: _extract_ism_formats(re.sub(r'\.ism/.*?\.m3u8', r'.ism/Manifest', manifest_url), video_id, ism_id='mss', fatal=False)
+   - All calls use fatal=False to avoid failing extraction if some format types are unavailable.
+   - If no formats are found and the video is geo-restricted, raise geo restriction error for SE via self.raise_geo_restricted.
+
+5) Finalize formats
+   - Sort formats with self._sort_formats(formats)
+
+6) Build and return video info
+   - id: video_id
+   - title: from metadata['title']
+   - formats: collected list
+   - description: metadata.get('description')
+   - timestamp: parse_iso8601(metadata.get('broadcast_date_time'))
+   - duration: int_or_none(metadata.get('duration'))
+   - thumbnail: metadata.get('image')
+   - is_live: metadata.get('isLive') is True
+   - series: metadata.get('seriesTitle')
+   - season_number: int_or_none(metadata.get('seasonNumber'))
+   - episode: metadata.get('episodeTitle')
+   - episode_number: int_or_none(metadata.get('episodeNumber'))
+   - Subtitles field is present in code as a commented placeholder (not currently populated)
+
+Implementation details
+- Uses external playback API endpoints to obtain both metadata and the master manifest:
+  - Asset metadata: https://playback-api.b17g.net/asset/{video_id}
+  - Media manifest: https://playback-api.b17g.net/media/{video_id}
+- Access parameters emphasize widevine DRM, browser device, and multiple protocols (hls, dash, etc.).
+- Multiple formats are gathered from a single manifest URL by requesting various streaming descriptors (HLS, MPD, F4M, ISM).
+- Geo-restriction handling: If formats list ends up empty and the content is geo-blocked, an explicit geo-restriction error is raised for Sweden (SE).
+- The code uses utility helpers:
+  - int_or_none for safely converting numeric fields
+  - parse_iso8601 for timestamp parsing
+  - _extract_m3u8_formats, _extract_mpd_formats, _extract_f4m_formats, _extract_ism_formats for parsing respective streaming formats
+  - _sort_formats to order formats by quality/preference
+
+Notable behavior
+- Supports both tv4.se and tv4play.se URL patterns.
+- Returns a comprehensive metadata dictionary including technical formats and descriptive fields, suitable for download and playback in the client.
+- The test suite validates both actual extraction results and URL matching coverage.

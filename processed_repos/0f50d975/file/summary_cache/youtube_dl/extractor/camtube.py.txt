@@ -1,0 +1,52 @@
+Summary of ./youtube-dl/youtube_dl/extractor/camtube.py
+
+Purpose
+- Implements a YouTube-DL extractor for CamTube videos, enabling downloading and metadata extraction from camtube.co recordings.
+
+Key components
+- CamTubeIE(InfoExtractor): Main extractor class.
+- _VALID_URL: Regex to recognize CamTube recording URLs (supports https?:// with optional www/api subdomains and singular/plural “recording(s)” path).
+- _API_BASE: Base API URL (https://api.camtube.co)
+- _TESTS: Includes a sample URL and expected metadata for testing.
+
+Main workflow (_real_extract)
+1. Parse display_id from URL using _match_id.
+2. Obtain a session token:
+   - Request JSON from https://api.camtube.co/rpc/session/new.
+   - Extract token from response['token'].
+   - Set a cookie on api.camtube.co: session=token (via _set_cookie).
+3. Retrieve video metadata:
+   - GET https://api.camtube.co/recordings/{display_id} with Referer header set to the original URL.
+   - Parse fields from the returned JSON:
+     - video_id = video['uuid']
+     - timestamp = unified_timestamp(video.get('createdAt'))
+     - duration = int_or_none(video.get('duration'))
+     - view_count = int_or_none(video.get('viewCount'))
+     - like_count = int_or_none(video.get('likeCount'))
+     - creator = video.get('stageName')
+4. Build formats:
+   - Single format pointing to the HLS manifest at:
+     https://api.camtube.co/recordings/{video_id}/manifest.m3u8
+   - format_id: 'hls'
+   - ext: 'mp4'
+   - protocol: 'm3u8_native'
+5. Return a result dictionary with:
+   - id: video_id
+   - display_id: display_id
+   - title: display_id
+   - timestamp, duration, view_count, like_count, creator
+   - formats: list containing the HLS format
+   - age_limit: 18
+
+Important implementation details
+- Uses youtube-dl utilities:
+  - _download_json for API calls
+  - _set_cookie to store session token for API requests
+  - unified_timestamp to convert createdAt to a Unix timestamp
+  - int_or_none to safely parse integers
+- The manifest URL is constructed from the video_id, not the display_id.
+- The extractor gracefully handles missing fields by using get() and int_or_none.
+- The _TESTS section demonstrates expected output for a sample CamTube recording, with skip_download to avoid downloading during tests.
+
+Overall functionality
+- Authenticate with CamTube API, fetch recording metadata, expose a single HLS-based format, and provide rich metadata such as duration, timestamps, counts, and creator for the video.

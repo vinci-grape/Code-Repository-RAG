@@ -1,0 +1,74 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/caffeine.py
+
+Overview
+- Implement a YouTube-DL extractor for Caffeine.tv video pages.
+- Class: CaffeineTVIE (inherits InfoExtractor).
+- Purpose: fetch video metadata and formats from Caffeine’s API and assemble a standard info dict for download.
+
+Key components
+- _VALID_URL: Regexp that matches Caffeine TV video URLs of the form https://www.caffeine.tv/<user>/video/<video-id> where video-id is a hex-like string with dashes.
+- _TESTS: Includes a sample URL and expected info dict (id, ext, title, timestamp, upload_date, uploader, duration, age_limit) with a bestvideo format.
+
+Main extraction flow (_real_extract)
+- Extract video_id from the URL using _match_id.
+- Retrieve JSON data from the Caffeine API:
+  - URL: https://api.caffeine.tv/social/public/activity/<video_id>
+  - Call: _download_json(...)
+- Pull broadcast-related info:
+  - broadcast_info = json_data['broadcast_info'] if present
+  - title = broadcast_info['broadcast_title']
+  - video_url = broadcast_info['video_url']
+- Determine the media format:
+  - ext = determine_ext(video_url)
+  - If ext is m3u8:
+    - formats = _extract_m3u8_formats(video_url, video_id, 'mp4', entry_protocol='m3u8', fatal=False)
+  - Else:
+    - formats = [{'url': video_url}]
+  - Sort formats with _sort_formats(formats)
+
+- Build the final info dictionary via merge_dicts, composed of:
+  - Base fields:
+    - id: video_id
+    - title: title
+    - formats: formats
+  - json_data-derived fields (via traverse_obj, get_all=False):
+    - uploader: extracted from json_data.user.username (and/or user.name in other mappings)
+    - like_count, view_count, comment_count (cast to int)
+    - tags (as text)
+    - is_live (boolean)
+  - broadcast_info-derived fields:
+    - duration: mapped from content_duration (int or None)
+    - timestamp: parsed from broadcast_start_time using parse_iso8601 (converted to Unix timestamp)
+    - thumbnail: built from preview_image_path via urljoin(page_url, thumbnail_path)
+    - age_limit: mapped from content_rating via a small mapping:
+      - If content_rating is e.g. 'NINE_PLUS', map to 9, 'TWELVE_PLUS' to 12, 'SEVENTEEN_PLUS' to 17, etc.
+      - The default is 17 if rating is unknown or missing.
+    - The mapping includes a specific handling inspired by Apple Store ratings:
+      - FOUR_PLUS -> 0
+      - NINE_PLUS -> 9
+      - TWELVE_PLUS -> 12
+      - SEVENTEEN_PLUS -> 17
+
+Implementation details and utilities
+- Uses a number of helper utilities:
+  - determine_ext: derive file extension from URL
+  - int_or_none: safely parse integers
+  - merge_dicts: merge multiple dicts into a single info dict
+  - parse_iso8601: parse ISO8601 timestamps
+  - T: type wrapper used within traverse_obj for casting
+  - traverse_obj: robust, nested data extraction with mapping rules
+  - txt_or_none: convert to text if possible
+  - urljoin: construct absolute URLs for thumbnails
+- Robust handling of two possible video URL formats:
+  - If video_url points to an HLS stream (m3u8), formats are extracted using _extract_m3u8_formats with entry_protocol='m3u8' and fatal=False to avoid failing when no formats are available.
+  - If video_url is a direct file, a single format dictionary with that URL is used.
+- The final info dict includes both common fields (id, title, uploader, etc.) and derived fields (timestamp, upload_date, duration, etc.), enabling downstream consumers to access standard metadata.
+
+What this enables
+- Automated extraction of Caffeine.tv videos, including:
+  - Title, uploader
+  - Video formats (including HLS when applicable)
+  - Duration, timestamps (upload date), and age restrictions
+  - View/like/comment counts and tags
+  - Thumbnail URL construction
+- Graceful handling of missing or varying data structures via traverse_obj and safe casting.

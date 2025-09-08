@@ -1,0 +1,58 @@
+Summary of ./youtube-dl/youtube_dl/extractor/popcorntv.py
+
+Overview
+- This file implements a YouTube-DL extractor for PopcornTV pages (PopcornTVIE), extending InfoExtractor.
+- It targets Italian Popcorn TV video pages under the guarda path and extracts streaming formats as well as metadata.
+
+Key components
+- Class: PopcornTVIE(InfoExtractor)
+  - _VALID_URL: Regex matching URLs like:
+    https://<subdomain>.popcorntv.it/guarda/<display_id>/<id>
+    where display_id is a slug and id is the numeric video ID.
+  - _TESTS: Includes a real video example and a second URL with only_matching to validate URL pattern recognition.
+
+Main extraction flow (_real_extract)
+- URL parsing
+  - Match URL with _VALID_URL and capture:
+    - display_id: slug used in the URL
+    - id: numeric video ID
+- Webpage retrieval
+  - Download the page HTML via _download_webpage.
+- Video formats
+  - Locate the master m3u8 URL by finding a link tag that has itemprop="contentUrl" or itemprop="embedUrl".
+  - The link element is extracted via a regex and parsed with extract_attributes to obtain the href attribute.
+  - Use _extract_m3u8_formats on the m3u8 URL to build a list of video formats.
+    - Parameters include display_id, extension 'mp4', entry_protocol='m3u8_native', and m3u8_id='hls'.
+- Metadata extraction
+  - Title: try to extract from an h1 tag with itemprop="name" and fallback to OpenGraph title (og:title).
+  - Description: optional HTML content inside an article tag with itemprop="description".
+  - Thumbnail: derived from og image via _og_search_thumbnail.
+  - Timestamp: parsed from the uploadDate meta using unified_timestamp (after _html_search_meta).
+  - Duration: parsed from a duration meta tag via _html_search_meta with int conversion and invscale=60, then cast to int if possible.
+  - View count: parsed from interactionCount meta via int_or_none.
+- Return value
+  - A dictionary containing:
+    - id: video_id
+    - display_id: display_id
+    - title: derived title
+    - description: optional description
+    - thumbnail: thumbnail URL
+    - timestamp: upload timestamp (UNIX epoch)
+    - duration: duration in seconds (as an integer when available)
+    - view_count: view count (optional)
+    - formats: list of available video formats derived from the m3u8 playlist
+
+Important implementation details
+- HTML parsing helpers:
+  - extract_attributes is used to parse attributes from the matched link element, specifically to obtain the href of the m3u8 URL.
+  - _search_regex is used to extract title from the HTML or fall back to og:title.
+  - _html_search_regex and _html_search_meta are used to extract description, uploadDate, duration, and interactionCount.
+  - _og_search_thumbnail and _og_search_title are used to fetch OpenGraph metadata as fallbacks.
+- Formats:
+  - The extractor relies on HLS (m3u8) formats via _extract_m3u8_formats with entry_protocol set to 'm3u8_native' and an id label 'hls'.
+- Robustness:
+  - Title and description extraction provide fallbacks to ensure metadata is captured even if some tags are missing.
+  - The test array includes a URL that should match the pattern but is intended for testing the URL-matching mechanism (only_matching).
+
+Overall purpose
+- To fetch PopcornTV video pages, extract the embedded HLS stream(s) and associated metadata (title, description, thumbnail, timestamp, duration, and view count) and present them in a structured format consumable by youtube-dl.

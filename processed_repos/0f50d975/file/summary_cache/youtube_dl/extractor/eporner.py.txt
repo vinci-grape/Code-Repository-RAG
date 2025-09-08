@@ -1,0 +1,79 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/eporner.py
+
+Purpose
+- Implement an InfoExtractor (EpornerIE) for porngenre site eporner.com to fetch video metadata and streaming formats.
+
+Key class
+- EpornerIE(InfoExtractor)
+  - _VALID_URL: Regex matching eporner video URLs, covering:
+    - /hd-porn/<id> or /embed/<id> or /video-<id> with optional display_id
+  - _TESTS: Includes a real example with expected metadata (id, display_id, ext, title, description, timestamp, upload_date, duration, view_count, age_limit) and several URL patterns for regex matching verification.
+
+Core extraction workflow (_real_extract)
+- URL parsing
+  - Match input URL against _VALID_URL to extract:
+    - video_id (from the id group)
+    - display_id (from the display_id group or falls back to video_id)
+  - Download the initial webpage and capture the redirect URL (webpage, urlh = _download_webpage_handle(url, display_id)).
+  - Recompute video_id from the final URL via self._match_id(urlh.geturl()) to ensure correctness after redirects.
+
+- Hash retrieval and calculation
+  - Extract a 32-char hex hash from the page using regex: r'hash\s*[:=]\s*["\']([\da-f]{32})'.
+  - Compute a derived hash via calc_hash, which mirrors reverse engineering from the site's vjs.js:
+    - Split the 32-char hex hash into 8-char chunks, convert each chunk from hex to int, then encode that int in base-36 using encode_base_n, concatenating the four results.
+
+- Video metadata request
+  - Fetch video JSON from: http://www.eporner.com/xhr/video/{video_id}
+  - Query parameters:
+    - hash: the result of calc_hash(hash)
+    - device: 'generic'
+    - domain: 'www.eporner.com'
+    - fallback: 'false'
+  - If video.available is False, raise ExtractorError with the message from the API.
+
+- Formats extraction
+  - Iterate over video['sources'] (a dict of kind -> formats_dict).
+  - For each format_id and format_dict:
+    - Skip non-dict structures defensively.
+    - src must exist and start with http.
+    - If kind == 'hls', extend formats with HLS entries via _extract_m3u8_formats(src, display_id, 'mp4', entry_protocol='m3u8_native', m3u8_id=kind, fatal=False).
+    - Otherwise, parse:
+      - height from format_id using (\d+)[pP]
+      - fps from format_id using (\d+)fps
+      - Append a format dict with 'url', 'format_id', 'height', 'fps'
+  - Sort formats with _sort_formats(formats).
+
+- Additional metadata
+  - json_ld = _search_json_ld(webpage, display_id, default={}) to collect structured data if present.
+  - duration: parsed from the page via parse_duration(self._html_search_meta('duration', webpage, default=None)).
+  - view_count: extracted via regex id="cinemaviews1" ... > numbers, then converted with str_to_int.
+
+- Result assembly
+  - Return a merged dict: merge_dicts(json_ld, {
+      'id': video_id,
+      'display_id': display_id,
+      'title': title (see below),
+      'duration': duration,
+      'view_count': view_count,
+      'formats': formats,
+      'age_limit': 18,
+    })
+  - Title extraction:
+    - Try OpenGraph title via _og_search_title(webpage, default=None).
+    - If unavailable, fall back to HTML title with pattern <title>(.+?) - EPORNER.
+
+Notes on implementation details
+- Title handling
+  - Primary: og:title meta tag; Fallback: HTML title, regex: <title>(.+?) - EPORNER.
+- Hash and security considerations
+  - The calc_hash function is a reverse-engineered mechanism from the site’s scripts (vjs.js) and is required to access the video JSON API.
+- Robustness
+  - The code defensively skips non-dict entries when iterating video['sources'] to handle unexpected API shapes.
+- Metadata sources
+  - Combines page-derived metadata (duration, view_count) with API-provided sources and optional JSON-LD data, giving precedence to explicit overrides in the final dictionary.
+- Age and availability
+  - age_limit is hard-coded to 18.
+  - If the API reports unavailable, an ExtractorError is raised with the API-provided message.
+
+Overall
+- The extractor retrieves a video’s final ID, derives a site-specific hash, fetches a JSON descriptor for the video, builds a list of streaming formats (handling both HLS and progressive MP4 formats), gathers additional metadata from JSON-LD and the page, and returns a consolidated metadata dictionary suitable for download by youtube-dl.

@@ -1,0 +1,59 @@
+Concise summary of code in ./youtube-dl/youtube_dl/extractor/tv5mondeplus.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for TV5MONDE+ content (movies and series episodes) from TV5Monde sites (tv5mondeplus.com or revoir.tv5monde.com).
+
+- Main class
+  - TV5MondePlusIE (inherits from InfoExtractor)
+  - Metadata and routing
+    - IE_DESC: 'TV5MONDE+'
+    - _VALID_URL matches URLs under tv5mondeplus.com or revoir.tv5monde.com in the path /toutes-les-videos/... with an id slug captured as id.
+    - _GEO_BYPASS = False (geo-block handling enabled)
+
+- Tests
+  - _TESTS includes:
+    - A movie example with expected id, display_id, title, description, upload_date, and mp4 extension
+    - A series episode example with series/episode fields and md5 for description
+    - Two entries marked only_matching to ensure URL patterns align
+
+- Core functionality (_real_extract)
+  - URL handling
+    - Extract display_id via _match_id and download the page HTML.
+    - If the page contains a geo restriction message, raise a geo-restricted error for FR.
+
+  - Metadata extraction
+    - Title: parsed from the first <h1> tag in the page.
+    - Video loader data: locate an element with class video_player_loader and extract its data-broadcast attribute, then parse it as JSON.
+    - description: pulled from a div element with class episode-texte.
+    - series and episode: parsed from elements with classes episode-emission and episode-texte; the code can combine series and title if a series name exists and differs from the title.
+    - upload_date: try to extract from date_publication or publish_date within the page JSON as a 4-digit date with underscores (YYYY_MM_DD) and convert to YYYYMMDD. Falls back to meta duration if needed.
+
+  - Video formats extraction
+    - data-broadcast JSON provides a 'files' list under its payload (vpl_data['data-broadcast'] -> JSON -> 'files').
+    - Each file: require a 'url'. Determine format: use provided 'format' or infer from URL extension via determine_ext.
+    - HLS handling: if format == 'm3u8', use _extract_m3u8_formats with m3u8_native, and add formats with id 'hls'. fatal=False to avoid abort on missing streams.
+    - For non-HLS: add a simple format dict with 'url' and 'format_id' (the inferred format).
+    - After collecting, call _sort_formats(formats).
+
+  - Other media metadata
+    - duration: try data-broadcast's 'data-duration' via int_or_none; if missing, fall back to parse_duration of the page meta tag (via _html_search_meta('duration')).
+    - thumbnail: from vpl_data['data-image'].
+    - video_id: attempt to extract a GUID-like string from data-guid or, alternatively, an id_contenu numeric field; defaults to the display_id if not found.
+    - Returns an InfoDict with keys:
+      - id, display_id, title, description, thumbnail, duration, upload_date, formats, series, episode
+
+- Helper utilities used
+  - determine_ext: infer file extension if not provided
+  - extract_attributes: parse HTML tag attributes into a dict
+  - int_or_none: safely convert to int or None
+  - parse_duration: convert duration string to seconds
+  - Various _youtube_dl.BaseExtractor helpers: _download_webpage, _html_search_regex, _parse_json, _sort_formats, _extract_m3u8_formats, _search_regex, _html_search_meta, etc.
+
+- Important implementation details
+  - The extractor targets the video loader element on the page, reading a JSON payload from data-broadcast to obtain a list of available video files.
+  - It supports both direct file URLs and HLS streams (m3u8), adding both to the formats with appropriate format handling.
+  - The display title may be augmented with a series name if present and distinct.
+  - The code carefully handles possible missing fields (upload_date, video_id) by providing fallbacks.
+  - Geo-restriction handling is explicit, with a FR-specific region lock message triggered when the page indicates the program is not available in the user’s region.
+
+Overall, the extractor fetches a TV5MONDE+ page, parses a JSON-like video-broadcast payload to assemble all available video formats (including HLS), and collects metadata (title, description, series/episode, upload date, duration, thumbnail) to return a complete InfoDict suitable for download.

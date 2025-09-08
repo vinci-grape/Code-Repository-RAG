@@ -1,0 +1,48 @@
+- Purpose: Two extractors for Soundgasm within youtube-dl:
+  - SoundgasmIE handles a single audio item.
+  - SoundgasmProfileIE handles a user/profile page and builds a playlist of that user’s items.
+
+- SoundgasmIE (single audio)
+  - Class: SoundgasmIE, IE_NAME = 'soundgasm'
+  - URL pattern: https://soundgasm.net/u/{user}/{display_id}
+  - _real_extract(url):
+    - Extracts user and display_id from the URL using the _VALID_URL regex.
+    - Downloads the page with _download_webpage.
+    - audio_url: found via _html_search_regex looking for a JavaScript-like m4a URL assignment (pattern m4a: "url" or m4a: 'url').
+    - title: extracted from a div with class including jp-title; falls back to display_id if not found.
+    - description: attempted from either a div with jp-description or a Description list item; not fatal if missing.
+    - audio_id: derived from the filename part of the audio URL (matching /([^/]+)\.m4a); defaults to display_id if not found.
+    - Returns an info dict:
+      - id: audio_id
+      - display_id: display_id
+      - url: audio_url
+      - vcodec: 'none' (audio-only)
+      - title: title
+      - description: description
+      - uploader: user extracted from the URL
+  - Key implementation notes:
+    - Robust extraction of the direct M4A URL using a regex that captures the value of a quoted string following m4a:
+      (?s)m4a\s*:\s*(["'])(?P<url>(?:(?!\1).)+)\1
+    - Provides sensible defaults (display_id) for missing fields.
+    - Returns a standard video info dict suitable for downloading an audio file.
+
+- SoundgasmProfileIE (profile/playlist)
+  - Class: SoundgasmProfileIE, IE_NAME = 'soundgasm:profile'
+  - URL pattern: https://soundgasm.net/u/{id}/? optionally with a fragment
+  - _real_extract(url):
+    - profile_id: extracted from the URL path.
+    - webpage: fetch the profile page with _download_webpage.
+    - entries: a list built by finding all hrefs that match the pattern /u/{profile_id}/... on the page. For each found audio_url, create a URL result using self.url_result(audio_url, 'Soundgasm'), i.e., delegate to the SoundgasmIE extractor for each item.
+    - Returns a playlist_result consisting of the collected entries and the profile_id as the playlist id.
+  - Key implementation notes:
+    - Uses a targeted regex to locate all relevant audio item links within the profile page:
+      href="([^"]+/u/%s/[^"]+)" % profile_id
+    - Leverages the existing SoundgasmIE for each item by passing the type 'Soundgasm' to url_result, enabling automatic extraction of each track.
+
+- Tests/_DATA:
+  - SoundgasmIE _TEST demonstrates a sample URL, expected MD5 for the audio, and an info_dict with id, ext (m4a), title, description, and uploader.
+  - SoundgasmProfileIE _TEST demonstrates a sample profile URL with id, and a playlist_count of 1.
+
+- Summary of main behavior:
+  - The code enables downloading a single Soundgasm audio file with metadata (title, description, uploader) and provides a direct M4A URL (audio-only).
+  - It also enables discovering a user’s Soundgasm page and generating a playlist of all items linked on that page by reusing the single-audio extractor for each item.

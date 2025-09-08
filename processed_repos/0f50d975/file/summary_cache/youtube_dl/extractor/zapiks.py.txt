@@ -1,0 +1,47 @@
+- Purpose: ZapiksIE is a YouTube-dl extractor that fetches video metadata and available formats from Zapiks (zapiks.fr/com or zapiks.com).
+
+- URL matching:
+  - Uses _VALID_URL to match Zapiks video pages and embed-like URLs.
+  - Captures either a display path (display_id) or a numeric media_id (id). If id is not present in the URL, it falls back to extracting data-media-id from the page.
+
+- Entry point: _real_extract(url)
+  - Extracts video_id from the URL; display_id is either the captured path or the video_id.
+  - Downloads the main webpage for the given URL.
+
+- Fallback data extraction:
+  - If video_id is not present in the URL, it searches the page for data-media-id="(\d+)" to obtain the ID.
+
+- Playlist retrieval:
+  - Fetches an XML playlist from http://www.zapiks.fr/view/index.php?action=playlist&media_id=VIDEO_ID&lang=en.
+  - Uses an XML namespace mapping for JWPlayer: 'jwplayer' maps to http://rss.jwpcdn.com/.
+
+- XML namespace handling:
+  - Helper function ns(path) wraps paths with the JWPlayer namespace using xpath_with_ns.
+
+- Metadata extraction from playlist item:
+  - item = first <channel>/<item> in the playlist.
+  - title: item/title or falls back to OpenGraph title from the page.
+  - description: OpenGraph description from the page (default None if unavailable).
+  - thumbnail: item/jwplayer:image or fallback to OpenGraph thumbnail from the page.
+  - duration: parsed from the HTML meta tag 'duration' via _html_search_meta, then parse_duration.
+  - timestamp: parsed from the HTML meta tag 'uploadDate' via _html_search_meta, then parse_iso8601.
+  - view_count: extracted via regex UserPlays:(\d+) on the page.
+  - comment_count: extracted via regex UserComments:(\d+) on the page.
+
+- Formats extraction:
+  - Iterates over all JWPlayer sources in the item: item.findall(ns('./jwplayer:source')).
+  - For each source: format_id = source.attrib['label'], url = source.attrib['file'].
+  - If format_id contains a height (e.g., "720p"), extracts height using regex r'^(?P<height>\d+)[pP]' and stores as an int.
+  - Appends each format to a list and sorts formats with _sort_formats.
+
+- Returned information:
+  - A dict with keys: id, title, description, thumbnail, duration, timestamp, view_count, comment_count, formats.
+
+- Key implementation details:
+  - Uses a JWPlayer playlist XML as the source of available formats.
+  - Namespace-aware parsing to extract JWPlayer-specific elements (source, image).
+  - Robustness: falls back to OG metadata when playlist data is missing.
+  - Test cases include a typical video page, and some only_matching cases for non-video or iframe URLs.
+
+- Tests:
+  - _TESTS include a real example with expected ID, title, duration, timestamp, and other fields, plus several only_matching entries to ensure URL patterns are recognized without extraction.

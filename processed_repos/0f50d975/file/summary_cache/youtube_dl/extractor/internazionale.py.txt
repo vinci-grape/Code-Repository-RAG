@@ -1,0 +1,54 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/internazionale.py
+
+- Purpose
+  - An InfoExtractor for Internazionale video pages. It parses a page, discovers the video source URLs (HLS and MPEG-DASH), and returns standard metadata plus available formats.
+
+- Main class
+  - InternazionaleIE(InfoExtractor)
+
+- URL pattern
+  - _VALID_URL matches URLs like https://www.internazionale.it/video/... and captures a display slug as the id.
+
+- Tests
+  - _TESTS include two sample URLs with expected info_dicts, including id, display_id, title, description, timestamp, thumbnail, and mp4 format extraction via bestvideo.
+
+- Core extraction logic (_real_extract)
+  - Determine display_id from URL using _match_id.
+  - Download the page HTML with _download_webpage.
+  - Locate key page data via a regex for data- attributes:
+    - data-video-title: used for the title (falls back to OpenGraph title if missing)
+    - data-job-id: video_id
+    - data-video-path: video_path
+    - data-video-available_abroad: flag to indicate if the video is accessible abroad (default '1')
+  - Interpret data-video-available_abroad as a boolean to decide how to build the video base URL.
+  - Build video_base URL:
+    - https://video[optional -ita].internazionale.it/{video_path}/{video_id}.
+    - If not available abroad, use the -ita variant in the host.
+  - Extract formats:
+    - HLS (m3u8) formats from video_base + 'm3u8' using _extract_m3u8_formats with:
+      - entry_protocol='m3u8_native'
+      - m3u8_id='hls'
+      - fatal=False (do not fail if not found)
+    - DASH (mpd) formats from video_base + 'mpd' using _extract_mpd_formats with:
+      - mpd_id='dash'
+      - fatal=False
+  - Sort formats with _sort_formats.
+  - Timestamp extraction:
+    - Use meta tag article:published_time via _html_search_meta and convert to epoch with unified_timestamp.
+  - Return metadata dictionary:
+    - id: video_id
+    - display_id: display_id
+    - title: extracted title (or og:title fallback)
+    - thumbnail: og:image/og meta thumbnail via _og_search_thumbnail
+    - description: og:description via _og_search_description
+    - timestamp: parsed epoch timestamp
+    - formats: list of video formats discovered
+
+- Notable implementation details
+  - Uses a reusable DATA_RE regex pattern to capture values of multiple data- attributes (video-title, job-id, video-path, video-available_abroad) from the HTML.
+  - The video URL construction depends on geographic availability; when abroad is not allowed, it switches to a -ita subdomain variant.
+  - Combines both m3u8 (native) and mpd formats to maximize compatibility.
+  - Falls back to OpenGraph title/description if specific data attributes are missing.
+  - Uses existing helpers (unified_timestamp, _og_search_thumbnail, _og_search_description) consistent with other extractors.
+
+Overall, it’s a specialized extractor that identifies Internazionale video data in the page, builds the real video URL(s) depending on geographic access, retrieves both HLS and DASH formats, and returns standard metadata for download.

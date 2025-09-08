@@ -1,0 +1,113 @@
+Summary of frontendmasters extractor (youtube-dl)
+
+Purpose
+- Implements extraction for Frontend Masters content. Supports:
+  - Single lessons (FrontendMastersLessonIE)
+  - Courses as playlists (FrontendMastersCourseIE)
+  - Direct video URLs via API (FrontendMastersIE)
+- Requires login for access (via _real_initialize and _login).
+
+Key classes
+- FrontendMastersBaseIE (InfoExtractor)
+  - Central login handling and shared configuration.
+  - Constants:
+    - _API_BASE: API base URL for Frontend Masters Kabuki API
+    - _LOGIN_URL: login page URL
+    - _NETRC_MACHINE: netrc machine name for credentials
+    - _QUALITIES: mapping of quality names to resolution (low/mid/high)
+  - _real_initialize: triggers login on initialization
+  - _login: login flow
+    - Retrieves credentials with _get_login_info()
+    - Downloads login page, extracts hidden inputs, adds username/password
+    - Finds post URL from the form and submits login request
+    - Detects successful login or raises ExtractorError with error message
+
+- FrontendMastersPageBaseIE (FrontendMastersBaseIE)
+  - _download_course(course_name, url): fetches course JSON from API_BASE/courses/{course_name} with Referer header
+  - _extract_chapters(course): reads lessonElements and returns a list of chapter URLs (or empty)
+  - _extract_lesson(chapters, lesson_id, lesson): builds a url_transparent entry for a lesson
+    - title, display_id, description, thumbnail
+    - Computes chapter_number and chapter from index and elementIndex
+    - Attempts to parse duration from timestamp (hh:mm:ss - hh:mm:ss) if present
+    - Returns a dict with:
+      - _type: 'url_transparent'
+      - url: 'frontendmasters:<lesson_id>'
+      - ie_key: FrontendMastersIE.ie_key()
+      - id, display_id, title, description, thumbnail, duration, chapter, chapter_number
+
+- FrontendMastersIE (FrontendMastersPageBaseIE)
+  - _VALID_URL matches either:
+    - frontendmasters:<lesson_id> or
+    - https://api.frontendmasters.com/v1/kabuki/video/<lesson_id>/source
+  - _real_extract(url):
+    - lesson_id = extracted id
+    - source_url = API_BASE/video/{lesson_id}/source
+    - Builds video formats by querying the source endpoint for each combination of ext in (webm, mp4) and quality in (low, mid, high)
+      - For each, sends query with f (extension) and r (height)
+      - Collects the returned 'url' and merges with format metadata (ext, format_id)
+      - Skips missing formats (fatal=False)
+    - _sort_formats(formats)
+    - Subtitles: English VTT at API_BASE/transcripts/{lesson_id}.vtt
+    - Returns dict with id, title, formats, subtitles
+  - Notes:
+    - Uses Referer header in requests
+    - Uses _QUALITIES for height, but not width, to select formats
+
+- FrontendMastersLessonIE (FrontendMastersPageBaseIE)
+  - _VALID_URL matches a Frontend Masters course and a lesson slug:
+    https://www.frontendmasters.com/courses/<course_name>/<lesson_name>
+  - _TEST shows an example with expected metadata and md5 for description
+  - _real_extract(url):
+    - Parses course_name and lesson_name
+    - Downloads course JSON via _download_course
+    - Locates the specific lesson by slug in course['lessonData']
+    - Gets chapters via _extract_chapters(course)
+    - Returns _extract_lesson(chapters, lesson_id, lesson)
+
+- FrontendMastersCourseIE (FrontendMastersPageBaseIE)
+  - _VALID_URL matches a Frontend Masters course page:
+    https://www.frontendmasters.com/courses/<id>
+  - _TEST defines a playlist with title/description and count
+  - suitable(cls, url): ensures this extractor is chosen for a course URL only when not matching a lesson URL
+  - _real_extract(url):
+    - course_name = slug from URL
+    - course = _download_course(course_name, url)
+    - chapters = _extract_chapters(course)
+    - lessons = course['lessonData'] values sorted by their 'index'
+    - For each lesson with a slug:
+      - lesson_id = lesson.get('hash') or lesson.get('statsId')
+      - entries.append(_extract_lesson(chapters, lesson_id, lesson))
+    - title = course.get('title'), description = course.get('description')
+    - Returns playlist_result(entries, course_name, title, description)
+
+Important implementation details
+- Login flow
+  - Reads credentials via _get_login_info() and performs a typical form-based login
+  - If credentials are absent, _login returns silently
+  - On failure, raises ExtractorError with the error message if available
+- API usage
+  - Uses _download_course for course-level JSON
+  - For individual lessons via FrontendMastersIE, calls /video/{id}/source with query params to fetch video URLs per format/quality
+  - Subtitles are provided as English VTT files
+- Formats handling
+  - Quality levels defined in _QUALITIES and used to generate multiple formats
+  - For each (ext, quality) combination, adds a format with fields: url, ext, format_id, height, width
+  - Formats are sorted with _sort_formats
+  - For lesson entries, the video is represented as a url_transparent entry pointing back to FrontendMastersIE
+- Chapters and duration
+  - Chapters derived from course['lessonElements']
+  - Lesson duration parsed from timestamp when available using parse_duration
+  - chapter_number and chapter derived from index and elementIndex
+- URLs and identifiers
+  - Lesson access uses a url_transparent wrapper with ie_key set to FrontendMastersIE
+  - IDs are typically the lesson_id/hash/statsId; URLs for course/lesson pages are mapped to appropriate API calls
+- Tests and patterns
+  - Includes _TEST and _TESTS for various entry points
+  - _VALID_URL patterns cover both web URLs and API-based sources
+  - Course extractor ensures it only handles course pages when not a specific lesson URL
+
+Overall
+- The file provides a complete integration for Frontend Masters content into youtube-dl:
+  - Handles login, course listing, and individual lesson extraction
+  - Builds a rich set of video formats from the API, plus English transcripts
+  - Supports both course playlists and single-lesson extraction with proper metadata (title, description, chapter info) and correct URL resolution via url_transparent entries.

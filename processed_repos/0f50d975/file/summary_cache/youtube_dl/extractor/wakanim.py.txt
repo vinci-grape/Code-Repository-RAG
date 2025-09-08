@@ -1,0 +1,46 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/wakanim.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Wakanim episode pages (WakanimTV).
+  - Retrieves video formats from the episode’s M3U8/HLS manifest and gathers metadata.
+
+- Key class
+  - WakanimIE(InfoExtractor): Main extractor class.
+
+- URL pattern (_VALID_URL)
+  - Regex: https://(?:www.)?wakanim.tv/[^/]+/v2/catalogue/episode/(?P<id>\d+)
+  - Matches Wakanim V2 catalogue episode pages and captures the episode id.
+
+- Tests (_TESTS)
+  - Test 1 (non-DRM): Example URL returns:
+    - id, ext (mp4), title, description (MD5), series, season_number, episode, episode_number
+    - formats with best video
+  - Test 2 (DRM protected): Example URL marked only_matching, indicating DRM handling is expected to raise an error rather than provide formats.
+
+- Core extraction flow (_real_extract)
+  - id extraction: video_id = self._match_id(url)
+  - page fetch: webpage = self._download_webpage(url, video_id)
+  - m3u8 URL extraction:
+    - Find a file: "<url>" entry in the page via regex and extract the URL.
+    - Build absolute URL with urljoin(url, extracted_url)
+  - DRM check:
+    - Detect encryption parameter in the m3u8 URL (encrypted streams use encryption%3D...).
+    - If encryption is cenc or cbcs-aapl, raise ExtractorError('This video is DRM protected.', expected=True).
+  - Formats extraction:
+    - formats = self._extract_m3u8_formats(m3u8_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls')
+  - Metadata:
+    - info = self._search_json_ld(webpage, video_id, default={}) to gather JSON-LD metadata if present.
+    - title extraction via two regex patterns on the HTML:
+      - <h1 class="episode_h1" title="...">
+      - <span class="episode_title">...</span>
+    - Returns title if found; otherwise default remains.
+  - Result assembly:
+    - Return merge_dicts(info, {'id': video_id, 'title': title, 'formats': formats})
+
+- Important implementation details
+  - DRM handling is done by inspecting the m3u8 URL for encoding schemes (cenc, cbcs-aapl) rather than decrypting content.
+  - Uses urljoin to correctly resolve relative manifest URLs found in the page.
+  - Combines JSON-LD metadata (if present) with extracted page title and formats to form the final info dict.
+  - Robust title extraction with two fallback HTML patterns to accommodate variations in the page markup.
+
+Overall, the extractor retrieves the episode’s M3U8 manifest, checks for DRM, collects streaming formats, and compiles metadata (id, title, formats, plus any JSON-LD data) for use by youtube-dl.

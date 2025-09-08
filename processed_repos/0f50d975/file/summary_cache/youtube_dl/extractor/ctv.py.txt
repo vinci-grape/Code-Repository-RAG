@@ -1,0 +1,46 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/ctv.py
+
+Purpose
+- Implement a YouTube-DL extractor for CTV (ctv.ca) video pages. It resolves CTV show/movie pages to a underlying video source managed by the NineCNineMedia extractor.
+
+Main class
+- CTVIE (subclass of InfoExtractor)
+
+Key components
+- _VALID_URL
+  - Regex to match CTV show or movie pages:
+    https://(www.)?ctv.ca/(shows|movies)/.../
+  - Captures the page identifier (display_id) from the path, e.g. shows/your-morning/wednesday-december-23-2020-s5e88
+
+- _TESTS
+  - Provides test cases:
+    1) A real show URL with a detailed expected info_dict (id, ext, title, thumbnail, description, timestamp, upload_date, series, season, season_number, episode_number, tags, categories, duration)
+    2) A URL that should only be checked for URL matching (only_matching)
+
+- _real_extract(self, url)
+  - display_id = self._match_id(url): extract the path portion used for the GraphQL query
+  - Fetches data from the GraphQL endpoint:
+    https://www.ctv.ca/space-graphql/graphql
+    with a GraphQL query that resolves the path "/<display_id>" and returns:
+      content.axisId
+      content.videoPlayerDestCode
+  - The code expects the response at:
+    data.resolvedPath.lastSegment.content
+  - video_id = content['axisId']
+  - Returns a NineCNineMedia URL result via:
+    self.url_result('9c9media:%s:%s' % (content['videoPlayerDestCode'], video_id),
+                    'NineCNineMedia', video_id)
+  - This delegates actual media extraction to the NineCNineMedia extractor, using a composite identifier:
+    9c9media:<videoPlayerDestCode>:<axisId>
+
+Important implementation details
+- The GraphQL query is constructed with string formatting to insert the display_id into the path:
+  resolvedPath(path: "/%s") { lastSegment { content { ... on AxisContent { axisId videoPlayerDestCode } } } }
+- The final URL passed to url_result uses a pseudo-scheme (9c9media) and includes both videoPlayerDestCode and axisId; NineCNineMedia is responsible for decoding and retrieving the actual video stream.
+- The _TESTS reflect expected fields for a CTV show page, including metadata like title, description, timestamps, series, season information, and duration.
+
+Summary of functionality
+- Given a CTV show or movie page URL, the extractor:
+  1) Identifies the display path segment.
+  2) Queries CTV’s GraphQL API to obtain the underlying content identifiers (axisId and videoPlayerDestCode).
+  3) Delegates to NineCNineMedia with a constructed identifier to fetch the actual video stream and associated metadata.

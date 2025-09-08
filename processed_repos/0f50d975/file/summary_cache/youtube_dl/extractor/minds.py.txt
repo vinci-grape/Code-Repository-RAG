@@ -1,0 +1,111 @@
+Here is a concise but comprehensive summary of the code in youtube-dl/youtube_dl/extractor/minds.py.
+
+Purpose
+- Implement a set of extractors for Minds.com within youtube-dl:
+  - MindsIE: extract individual video/media pages (including activity-based entries and direct videos)
+  - MindsChannelIE: extract a channel feed (list of videos) as a playlist
+  - MindsGroupIE: extract a group feed (list of videos) as a playlist
+
+Main classes and structure
+- MindsBaseIE (InfoExtractor)
+  - Shared utilities for Minds.com
+  - _VALID_URL_BASE = https?://(www.)?minds.com/
+  - _call_api(path, video_id, resource, query=None)
+    - Builds API URL: https://www.minds.com/api/{path}
+    - Retrieves XSRF token from cookies and passes it as X-XSRF-TOKEN header
+    - Uses _download_json to fetch JSON, with Referer header set to https://www.minds.com/
+
+- MindsIE (inherits MindsBaseIE)
+  - IE_NAME = 'minds'
+  - _VALID_URL matches Minds media pages:
+    https://www.minds.com/media/<id>
+    https://www.minds.com/newsfeed/<id>
+    https://www.minds.com/archive/view/<id>
+  - _TESTS: multiple sample URLs with expected metadata (title, uploader, timestamps, counts, tags, etc.)
+  - _real_extract(url)
+    - Determine entity_id from URL
+    - Fetch entity data via API v1/entities/entity/{entity_id}
+    - If entity is type 'activity':
+      - If custom_type == 'video', use video_id = entity_guid
+      - Else, return a direct URL to perma_url (redirect)
+    - Else (video), ensure subtype is 'video' and set video_id = entity_id
+    - Fetch video data via API v2/media/video/{video_id}
+    - Build formats from video.sources:
+      - Each source with 'src' becomes a format with format_id (label), height (size), and url
+    - Sort formats
+    - Choose entity context (video.get('entity') or original entity)
+    - Gather uploader information from entity.ownerObj or empty
+    - Normalize tags, handling both list and single string cases
+    - Resolve thumbnail via poster (video.poster or entity.thumbnail_src) by fetching the URL to ensure validity
+    - Return a dict with:
+      - id, title, formats, description, license, timestamp
+      - uploader, uploader_id, uploader_url
+      - view_count, like_count, dislike_count, tags, comment_count
+      - thumbnail
+
+- MindsFeedBaseIE (inherits MindsBaseIE)
+  - Shared feed logic for channel and group
+  - _PAGE_SIZE = 150
+  - _entries(feed_id)
+    - Iterates through paginated feed videos using v2/feeds/container/{feed_id}/videos
+    - Each entry yields a playlist item pointing to MindsIE with the video URL
+    - Uses load-next value as new from_timestamp to paginate
+    - Stops when fewer than full page or missing next timestamp
+  - _real_extract(url)
+    - Extract feed_id from URL
+    - Fetch feed data via API v1/{self._FEED_PATH}/{feed_id} returning a dict keyed by self._FEED_TYPE
+    - Return a playlist_result built from:
+      - self._entries(feed['guid']) as the entries
+      - feed_id as id
+      - strip_or_none(feed.get('name')) as title
+      - feed.get('briefdescription') as description
+
+- MindsChannelIE (inherits MindsFeedBaseIE)
+  - _FEED_TYPE = 'channel'
+  - IE_NAME = 'minds:' + _FEED_TYPE
+  - _VALID_URL excludes some paths (newsfeed, media, api, archive, groups) and captures id
+  - _FEED_PATH = 'channel'
+  - _TEST: sample channel with id and basic info
+
+- MindsGroupIE (inherits MindsFeedBaseIE)
+  - _FEED_TYPE = 'group'
+  - IE_NAME = 'minds:' + _FEED_TYPE
+  - _VALID_URL matches groups/profile/<id>/feed/videos
+  - _FEED_PATH = 'groups/group'
+  - _TEST: sample group with id and basic info
+
+Key implementation details
+- API interaction
+  - All data retrieval goes through _call_api, which hits Minds’ API endpoints under https://www.minds.com/api/
+  - CSRF protection: token from cookies is sent via X-XSRF-TOKEN header
+  - For activity entries, non-video activities route to their perma_url; video activities extract the embedded video
+- Video formats
+  - Formats are built from video.sources, using:
+    - 'src' as URL
+    - 'label' as format_id
+    - 'size' as height (if provided)
+  - Formats are sorted with _sort_formats
+- Metadata extraction
+  - Title falls back to video_id if missing
+  - Description sanitized via clean_html
+  - License via str_or_none
+  - Timestamps via int_or_none
+  - Uploader name and ID extracted from ownerObj
+  - Uploader URL constructed if uploader_id is present
+  - View/like/dislike/comment counts extracted with int_or_none
+  - Tags normalization to always be a list
+- Thumbnails
+  - Poster URL resolution: video.poster or entity.thumbnail_src
+  - Validated by performing a lightweight page request with fatal=False; if retrievable, used as thumbnail URL
+- Feeds
+  - Channel and Group feeds are implemented via MindsFeedBaseIE
+  - Pagination uses limit and sync parameters; continues while there are more pages (load-next provided and full-page results)
+  - Entries are emitted as URLs pointing back to MindsIE (video pages) for each video GUID found in the feed
+- Tests
+  - MindsIE _TESTS cover:
+    - Direct video page extraction with expected fields
+    - Activity-type entities and fallback to perma_url
+    - Non-matching URLs and perma-URL cases
+  - MindsChannelIE and MindsGroupIE _TEST entries verify playlist extraction and basic metadata
+
+Overall, the file provides a cohesive implementation for Minds.com inside youtube-dl, handling both individual video extraction (with robust handling of Minds’ entity structure) and channel/group feeds as playlists, with careful attention to formats, metadata normalization, and CSRF-protected API access.

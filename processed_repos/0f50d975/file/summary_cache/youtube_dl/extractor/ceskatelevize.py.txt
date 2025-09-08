@@ -1,0 +1,65 @@
+Here's a concise, focused summary of the CeskaTelevize extractor.
+
+Purpose
+- Implemented in CeskaTelevizeIE (subclass of InfoExtractor) to extract video and playlist information from Ceska Televize sites (ivysilani, porady, zive) and related embeds.
+
+Key URL patterns and tests
+- _VALID_URL matches Ceska Televize pages under ivysilani, porady, zive.
+- _TESTS include:
+  - Bonus video (with IDEC and m3u8), via actual video page
+  - Live stream (zive)
+  - Another live via ivysilani with is_live
+  - iframe/embed URL
+  - 18+ caution trailer with a playlist (two items)
+  - iframe embed page and generic embed
+
+Main functionality and flow (_real_extract)
+- Fetches the page (playlist_id) and extracts basic metadata:
+  - site_name and playlist_title via OpenGraph
+  - playlist_description, cleaned of non-breaking spaces
+- Determines content type and IDEC (video id) for embedded content:
+  - For /zive/ or /porady/ pages, loads the Next.js data script (__NEXT_DATA__) to locate IDEC
+  - If on live pages (/zive/), IDEC under liveBroadcast; otherwise under mediaMeta or bonus
+  - If IDEC not found, errors out
+  - Retrieves an iframe hash from v-api/iframe-hash/ and loads the embed player with type and IDEC
+- Validation and errors:
+  - Detects geo-restrictions and raises geo error with a user-facing message
+  - If IDEC is missing, raises a specific ExtractorError
+- Playlist and item extraction:
+  - Tries to read a playlist structure from the page (via getPlaylistUrl) to determine playlist type and episode_id
+  - If not available directly, uses subsequent HTML/JS regexes to derive type and episode_id
+  - Builds a data payload for an AJAX call to get-client-playlist to obtain actual stream URLs
+  - Tries the request with two user-agent options (default and Safari) to improve compatibility
+  - Handles regional restrictions (error_region) from the server
+  - Fetches the final playlist JSON and iterates items:
+    - Detects is_live from item type
+    - Builds formats from item['streamUrls']:
+      - If stream URL contains drmOnly, skip
+      - HLS (m3u8) vs DASH (mpd) handling
+      - Special handling for audioDescription: sets negative source_preference
+    - For VOD items, extracts subtitles if present
+    - Builds final title:
+      - If single playlist, use playlist_title or item title
+      - If multiple items, combine as "playlist_title (item title)"
+    - Collects per-item data: id, title, description, thumbnail, duration, formats, subtitles, is_live
+- Final assembly:
+  - Sorts formats for each entry
+  - If only one entry, returns that single item; otherwise returns a playlist_result containing all entries
+- Subtitles:
+  - _get_subtitles downloads and fixes subtitles via _fix_subtitles
+  - _fix_subtitles converts millisecond-based SRT-like subtitles to proper SRT:
+    - Converts time segments from milliseconds to SRT timecodes
+    - Handles lines with a pattern of start; end duration and converts to a proper "start --> end" timestamp
+  - Subtitles are exposed as cs: with SRT data
+
+Notable implementation details
+- Uses Next.js data payload (_search_nextjs_data) to locate IDEC for robust extraction on various page types.
+- Differentiates between IDEC-based content and bonus content; handles both with appropriate type handling.
+- Interacts with iVysilani embed API using iframe hash to retrieve playable embed URLs, then resolves those to actual streams.
+- Supports both HLS (m3u8) and DASH (mpd) stream formats, with special handling for audioDescription streams.
+- Includes geo-restriction checks and clear error messaging for restricted content.
+- Subtitles support is limited to VOD items; subtitles are converted into SRT via a dedicated fixer.
+- Employs a fallback UA strategy (including Safari) for playlist retrieval to maximize compatibility.
+
+Overall
+- The file provides a comprehensive extractor for Česká televize services, handling live and on-demand content, embeds, georestrictions, multi-item playlists, and subtitle conversion, with careful handling of IDEC discovery and downstream playlist retrieval.

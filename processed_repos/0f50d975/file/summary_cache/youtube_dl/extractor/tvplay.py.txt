@@ -1,0 +1,91 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/tvplay.py
+
+Purpose
+- Implements MTG/TVPlay family extractors for youtube-dl, covering multiple MTG-owned streaming sites (TVPlay, Viafree, and TVPlay Home assets).
+- Fetches video metadata and streaming formats (HLS, RTMP/FLV, F4M) and exposes a unified information dictionary suitable for downloading with different format types and optional subtitles.
+
+Key classes and their roles
+1) TVPlayIE
+- IE_NAME: 'mtg'
+- Purpose: Core extractor for MTG/TVPlay family videos across many domains (tvplay.lv, tvplay.skaties.lv, tv3play.lt/ee/no/se, viasat4play, tv6play, tv8play, play.novatv.bg, etc.).
+- URL matching: _VALID_URL is a large regex that captures an id at the end of a path and supports a wide set of MTG-hosted video pages.
+- Main workflow (_real_extract):
+  - Extract video_id from URL.
+  - Optional geo bypass based on the country code in the URL (e.g., domain like something.xx).
+  - Download video metadata JSON from http://playapi.mtgx.tv/v3/videos/{video_id}.
+  - Retrieve title; then download streams JSON from http://playapi.mtgx.tv/v3/videos/stream/{video_id}.
+  - If streams fetch fails with 403, parse the error body to raise a localized message (ExtractorError with message).
+  - Build formats from streams:
+    - For each stream entry: determine extension.
+    - If ext is f4m: fetch HDS formats with hdcore/plugin parameters.
+    - If ext is m3u8: fetch HLS formats (m3u8_native) with id 'hls'.
+    - Otherwise: construct a format with format_id, extension, and URL. If RTMP, parse into rtmp URL, app, and playpath; set ext to 'flv' and a lower priority.
+  - If no formats and content is geo-blocked, raise geo restriction.
+  - Sort formats.
+  - Subtitles: support Sami (sami_path). Derive language code from sami_path (regex on filename) or fall back to the URL host’s TLD; provide a Sami subtitle URL entry.
+  - Metadata extraction: series, episode_number, season, season_number, duration, timestamp, view_count, age_limit, etc.
+  - Return a dict with keys: id, title, description, formats, subtitles, series, episode_number, season, season_number, duration, timestamp, view_count, age_limit.
+- Important implementation details:
+  - Formats support: HLS (m3u8), F4M (HDS), RTMP fallback to FLV when appropriate.
+  - Geo-restriction handling and message extraction for 403 errors.
+  - Subtitles support via Sami files.
+  - Rich metadata extraction from the video JSON (format_title, season, embedded season data, created_at, duration, views, age_limit).
+
+2) ViafreeIE
+- _VALID_URL: Matches Viafree country sites (dk/no/se) and a programmer path structure.
+- GEO bypass: _GEO_BYPASS = False (default); handles geoblocking.
+- URL suitability: suitable() overridden to defer to TVPlayIE if the same URL also matches TVPlayIE; ensures correct extractor selection when domains overlap.
+- _real_extract:
+  - Extracts country and path from the URL using the class-specific regex.
+  - Fetches content metadata from https://viafree-content.mtg-api.com/viafree-content/v1/{country}/path/{path}.
+  - Obtains the program block, GUID, and title/description meta data.
+  - Tries to fetch a stream URL via program['_links']['streamLink']['href'], using geo headers if needed; selects prioritizedStreams[0].links.stream.href.
+  - On 403, raise geo-restricted for the specific country.
+  - Formats: extract M3U8 formats from the stream URL (mp4) and sort formats.
+  - Episode data: derive episode, season numbers, duration (milliseconds converted to seconds), and timestamp from program data.
+  - Return a dict with id (GUID), title, description, series, episode_number, season_number, duration, timestamp, formats.
+
+3) TVPlayHomeIE
+- _VALID_URL: Matches MTG TVPlay Home asset URLs (e.g., tvplay TV3 LT home assets).
+- _TESTS: Includes examples with expected id, title, description, duration, timestamps, and 18+ age where applicable.
+- _real_extract:
+  - video_id = extracted from URL.
+  - Fetches asset data from urljoin(url, '/sb/public/asset/' + video_id) to obtain a structured asset object.
+  - Reads m3u8_url from asset['movie']['contentUrl']; uses asset['assetId'] as the internal video_id.
+  - Title comes from asset['title']['title']; formats are built from M3U8 using _extract_m3u8_formats with m3u8_native and hls id.
+  - Thumbnails: if asset has imageUrl, construct a thumbnail list entry with a joined URL and 'jpg' extension.
+  - Metadata: description from asset['title']['summaryLong'] or ['summaryShort']; duration from runTime; series/title data from asset fields; season/episode data from metadata.
+  - Return dict with id, title, description, thumbnails, duration, series, season, season_number, episode, episode_number, formats.
+
+Main functionality and interactions
+- This file provides three extractors that together cover most MTG streaming offerings across multiple European markets:
+  - TVPlayIE (core extractor for MTG video pages and streams)
+  - ViafreeIE (Viafree service, separate content API and HLS streaming)
+  - TVPlayHomeIE (home/asset-based content retrieval)
+- All extractors focus on producing:
+  - A standard information dictionary with id, title, description, and optionally series/season/episode metadata.
+  - A list of available formats with appropriate format_id, extension, direct URLs or RTMP components, and quality ranking.
+  - Optional subtitles (SAMI for TVPlayIE).
+- Streaming formats handled:
+  - HLS (m3u8) via _extract_m3u8_formats
+  - F4M/HDS via _extract_f4m_formats with appropriate hdcore/plugin parameters
+  - RTMP fallback (RTMP URL, app, and play_path with ext set to FLV)
+- Geo-restriction logic:
+  - TVPlayIE attempts to infer country from URL and can trigger geo-bypass setup.
+  - If streams fail with 403, a friendly message extracted from the error body is shown.
+  - ViafreeIE explicitly raises geo-restrictions when HTTP 403 is encountered, scoped to the country detected in the URL.
+- Language and subtitles:
+  - Sami subtitles support for TVPlayIE when sami_path is present; language inferred from Sami filename or host TLD.
+- Metadata extraction:
+  - TVPlayIE: title, description, series, season/season_number, episode_number, duration, timestamp, view_count, age_limit, release/upload date, and more from video JSON.
+  - ViafreeIE: title, description, series, season/episode numbers, duration, timestamp from content metadata.
+  - TVPlayHomeIE: title, description, duration, series, season/episode info, and timing data from asset data.
+
+Notable implementation details
+- Robust format handling: supports multiple streaming protocols and converts into a unified formats list with proper IDs and quality ordering.
+- Error handling: special handling for 403 responses to surface user-friendly messages or geo restrictions.
+- Subtitle support: Sami subtitles extraction and assignment when available.
+- Cross-domain and URL handling: regexes cover a broad set of MTG-hosted sites; suitable() logic prevents conflicts between TVPlayIE and ViafreeIE.
+- Output structure aligns with youtube-dl expectations: dictionaries containing id, title, description, formats, and other optional metadata fields such as series, season, episode, duration, timestamp, and age_limit.
+
+In short, the file provides comprehensive MTG video extraction across several domains, with support for multiple streaming formats, geolocation restrictions, and rich metadata for TV shows and programs.

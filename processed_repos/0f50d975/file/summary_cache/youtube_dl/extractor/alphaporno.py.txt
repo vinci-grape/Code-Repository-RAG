@@ -1,0 +1,55 @@
+Concise Summary of ./youtube-dl/youtube_dl/extractor/alphaporno.py
+
+- Purpose:
+  - Implements a YouTube-DL extractor for video pages on alphaporno.com, enabling extraction of video metadata and the actual video URL for downloading.
+
+- Key class:
+  - AlphaPornoIE(InfoExtractor): Subclasses youtube-dl's InfoExtractor to handle Alphaporno video pages.
+
+- URL matching:
+  - _VALID_URL: Matches http/https URLs like http(s)://www.alphaporno.com/videos/{id}
+  - The {id} portion is captured as the display_id.
+
+- Test data:
+  - _TEST provides a sample URL, expected md5 of the video, and a comprehensive info_dict with fields such as id, display_id, ext (mp4), title, thumbnail, timestamp, upload_date, duration, filesize_approx, tbr (bitrate), categories, and age_limit.
+
+- Main extraction logic (_real_extract):
+  1. Derives display_id from the URL using _match_id.
+  2. Downloads the webpage content for the given URL.
+  3. Extracts video_id from the page using the regex video_id\s*:\s*'([^']+)' (default None if not found).
+  4. Extracts video_url from the page using the regex video_url\s*:\s*'([^']+)'.
+  5. Determines file extension ext from the encodingFormat meta tag (fallback '.mp4'), trimming the leading dot to yield 'mp4'.
+  6. Extracts title via one of two patterns:
+     - meta tag: <meta content="..." itemprop="description">
+     - or: class="title" itemprop="name">...
+  7. Retrieves thumbnail from the thumbnail meta tag.
+  8. Parses timestamp from the uploadDate meta tag using parse_iso8601.
+  9. Parses duration from the duration meta tag using parse_duration.
+  10. Parses approximate filesize from the contentSize meta tag using parse_filesize.
+  11. Parses bitrate from the bitrate meta tag using int_or_none.
+  12. Builds a categories list by splitting the keywords meta tag (defaulting to an empty string if missing).
+  13. Determines age_limit via _rta_search (adult content restriction).
+
+- Metadata and return structure:
+  - Returns a dict with:
+    - id: video_id
+    - display_id: display_id (from URL)
+    - url: video_url
+    - ext: ext (e.g., 'mp4')
+    - title: extracted title
+    - thumbnail: thumbnail URL
+    - timestamp: upload time as Unix timestamp
+    - duration: duration in seconds
+    - filesize_approx: approximate file size
+    - tbr: bitrate
+    - categories: list of categories/keywords
+    - age_limit: age restriction (e.g., 18)
+
+- Notable implementation details:
+  - Uses a mix of direct HTML regex searches (_search_regex) and HTML meta tag lookups (_html_search_meta) to robustly extract data from the page.
+  - Ext extraction relies on encodingFormat meta tag and normalizes to a plain extension by stripping a leading dot.
+  - Title extraction supports multiple potential page structures to maximize chances of finding the correct title.
+  - Handles missing fields gracefully (e.g., video_id may be None) and provides sensible defaults.
+  - Uses utility parsers (parse_iso8601, parse_duration, parse_filesize, int_or_none) for robust type conversion.
+
+Overall, AlphaPornoIE is a specialized extractor that scrapes Alphaporno video pages to produce a standard youtube-dl info dictionary, including the direct video URL, metadata (title, thumbnail, dates, duration, size, bitrate), and content classifications (categories, age limit).

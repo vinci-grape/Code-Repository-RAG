@@ -1,0 +1,64 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/dlive.py
+
+Overview
+- Implements two extractors for DLive content:
+  - DLiveVODIE: for VODs (videos) on DLive
+  - DLiveStreamIE: for live streams on DLive
+- Both extractors fetch data via a GraphQL endpoint (graphigo.prd.dlive.tv) and build media formats from HLS/M3U8 sources.
+
+Key classes and responsibilities
+- DLiveVODIE (InfoExtractor)
+  - IE_NAME: 'dlive:vod'
+  - _VALID_URL: matches URLs of format https://dlive.tv/p/{uploader_id}+{vod_id}
+  - _real_extract(url):
+    - Extracts uploader_id and vod_id from URL using _VALID_URL regex.
+    - Queries GraphQL endpoint for the past broadcast via permlink "{uploader_id}+{vod_id}" to obtain:
+      - content, createdAt, playbackUrl, title, thumbnailUrl, viewCount
+    - Builds formats from the playbackUrl using HLS (m3u8_native).
+    - Returns a dict with:
+      - id: vod_id
+      - title, uploader_id
+      - formats
+      - description (content)
+      - thumbnail
+      - timestamp (createdAt converted to seconds via int_or_none(..., 1000))
+      - view_count
+- DLiveStreamIE (InfoExtractor)
+  - IE_NAME: 'dlive:stream'
+  - _VALID_URL: matches URLs under dlive.tv that are not /p/ (i.e., channel/user pages)
+  - _real_extract(url):
+    - Determines display_name from URL.
+    - Queries GraphQL endpoint for user by display name to fetch livestream data:
+      - content, createdAt, title, thumbnailUrl, watchingCount, username
+    - Builds formats from the live HLS URL https://live.prd.dlive.tv/hls/live/{username}.m3u8
+    - Returns a dict with:
+      - id: display_name
+      - title: normalized via _live_title(title)
+      - uploader: display_name
+      - uploader_id: username
+      - formats
+      - description (content)
+      - thumbnail
+      - is_live: True
+      - timestamp (createdAt converted to seconds via int_or_none(..., 1000))
+      - view_count (watchingCount)
+
+Important implementation details
+- Data retrieval:
+  - Both extractors use the GraphQL endpoint https://graphigo.prd.dlive.tv/ and post a JSON payload containing a GraphQL query.
+  - VOD query uses pastBroadcast with permlink "{uploader_id}+{vod_id}" to fetch:
+    - content, createdAt, playbackUrl, title, thumbnailUrl, viewCount
+  - Stream query uses userByDisplayName to fetch livestream data and username.
+- Formats:
+  - Use _extract_m3u8_formats on playbackUrl or constructed HLS URLs to obtain multiple formats.
+  - Use 'm3u8_native' for VOD and default handling for streams; both are sorted via _sort_formats.
+- Metadata:
+  - VOD returns: id, title, uploader_id, description, thumbnail, timestamp, view_count.
+  - Live stream returns: id, title (via _live_title), uploader, uploader_id, description, thumbnail, is_live, timestamp, view_count.
+- Time handling:
+  - Timestamps are converted from milliseconds to seconds using int_or_none(value, 1000) to align with standard Unix timestamps.
+- Testing:
+  - Provided _TESTS for VOD verifies id, ext, title, upload_date, timestamp, uploader_id.
+
+In short
+- This file provides DLive-specific extractors for both VODs and live streams by querying a GraphQL API, extracting relevant metadata, constructing HLS-based formats, and returning standardized dictionaries suitable for youtube-dl.

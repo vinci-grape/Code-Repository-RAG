@@ -1,0 +1,57 @@
+Summary of ./youtube-dl/youtube_dl/extractor/dtube.py
+
+- Purpose
+  - Implement a youtube-dl extractor (DTubeIE) for videos hosted on DTube, using the SteemIT API to fetch metadata and IPFS-backed video streams.
+
+- Key class
+  - DTubeIE(InfoExtractor)
+    - _VALID_URL: Regex matching DTube video pages, capturing uploader_id and video_id. Supports URLs like http(s)://d.tube/#!/v/uploader_id/video_id.
+    - _TEST: Example test case with a sample DTube video, including expected id, title, description hash, uploader_id, upload_date, timestamp, and a default format request (480p).
+
+- Core functionality (_real_extract)
+  - URL parsing: Extracts uploader_id and video_id from the URL using the _VALID_URL pattern.
+  - Data retrieval:
+    - Performs a JSON-RPC request to https://api.steemit.com/ with:
+      {
+        "jsonrpc": "2.0",
+        "method": "get_content",
+        "params": [uploader_id, video_id]
+      }
+    - The response’s result field contains:
+      - 'json_metadata' (a JSON string) which is parsed into metadata.
+      - result['created'] timestamp (ISO8601 string) for upload time.
+      - result['title'] as a fallback for the video title if not in metadata.
+  - Metadata extraction:
+    - metadata['video'] contains 'content' (IPFS hashes and related data) and optional 'info' dict.
+    - info = video.get('info', {}) and title = info.get('title') or result['title'].
+  - IPFS URL construction:
+    - canonical_url(hash): if hash is present, return 'https://video.dtube.top/ipfs/' + hash; otherwise None.
+  - Formats discovery:
+    - Iterate over quality keys q in ('240', '480', '720', '1080', '') to cover common resolutions and the source.
+    - For each, fetch content.get('video%shash' % q) to obtain the IPFS hash.
+    - Build video_url via canonical_url(hash). If missing, skip.
+    - Determine format_id: 'Source' for the '' case, else e.g. '480p', '720p', etc.
+    - Validate URL accessibility by performing a quick HTTP open (5-second timeout). If a timeout occurs, skip that format; otherwise include.
+    - Collect format dicts: {'format_id', 'url', 'height' (int or None), 'ext': 'mp4'}.
+  - Result assembly:
+    - id: video_id
+    - title: determined title
+    - description: content.get('description')
+    - thumbnail: canonical_url(info.get('snaphash'))
+    - tags: content.get('tags') or metadata.get('tags')
+    - duration: info.get('duration')
+    - formats: list of discovered formats
+    - timestamp: parse_iso8601(result.get('created'))
+    - uploader_id: uploader_id
+
+- Important implementation details
+  - Uses SteemIT JSON-RPC API to fetch content metadata instead of a direct DTube API.
+  - Video sources are IPFS-based URLs under video.dtube.top/ipfs/{hash}; builds a canonical URL for each available hash.
+  - Proactively validates each potential video URL by issuing a lightweight HTTP request with a 5-second timeout to ensure only working formats are exposed.
+  - Handles multiple quality levels (240, 480, 720, 1080) plus a source option; assigns height from q when available.
+  - Robustness considerations:
+    - Catches only timeout exceptions during URL validation; other network errors may propagate.
+    - Falls back to result['title'] if metadata title is unavailable.
+    - Uses int_or_none for numeric heights and parse_iso8601 to convert creation date to a Unix timestamp.
+
+In short, this extractor fetches DTube video metadata via SteemIT, builds a list of verified IPFS-hosted video formats across common qualities, and returns a standard youtube-dl info dictionary with id, title, description, thumbnail, tags, duration, timestamp, uploader_id, and the available formats.

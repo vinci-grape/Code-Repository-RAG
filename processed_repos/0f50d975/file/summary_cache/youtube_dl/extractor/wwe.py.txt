@@ -1,0 +1,62 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/wwe.py
+
+Overview
+- This file implements WWE-specific extractors for youtube-dl:
+  - WWEBaseIE: shared extraction logic for WWE video entries.
+  - WWEIE: extractor for a single WWE video page.
+  - WWEPlaylistIE: extractor for WWE show/playlist pages containing multiple videos.
+
+Key classes and main functionality
+- WWEBaseIE (InfoExtractor)
+  - _SUBTITLE_LANGS mapping: translates human-readable subtitle labels to ISO-like language codes (English -> en, Deutsch -> de).
+  - _extract_entry(self, data, url, video_id=None):
+    - Determines video_id (uses provided id or data['nid']).
+    - Extracts formats from an HLS playlist with _extract_m3u8_formats(data['file'], ...), using m3u8_native and m3u8_id='hls'.
+    - Reads metadata: title, description, thumbnail (constructed via urljoin with data['image']), series (show_name), episode (episode_name).
+    - Subtitles:
+      - Looks at data['tracks'] (if a list).
+      - For tracks with kind == 'captions' and a valid file URL, builds per-language entries.
+      - Language is determined by _SUBTITLE_LANGS[label] or falls back to label; defaults to 'en' if missing.
+    - Returns a dict with id, title, description, thumbnail, series, episode, formats, and subtitles.
+- WWEIE (WWEBaseIE)
+  - _VALID_URL matches WWE video pages: https://...wwe.com/.../videos/<id>
+  - _TESTS: includes a sample video page with expected id, title, and thumbnail.
+  - _real_extract(self, url):
+    - display_id from _match_id(url); download page.
+    - Extracts embedded Drupal settings JSON via regex looking for Drupal.settings, parses it to a dict.
+    - Navigates to WWEVideoLanding, then initialVideo/playlist[0] to obtain data for the video.
+    - video_id obtained from landing['initialVideoId'].
+    - Calls _extract_entry(data, url, video_id) to build the info dict.
+    - Adds display_id to the result and returns it.
+- WWEPlaylistIE (WWEBaseIE)
+  - _VALID_URL matches WWE pages that are likely to be playlists/shows (not single video pages).
+  - _TESTS: includes a RAW show URL with expected playlist id and minimum number of entries.
+  - suitable(cls, url):
+    - Returns False if WWEIE.suitable(url) is True (to avoid misclassifying video pages as playlists).
+    - Otherwise uses the base playlist suitability check.
+  - _real_extract(self, url):
+    - display_id from the URL; download the page.
+    - Parses embedded JSON data-video="..." blocks (regex: data-video = "data").
+    - For each found data block:
+      - Parses JSON with _parse_json (transform_source=unescapeHTML, fatal=False).
+      - Extracts data = video['playlist'][0] if available (via try_get).
+      - Builds an entry with _extract_entry(data, url); on success, tags it with extractor_key = WWEIE.ie_key() to indicate the source extractor.
+      - Collects all valid entries.
+    - Returns a playlist_result(entries, display_id).
+
+Important implementation details
+- Data source and structure:
+  - WWEIE relies on Drupal.settings in the page to access WWEVideoLanding and related video data.
+  - WWEPlaylistIE relies on data-video attributes embedded in the page HTML for multiple videos.
+  - Both paths ultimately feed data into _extract_entry to produce standardized info dicts.
+- Formats extraction:
+  - Uses _extract_m3u8_formats with entry_protocol='m3u8_native' and m3u8_id='hls' to obtain HLS-based video formats from data['file'].
+- Subtitles:
+  - Supports caption tracks found in data['tracks']; builds per-language subtitle lists.
+  - Language mapping supported by _SUBTITLE_LANGS; falls back to label or 'en' if unclear.
+- Robustness:
+  - WWEPlaylistIE.suitable ensures it only handles true playlists when WWEIE doesn’t match, preventing misclassification.
+  - Safe parsing: playlist extraction uses try_get with graceful skipping if data is missing; fatal=False in JSON parsing within playlists to skip non-conforming blocks.
+
+In short
+- The file provides a cohesive WWE extractor suite: a shared entry extractor for video metadata and formats, a single-video extractor that parses WWE’s Drupal-embedded data, and a playlist extractor that aggregates multiple videos from a page. It handles video formats (HLS), metadata (title, description, thumbnail, series, episode), and subtitles with language mapping, using robust JSON parsing and URL resolution.

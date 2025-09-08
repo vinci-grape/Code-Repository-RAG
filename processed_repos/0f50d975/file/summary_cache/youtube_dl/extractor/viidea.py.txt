@@ -1,0 +1,55 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/viidea.py
+
+- Purpose
+  - ViideaIE is a YouTube-DL extractor for Viidea-based video services (e.g., videolectures.net and several partner domains). It can extract single lectures, multi-part lectures, event playlists, and standard playlists.
+
+- Key class and entry points
+  - Class ViideaIE(InfoExtractor)
+  - _VALID_URL: Regular expression capturing a wide range of Viidea-related domains, with optional /lecture, a slug id, optional /video/part, and optional fragment.
+  - _TESTS: Several test cases covering:
+    - Single video with metadata (title, description, duration, timestamp, thumbnail).
+    - 403-protected direct format (RTMP/HTTP 403 case) requiring a user-friendly error.
+    - Event playlist with multiple items.
+    - Multi-part lecture with two parts.
+
+- Core extraction flow (_real_extract)
+  1. Parse URL to obtain lecture_slug and explicit_part_id from the matched groups.
+  2. Download the lecture page and extract a configuration object named cfg from the page using one of two possible patterns. Convert the JS object to JSON with js_to_json.
+  3. Get lecture_id from cfg['obj_id'] and base_url from cfg['livepipe'] via _proto_relative_url.
+  4. Fetch lecture metadata from the API at base_url/site/api/lecture/{lecture_id}?format=json.
+     - If a 403 error occurs, read the error response, parse the JSON, and raise an ExtractorError with the detail message (marked as expected).
+  5. Build a basic lecture_info dict with id, display_id, title, timestamp, description, and thumbnail.
+  6. Determine parts for the lecture:
+     - parts = list of cfg['videos'] converted to strings.
+     - If parts exist, determine multipart flag (more than 1 part).
+     - Define inner function extract_part(part_id) to:
+       - Download the corresponding SMIL (video part) at base_url/slug/video/{part_id}/smil.xml.
+       - Parse SMIL to obtain formats and metadata, sort formats, set id/display_id depending on multipart, adjust title for the part, and set duration if a <switch> element has a dur attribute.
+       - Merge with the lecture_info to form a complete per-part item.
+     - If an explicit_part_id is given or there is only a single part, return that specific part. Otherwise, construct a multi_video entry with all parts.
+  7. If there are no parts or the lecture type indicates an event (evt), fetch an event drilldown page at base_url/site/ajax/drilldown/?id={lecture_id} to gather additional video URLs:
+     - Parse links to video URLs with a regex, then create Viidea URL results for those URLs and append to the playlist entries.
+  8. Build the final playlist using playlist_result with all collected entries, and merge lecture_info into it before returning.
+
+- Important implementation details
+  - Flexible cfg extraction: supports multiple page layouts to obtain the config object.
+  - Robust error handling for HTTP 403 when loading the lecture JSON, with user-facing error message extracted from the response body.
+  - Multi-part support: if cfg['videos'] exists, each part is fetched via SMIL (smil.xml), parsed (via _parse_smil), and converted into individual playable items. Duration is derived from the SMIL <switch> element if present.
+  - Display IDs and titles: when multipart, per-part items have display_id and titles appended with “(Part N)”, and IDs use a suffix _partN.
+  - Event/playlists handling: if the lecture is an event or no explicit parts are present, builds a playlist by scraping a drilldown page for additional video URLs and converting them into Viidea items.
+  - Ext-based handling: single videos return a direct item; multipart or event playlists return a structured playlist with a mixture of per-part items and/or additional playlist entries.
+  - Use of utility methods:
+    - _download_webpage, _download_json, _download_smil for fetching data
+    - _parse_smil to extract formats and metadata
+    - _sort_formats to order video formats
+    - _proto_relative_url to form base URLs
+    - parse_iso8601, parse_duration for timestamps and durations
+    - compat helpers to manage Python 2/3 compatibility and HTTP errors
+
+- Output shapes
+  - Single video: a dict with id, display_id, title, timestamp, description, thumbnail, ext, and duration (if available).
+  - Part of a multi-part lecture: a per-part dict with id, display_id, title (including “(Part N)” when multipart), formats, duration, timestamp, etc.
+  - Event/playlist: a playlist dict containing entries (each either a per-part item or a url_result for additional Viidea items) and merged lecture metadata (title, description, timestamp, thumbnail).
+
+- Overall functionality
+  - This extractor comprehensively handles Viidea-hosted content, including direct lectures, multi-part lectures, event-based playlists, and cross-page playlists, with robust error handling and careful construction of per-part and playlist item metadata.

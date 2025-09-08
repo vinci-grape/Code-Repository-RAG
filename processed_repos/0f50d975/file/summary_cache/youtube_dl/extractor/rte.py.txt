@@ -1,0 +1,75 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/rte.py
+
+Purpose
+- Implement YouTube-DL extractors for Raidió Teilifís Éireann (RTE) TV and radio content.
+- Support RTMP, HLS (M3U8), and HDS (F4M) streaming formats, with metadata extraction.
+
+Key classes
+- RteBaseIE (InfoExtractor)
+  - Core shared logic used by both TV and radio extractors.
+  - Method: _real_extract(url)
+    - Determines item_id from URL.
+    - Queries two JSON playlist endpoints to locate show data.
+    - Builds a unified info_dict (id, title, description, thumbnail, timestamp, duration).
+    - Extracts available formats from the JSON’s media:group entry, including:
+      - RTMP (via rtmp URL pattern) with format_id 'rtmp'
+      - HLS (M3U8) via _extract_m3u8_formats
+      - HDS (F4M) via _extract_f4m_formats
+      - Optional: secondary HDS via rte:server + url
+    - Sorts formats and returns a complete info_dict with formats.
+  - Endpoints used for data retrieval:
+    - https://feeds.rasset.ie/rteavgen/player/playlist?type=iptv&format=json&showId=
+    - http://www.rte.ie/rteavgen/getplaylist/?type=web&format=json&id=
+  - Robust error handling:
+    - If a request fails on the first endpoint, tries the next one.
+    - If a 404 occurs, attempts to parse a JSON error message from the HTTP error and raise a user-friendly ExtractorError.
+  - Data handling details:
+    - JSON fields are XML-escaped; unescape HTML for title/description.
+    - show data is taken from data['shows'][0].
+    - duration is converted from milliseconds to seconds using float_or_none(..., 1000).
+    - published date is parsed with parse_iso8601.
+- RteIE (TV extractor)
+  - Inherits RteBaseIE.
+  - IE_NAME = 'rte'
+  - IE_DESC = 'Raidió Teilifís Éireann TV'
+  - _VALID_URL regex matches rte.tv player show pages and captures an internal id used to fetch data.
+  - Includes a representative _TEST with expected metadata for a TV show.
+- RteRadioIE (Radio extractor)
+  - Inherits RteBaseIE.
+  - IE_NAME = 'rte:radio'
+  - IE_DESC = 'Raidió Teilifís Éireann radio'
+  - _VALID_URL handles Radioplayer URLs with two specifier formats for the RIIs:
+    - Old and new Radioplayer URL formats (the id is the unique recording id).
+  - _TESTS with two samples:
+    - Old-style URL: RTMP and/or HLS formats; expected metadata including id, title, duration, timestamp.
+    - New-style URL: RTMP; test marks skip_download to avoid actual media download.
+
+Important implementation details
+- Data extraction flow:
+  - item_id derived from URL via _match_id.
+  - Attempt to fetch data from two endpoints; if one succeeds, use its first show entry.
+  - Build a shared info_dict on first successful endpoint to populate id, title, description, thumbnail, timestamp, and duration (duration from milliseconds to seconds).
+  - Extract formats from media:group[0] with:
+    - RTMP: detected via regex on mg['url']; constructs an FLV RTMP format with fields: url, app, play_path, player_url, ext='flv', format_id='rtmp'.
+    - HLS: mg['hls_server'] + mg['hls_url']; use _extract_m3u8_formats with entry_protocol='m3u8_native'.
+    - HDS: mg['hds_server'] + mg['hds_url']; use _extract_f4m_formats.
+    - Additional HDS via rte:server + url if present.
+- Robustness:
+  - If an endpoint raises an ExtractorError:
+    - If more endpoints remain or formats already found, continue to next endpoint.
+    - If 404, try to parse a JSON error message from the HTTP error body and raise a user-friendly ExtractorError with that message.
+- Data normalization:
+  - XML escaping in JSON strings is handled by unescapeHTML for title and description.
+  - Timestamps parsed with parse_iso8601; upload_date is typically derived from the timestamp in tests.
+- Compatibility:
+  - Supports multiple streaming protocols (RTMP, HLS, HDS) and uses the appropriate extractor helpers provided by the base class.
+  - Radio-specific URL parsing to extract the relevant recording id from Radioplayer URLs.
+
+Files/structures touched
+- Main extractor logic in RteBaseIE._real_extract
+- TV extractor: RteIE
+- Radio extractor: RteRadioIE
+- Metadata fields populated: id, title, description, thumbnail, timestamp, duration
+- Formats collected and sorted into info_dict['formats']
+
+This module enables youtube-dl to fetch RTE TV/radio content by querying their endpoints, aggregating metadata, and assembling a set of playable formats (RTMP, HLS, and HDS) for each item.

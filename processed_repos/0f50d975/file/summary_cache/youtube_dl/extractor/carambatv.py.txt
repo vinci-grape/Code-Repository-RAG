@@ -1,0 +1,62 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/carambatv.py
+
+- Purpose
+  - Implements two extractors for CarambaTV content:
+    - CarambaTVIE: direct extraction from CarambaTV video endpoints.
+    - CarambaTVPageIE: page-level extractor that delegates to Videomore or CarambaTV as appropriate.
+
+- Key classes
+  - CarambaTVIE(InfoExtractor)
+    - _VALID_URL: matches either "carambatv:<id>" or "http(s)://video1.carambatv.ru/v/<id>"
+    - _TESTS: includes a direct video URL test (with expected id, title, thumbnail, duration, ext) and a "carambatv:<id>" test (only_matching).
+    - _real_extract(url):
+      - Extracts video_id from URL.
+      - Downloads JSON from http://video1.carambatv.ru/v/<id>/videoinfo.js.
+      - Reads title from video['title'].
+      - Determines base_url: uses video['video'] if present, otherwise falls back to http://video1.carambatv.ru/v/<id>/.
+      - Builds formats from video['qualities']:
+        - Each format uses url = base_url + f['fn'].
+        - height is int_or_none(f.get('height')).
+        format_id is "<height>p" when height is present; otherwise None.
+      - Sorts formats via self._sort_formats(formats).
+      - thumbnail from video['splash'].
+      - duration from video['annotations'][0]['end_time'] if available (converted to float via float_or_none).
+      - Returns a dict: id, title, thumbnail, duration, formats.
+
+  - CarambaTVPageIE(InfoExtractor)
+    - _VALID_URL: matches a CarambaTV page URL like http://carambatv.ru/<category>/<title>/...
+    - _TEST: includes a sample page with expected id, ext, title, thumbnail; notes that duration from Videomore is incorrect; add_ie includes VideomoreIE.
+    - _real_extract(url):
+      - Extracts video_id from URL.
+      - Downloads the webpage.
+      - Attempts to extract a Videomore URL via VideomoreIE._extract_url(webpage).
+      - If not found, tries to locate a Videomore id with regex getVMCode(\d+); if found, builds videomore_url = 'videomore:<id>'.
+      - If videomore_url is found:
+        - Extracts title via _og_search_title(webpage).
+        - Returns a url_transparent result pointing to VideomoreIE with the title.
+      - If no Videomore URL is found:
+        - Attempts to find video_url from the og:image/video:iframe meta via _og_search_property('video:iframe', webpage).
+        - If still not found, tries to locate a video_id via regex (video_id or crmb_vuid) and builds video_url = 'carambatv:<video_id>'.
+      - Finally, returns a URL result for video_url using CarambaTVIE as the extractor key.
+    - This flow allows the page to either:
+      - delegate to Videomore (if embedded there),
+      - or fall back to a CarambaTV video id, which is then processed by CarambaTVIE.
+
+- Important implementation details
+  - Robust data access:
+    - Uses try_get to safely navigate nested structures when extracting duration.
+    - Uses compat_str to normalize potential string values for numeric conversion.
+  - Formats construction:
+    - Each format uses the file name fn from video['qualities'] and appends it to a base URL.
+    - If height is available, format_id is "<height>p" (e.g., "720p").
+  - Interplay with Videomore:
+    - The page extractor prefers Videomore when available and uses a transparent URL result to hand off to VideomoreIE.
+    - If Videomore data is not present, it tries to locate a Videomore code on the page and uses that as a fallback.
+  - Return structure:
+    - CarambaTVIE returns a standard video info dict with id, title, thumbnail, duration, formats.
+    - CarambaTVPageIE can return a transparent URL to Videomore or a direct CarambaTV URL via url_result, enabling chaining between extractors.
+
+- Overall behavior
+  - The module provides two entry points for CarambaTV content:
+    - Direct video links (CarambaTVIE) with explicit format URLs and metadata.
+    - CarambaTV page links (CarambaTVPageIE) that defer to Videomore when possible, or resolve to a CarambaTV video id for processing by CarambaTVIE.

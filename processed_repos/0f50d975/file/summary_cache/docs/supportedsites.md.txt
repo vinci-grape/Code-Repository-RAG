@@ -1,0 +1,16 @@
+The file is a documentation page (Markdown) that lists all supported video sources (sites) for youtube-dl. It is not executable code but a comprehensive index used as a reference for extractors.
+
+Key points about the content and structure:
+- Purpose: Provide a centralized, human-readable catalog of all sites for which youtube-dl has extractors, including both domains and their specialized variants.
+- Site entries: Each item is shown as a bullet with the site name in bold (e.g., youtube, youtube:playlist, abcotvs, ivi:compilation). The bold key is the canonical site/extractor identifier.
+- Variants/sub-extractors: A colon and suffix (for example, youtube:playlist, youtube:watchlater, dailymotion:playlist, rtve.es:live) indicate specialized extractors or sub-features for that site.
+- Human-readable descriptions: Some entries include a description after a colon, often in English or localized languages, clarifying the site or its variant (e.g., "ABC Owned Television Stations" or "archive.org videos").
+- Language and scope: The list covers a broad mix of global and regional sites, education portals, media networks, streaming services, social platforms, and more. It includes major players (YouTube, Facebook, Vimeo, Dailymotion, BBC iPlayer, etc.) as well as many niche or regional sites.
+- Notes and caveats: Some entries include notes such as "(Currently broken)" indicating known issues with that extractor. Others include multiple domains under a single site or long descriptive strings (e.g., Condé Nast group, PBS networks, or ORF family services).
+- Generic/fallback entry: There is an entry like "generic" which indicates a generic downloader that works on some sites, acting as a fallback.
+- Documentation format: The file uses a simple Markdown bullet list with bold site keys and optional descriptors, suitable for quick human reference and for contributors to understand what extractors exist.
+
+What this implies about the codebase:
+- The actual extractors are organized as site keys (and colon-separated variants) that map to specific downloader/parser implementations in youtube-dl.
+- This doc helps users, contributors, and maintainers know what extractors are available and what they cover, without needing to parse code.
+- The large, multilingual, and variant-rich list reflects youtube-dl’s broad support and the need to track many specialized extractors and edge cases.

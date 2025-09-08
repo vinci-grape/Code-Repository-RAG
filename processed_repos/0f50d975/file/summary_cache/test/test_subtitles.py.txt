@@ -1,0 +1,55 @@
+- Overview
+  - A unittest module for youtube-dl that validates subtitle extraction across multiple video sites.
+  - Uses a FakeYDL test helper to simulate the downloader and network I/O.
+  - Focuses on retrieving subtitles (including automatic captions), in various formats, and verifies content via MD5 checksums.
+
+- Main components
+  - BaseTestSubtitles (unittest.TestCase)
+    - setUp: creates a FakeYDL instance, instantiates the IE under test, and registers it. Skips if the extractor is not marked as _WORKING.
+    - getInfoDict: runs extraction for the configured URL (download=False) and returns the info dict.
+    - getSubtitles: fetches the info dict, reads requested_subtitles, and if any subtitle entry lacks data, fetches the subtitle content from its URL and caches it in the entry. Returns a dict mapping language code to subtitle text.
+  - Test classes (subclassed from BaseTestSubtitles)
+    - TestYoutubeSubtitles (YoutubeIE)
+      - Tests for all subtitles (writesubtitles, allsubtitles) and specific formats (ttml, vtt, json3).
+      - Includes tests for automatic captions (writeautomaticsub) and translated subtitles (skipped in this suite).
+      - Also tests the case where no subtitles exist for a video (warning and empty result).
+    - TestDailymotionSubtitles (DailymotionIE)
+      - Tests all subtitles (minimum 6 languages) and specific language checks (en, fr), plus a nosubtitles case.
+    - TestTedSubtitles (TEDIE) [skipped: IE broken]
+    - TestVimeoSubtitles (VimeoIE)
+      - Tests all subtitles for a Vimeo video and a nosubtitles case.
+    - TestWallaSubtitles, TestCeskaTelevizeSubtitles, TestLyndaSubtitles, TestNPOSubtitles, TestMTVSubtitles
+      - Several tests marked as skipped or IE broken; intended to validate subtitles for respective sites (Hebrew, Czech TV, Lynda, NPO, MTV/Comedy Central).
+    - TestNRKSubtitles (NRKTVIE)
+      - Tests allsubtitles for a NRK video and checks for expected language key (nb-ttv) and its MD5.
+    - TestRaiPlaySubtitles (RaiPlayIE)
+      - Tests for Italian subtitles with both single-subtitle and array-based subtitle pages; validates language key and MD5.
+    - TestVikiSubtitles (VikiIE) [skipped: IE broken]
+    - TestThePlatformSubtitles (ThePlatformIE)
+      - Tests allsubtitles for a platform-hosted video (theplatform: URI) and MD5 of English subtitle.
+    - TestThePlatformFeedSubtitles, TestRtveSubtitles (RTVEALaCartaIE), TestDemocracynowSubtitles (DemocracynowIE)
+      - Additional sites with tests for allsubtitles and specific content MD5s. Some tests are skipped or limited (e.g., RTVE test prints a skip notice for Spain-only access).
+
+- How subtitle retrieval is implemented in tests
+  - getSubtitles builds the info dict via getInfoDict and reads info_dict['requested_subtitles'].
+  - If a subtitle entry has no pre-fetched data, the test fetches it using DL.urlopen(url).read() and decodes as UTF-8, caching the data in sub_info['data'].
+  - Returns a dict: { language_code: subtitle_text } for all requested subtitles.
+
+- Important implementation details
+  - Tests rely on MD5 checksums of the actual subtitle content to ensure correctness (imported helper md5 from test.helper).
+  - Subtitle options controlled via FakeYDL.params:
+    - writesubtitles: enable subtitle downloading
+    - allsubtitles: fetch all available languages
+    - subtitlesformat: format for subtitles (ttml, vtt, json3, etc.)
+    - writeautomaticsub: request automatic captions
+    - subtitleslangs: list of target languages for automatic captions
+    - format: content format specification (e.g., best/bestvideo for NRK)
+  - Some tests are skipped or marked as broken because certain IEs are marked not working or have known issues (e.g., TED, Walla, CeskaTelevize, Lynda, NRK, etc.), or because the extractor is currently considered broken in this test suite.
+  - The code assumes that the extractor’s output includes a 'requested_subtitles' field in the info dict, which is a mapping from language code to sub-info (with at least 'url' and optionally 'data').
+  - The suite covers a wide range of sites (YouTube, Dailymotion, Vimeo, RaiPlay, NRK, DemocarcyNow, RTVE, ThePlatform, etc.), testing both presence of multiple languages and exact content via MD5, as well as the handling of non-existent subtitles (warnings and empty results).
+
+- Execution notes
+  - The file is designed to be run as part of pytest/unittest suite (if __name__ == '__main__': unittest.main()).
+  - It uses direct execution compatibility (unicode_literals) and adjusts sys.path to import testing helpers from the repository.
+
+In short, this file provides a comprehensive, cross-site suite of unit tests for subtitle extraction in youtube-dl, validating both the retrieval and formatting of subtitles (including automatic captions) across many supported video sites, with MD5-backed content verification and robust handling of missing subtitles.

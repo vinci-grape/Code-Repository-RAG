@@ -1,0 +1,77 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/teamtreehouse.py
+
+What it does
+- Implements a Team Tree House extractor (TeamTreeHouseIE) for youtube-dl.
+- Handles three content types on teamtreehouse.com/library pages:
+  - Individual videos
+  - Courses (multiple videos as a playlist)
+  - Workshops (another playlist-style collection)
+- Supports optional user authentication to access full content; will warn/limit when viewing previews.
+
+Key components and functionality
+- Class: TeamTreeHouseIE(InfoExtractor)
+  - _VALID_URL: Matches library pages under teamtreehouse.com/library/{id}
+  - _NETRC_MACHINE: 'teamtreehouse' for netrc-based login
+
+- Authentication flow (_real_initialize)
+  - If login info is provided, navigates to signin page and builds a login POST using hidden form inputs.
+  - Submits user credentials to sign in (person_session).
+  - If the response contains an element with class 'error-message', raises an ExtractorError with the error content.
+  - This enables access to restricted content when credentials are supplied.
+
+- Main extraction (_real_extract)
+  - Fetches page, derives display_id from URL, and extracts:
+    - title (og:title or twitter:title)
+    - description (description, og:description, or twitter:description)
+  - Tries to parse direct media entries via _parse_html5_media_entries.
+    - If found (single video or media item):
+      - Normalizes subtitles by setting their file extension using determine_ext(subtitle['url'], 'srt').
+      - Detects preview mode via data-preview="true":
+        - If preview, warns the user and sets duration to 30 seconds.
+      - If not preview, tries to read duration from data-duration attribute; fallback to parsing the element with id="video-duration".
+      - Returns a dict with id, title, description, duration, and other media info.
+    - If not found (no direct video on the page):
+      - Builds a playlist by collecting links to videos in two possible ways:
+        1) workshop-videos list: looks for a ul with id="workshop-videos" and extracts all hrefs.
+        2) syllabus-stages path: looks for a div with id="syllabus-stages" and data-url attribute, downloads that stages page, and extracts chapters and their steps.
+      - Internal helper extract_urls(html, extract_info=None):
+        - Finds all <a href="..."> links, resolves to absolute URLs, and creates url_transparent entries with:
+          - _type: 'url_transparent'
+          - url: resolved link
+          - id: extracted via _match_id(page_url)
+          - id_key: the extractor type
+        - If extract_info provided, attaches additional fields (e.g., chapter metadata)
+      - If stages are found, iterates over chapters and steps to create entries with chapter_number and chapter metadata.
+      - Strips trailing " Course" from the title when building playlists from stages.
+      - Returns a playlist_result(entries, display_id, title, description)
+
+Important implementation details
+- Subtitle handling: normalizes subtitle extensions with determine_ext, defaulting to 'srt' when uncertain.
+- Duration handling:
+  - If data-duration attribute present on the page, uses that value (converted from milliseconds if needed).
+  - If not, uses the element with id="video-duration" to parse duration.
+  - In preview mode, duration is forced to 30 seconds to reflect truncated content.
+- Preview behavior: warns users when accessing preview content that requires a Basic account for full access.
+- Playlist building:
+  - Robust against two layouts: a dedicated workshop videos list or a syllabus stages structure.
+  - Uses a nested approach with an inner extract_urls helper to accumulate video entries as url_transparent items.
+  - When building from stages, collects Chapter and Chapter Number metadata to enrich entries.
+  - Title normalization for playlist pages derived from stages (removes trailing " Course").
+- Error handling:
+  - If login fails, raises ExtractorError with cleaned HTML of the error message.
+- Utilities used:
+  - _download_webpage, _html_search_meta, _parse_html5_media_entries, _search_regex, _match_id, _download_webpage, _form_hidden_inputs, clean_html, urlencode_postdata, urljoin, parse_duration, remove_end, determine_ext, get_element_by_class, get_element_by_id, float_or_none, etc.
+
+Tests
+- _TESTS include:
+  - Course: a course URL with expected multi-video playlist and metadata (id, title, description) and a playlist minimum count.
+  - Workshop: a workshop URL with a playlist and metadata.
+  - Video: a single video URL with mp4 extension and description, plus a preview warning expectation.
+
+In short
+- This extractor handles Team Tree House library pages by:
+  - Logging in when credentials are provided
+  - Extracting metadata for single videos
+  - Detecting and constructing playlists from either workshop video lists or syllabus stages
+  - Handling subtitles, duration, preview mode, and chapters/sections metadata
+  - Returning either a single video info dict or a playlist of url_transparent entries with enriched metadata.

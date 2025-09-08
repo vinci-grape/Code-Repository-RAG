@@ -1,0 +1,60 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/tenplay.py
+
+Purpose
+- Implement an InfoExtractor for the TenPlay (Australian TV) site to extract video formats and metadata for Brightcove-hosted videos embedded on 10play.
+
+Key components
+- TenPlayIE class (inherits InfoExtractor)
+  - _VALID_URL: Regex to match 10play URLs that contain a content id in the form tpv{6 digits}{5 lowercase letters} within a path like …/masterchef/episodes/season-1/…/tpv190718kwzga
+  - _TESTS: Examples for unit tests
+    - Test 1: Valid TenPlay URL with expected id, formats, title, description, age_limit, timestamp, upload_date, uploader_id; uses skip_download.
+    - Test 2: A non-matching 10play URL (only_matching test)
+  - _GEO_BYPASS: False (not directly used in logic)
+  - _FASTLY_URL_TEMPL: Template URL used to obtain the Brightcove/manifest URL via a HEAD request
+  - _real_extract(self, url): Core extraction logic
+
+Main workflow
+1. Extract content_id from the URL using _match_id.
+2. Fetch video data from TenPlay API:
+   - Request: https://10play.com.au/api/video/{content_id}
+   - Response split into:
+     - video: primary video data
+     - metaData: additional metadata
+3. Determine Brightcove video id:
+   - brightcove_id = video['videoId'] or metadata['showContentVideoId']
+4. Obtain the manifest URL (m3u8) via a HEAD request:
+   - Build URL with _FASTLY_URL_TEMPL % brightcove_id
+   - Issue HEADRequest and take the resulting URL (geturl())
+   - If the URL contains '10play-not-in-oz', raise geo restriction for AU
+5. Extract formats:
+   - Use _extract_m3u8_formats(m3u8_url, brightcove_id, 'mp4')
+   - Sort formats with _sort_formats
+6. Build the final info dictionary:
+   - id: brightcove_id
+   - formats: list of extracted formats
+   - title: prefer video['title'], else metadata['pageContentName'], else metadata['showContentName']
+   - description: video.get('description')
+   - age_limit: parse_age_limit(video['showRatingClassification'] or metadata['showProgramClassification'])
+   - series: metadata.get('showName')
+   - season: metadata.get('showContentSeason')
+   - timestamp: parse_iso8601(metadata.get('contentPublishDate') or metadata.get('pageContentPublishDate'))
+   - thumbnail: video.get('poster')
+   - uploader_id: '2199827728001' (hardcoded/inferred Brightcove account)
+   - Note: Some Brightcove URL construction code is present but commented out; the extractor currently uses the manifest approach via Fastly/HEADRequest.
+
+Important implementation details
+- Data source: TenPlay API endpoint /api/video/{content_id} provides both video and metadata; Brightcove videoId may come from either video or metadata.
+- Brightcove integration: Instead of embedding a direct Brightcove URL, the code obtains a manifest URL through a Fastly-backed endpoint, using a HEAD request to avoid downloading the content. The final m3u8 manifest is then used to extract available formats.
+- Geo restriction: If the m3u8 URL indicates not-in-Australia (string 10play-not-in-oz), the extractor raises a geo restriction error targeting AU.
+- Formats extraction: Uses _extract_m3u8_formats on the retrieved m3u8 URL and sorts them for preference order.
+- Metadata handling:
+  - Title: fallback chain across video title and metadata fields.
+  - Description: from video.description.
+  - Age limit: parsed from either showRatingClassification or showProgramClassification via parse_age_limit.
+  - Temporal data: timestamp parsed from contentPublishDate or pageContentPublishDate via parse_iso8601.
+  - Other fields: series, season, and poster thumbnail pulled from metadata/video as available.
+- Robustness considerations: If certain metadata fields are missing, the code uses sensible fallbacks; geo checks guard content not available in AU.
+
+Notes
+- There is commented code related to constructing a direct Brightcove URL via a template (BRIGHTCOVE_URL_TEMPLATE) and a smuggle_url wrapper, indicating a previous or alternative approach. The active path uses the FASTLY-based manifest retrieval instead.
+- The _TESTS section demonstrates expected output for a real TenPlay video and a non-matching URL check.

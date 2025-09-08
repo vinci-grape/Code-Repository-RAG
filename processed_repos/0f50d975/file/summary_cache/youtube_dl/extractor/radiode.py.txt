@@ -1,0 +1,46 @@
+Summary of the file: youtube-dl/youtube_dl/extractor/radiode.py
+
+- Purpose
+  - Implements an extractor for Radio.de and related domains to retrieve live radio stream metadata and formats.
+
+- Key class
+  - RadioDeIE(InfoExtractor)
+    - IE_NAME = 'radio.de'
+    - _VALID_URL matches URLs like http(s)://<id>.(radio.de|radio.at|radio.fr|...|rad.io)
+    - _TEST provides a sample URL (ndr2) and the expected metadata, indicating a live MP3 stream
+
+- Core functionality (_real_extract)
+  - Derives radio_id from the URL using _match_id
+  - Downloads the page HTML with _download_webpage
+  - Extracts a JSON blob containing station/broadcast details via a targeted _search_regex pattern:
+    "'components/station/stationService':\s*\{\s*'?station'?:\s*(\{.*?\s*\}),\n"
+  - Parses the extracted JSON with _parse_json to obtain a broadcast dictionary
+  - Title: constructed with _live_title(broadcast['name']) to reflect a live stream
+  - Description: broadcast['description'] or broadcast['shortDescription']
+  - Thumbnail: fallback across broadcast['picture4Url'], broadcast['picture4TransUrl'], broadcast['logo100x100']
+  - Formats:
+    - Build a list from broadcast['streamUrls']; for each stream, create:
+      - 'url': stream['streamUrl']
+      - 'ext': stream['streamContentFormat'].lower()
+      - 'acodec': stream['streamContentFormat']
+      - 'abr': stream['bitRate']
+      - 'asr': stream['sampleRate']
+    - Call self._sort_formats(formats) to order streams by quality
+  - Return a playlist-like dict with:
+    - 'id': radio_id
+    - 'title': computed live title
+    - 'description': extracted description
+    - 'thumbnail': selected thumbnail
+    - 'is_live': True
+    - 'formats': list of constructed formats
+
+- Important implementation details
+  - _VALID_URL supports a wide range of Radio domains (radio.de at various countries and rad.io)
+  - JSON extraction relies on a specific JavaScript object path within the page: components/station/stationService
+  - Description and thumbnail have multiple fallbacks to handle varying JSON structures
+  - Stream metadata uses the same value for both ext and acodec (streamContentFormat)
+  - The extractor marks the stream as live (is_live = True) and does not download the actual media in tests (skip_download in _TEST)
+  - Relies on internal helper methods from InfoExtractor: _download_webpage, _search_regex, _parse_json, _live_title, and _sort_formats
+
+- Overall behavior
+  - Fetches the station data embedded in the page, parses it, and returns a structured set of live-stream formats along with metadata suitable for youtube-dl to enumerate and play the live radio stream.

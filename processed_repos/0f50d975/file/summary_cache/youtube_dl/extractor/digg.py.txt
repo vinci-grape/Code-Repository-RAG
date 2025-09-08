@@ -1,0 +1,38 @@
+Concise summary of digg.py
+
+- Purpose
+  - Implements a Digg video extractor (DiggIE) for youtube-dl. It handles Digg pages that embed videos via external providers (YouTube or JWPlayer/JWPlatform) and delegates extraction to the appropriate extractor when possible. If no known provider is found, it falls back to the Generic extractor.
+
+- Main class
+  - DiggIE (subclass of InfoExtractor)
+
+- Key URL pattern
+  - _VALID_URL = r'https?://(?:www\.)?digg\.com/video/(?P<id>[^/?#&]+)'
+  - Captures the Digg video slug as the display_id.
+
+- Core logic (_real_extract)
+  - Download the Digg video page.
+  - Look for a JavaScript video info object in the page using the regex:
+    (?s)video_info\s*=\s*({.+?});\n
+  - Parse that JS object into JSON using _parse_json with transform_source=js_to_json. If not found, default to {}.
+  - Extract video_id from the parsed info.
+  - If video_id exists:
+    - Check provider_name:
+      - If provider_name is "youtube": return a URL result that delegates to the YouTube extractor (ie='Youtube', video_id=video_id).
+      - If provider_name is "jwplayer": return a URL result that delegates to the JWPlatform extractor (ie='JWPlatform', video_id=video_id, formatted as 'jwplatform:<video_id>').
+  - If no suitable provider is found or video_id is missing, fall back to returning a Generic extractor result for the original Digg URL.
+
+- Key implementation details
+  - Uses _download_webpage to fetch the page and _search_regex with a forgiving fatal=False to extract the video_info object.
+  - Uses js_to_json to convert embedded JavaScript object notation to proper JSON for parsing.
+  - Delegates to other extractors via url_result when a known provider is detected (YouTube or JWPlatform), enabling reuse of existing extractors.
+  - Tests (_TESTS) cover:
+    - A JWPlatform-provided Digg video (with full metadata in the test expected output).
+    - Two cases that only test URL matching (YouTube and Vimeo embeds via Digg) to ensure the URL pattern matches correctly.
+
+- Flow of execution
+  - Match Digg URL -> download page -> extract video_info object -> parse to JSON -> obtain video_id and provider_name -> dispatch to YouTube or JWPlatform if recognized -> otherwise use Generic extractor.
+
+- What it handles and what it doesn’t
+  - Handles Digg pages embedding videos through YouTube or JWPlatform.
+  - If embedding is not via a recognized provider or video_info is absent, it does not fail hard and falls back to Generic extraction.

@@ -1,0 +1,94 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/adobepass.py
+
+What it is for
+- Implements an Adobe Pass (MVPD) authentication flow for youtube-dl. It handles obtaining authenticated tokens from participating MVPDs (MSOs) via service providers (SPs) and returns a short, usable authorization token for media access.
+- Supports a wide range of MSOs through a large MSO_INFO mapping that defines each provider’s login form fields.
+
+Key components
+- MSO_INFO mapping
+  - A large dictionary mapping MSO IDs (e.g., 'DTV', 'ATT', 'Comcast_SSO', 'Verizon', plus many smaller providers) to:
+    - Display name (for user-friendly messages)
+    - username_field and password_field (the form field names to submit for credentials)
+  - Used to tailor login requests for each MSO during the Adobe Pass flow.
+
+- AdobePassIE class (subclasses InfoExtractor)
+  - _SERVICE_PROVIDER_TEMPLATE: base URL for ADOBE PASS service provider endpoints (https://sp.auth.adobe.com/adobe-services/%s)
+  - _USER_AGENT: a Firefox-like user agent string to mimic a real browser
+  - _MVPD_CACHE: cache key for storing MVPD tokens (authn/authz tokens per requestor)
+  - _DOWNLOADING_LOGIN_PAGE: status string used when downloading login pages
+
+- _download_webpage_handle override
+  - Adds geo-verification headers (via geo_verification_headers()) to requests
+  - Merges supplied headers and delegates to parent implementation
+
+- _get_mvpd_resource(provider_id, title, guid, rating)
+  - Builds a tiny RSS/Atom-like XML resource describing an MVPD resource
+  - Returns an XML string containing a channel with a title and an item with title, guid, and a media rating
+  - Likely used to supply a resource descriptor to some parts of the flow
+
+- _extract_mvpd_auth(url, video_id, requestor_id, resource)
+  - Core, multi-step Adobe Pass authentication flow
+  - Inner helper utilities:
+    - xml_text(xml_str, tag): extract value of an XML tag from a string using regex
+    - is_expired(token, date_ele): determine if a token is expired using unified_timestamp
+    - post_form(form_page_res, note, data): parse a form’s action URL, gather hidden inputs, merge data, and POST to the form
+    - raise_mvpd_required(): raises an ExtractorError prompting for --ap-mso, --ap-username, and --ap-password (or netrc)
+    - extract_redirect_url(html, url=None, fatal=False): parse HTML meta refresh redirects and return the absolute URL
+  - mvpd_headers: base headers used for MVPD communication, including:
+    - ap_42, ap_11, ap_z, and User-Agent
+  - GUID logic:
+    - guid = value extracted from resource if it contains XML, else use resource as-is
+  - Main loop (up to 2 attempts):
+    - Load requestor_info from cache (ap-mvpd). If an authn_token exists but is expired, drop it.
+    - If missing authn_token:
+      - Reads --ap_mso (MSO) parameter; if absent, raise
+      - Retrieves credentials via _get_login_info using mso_id
+      - Looks up mso_info in MSO_INFO
+      - Starts provider redirect by hitting authenticate/saml with several query params (mso_id, requestor_id, etc.)
+      - Special-cases for Comcast_SSO, Verizon, and general providers due to their different login flows:
+        - Comcast_SSO:
+          - Handles auto-login redirects, possible signin forms, http-equiv refresh redirects
+          - Uses post_form to submit credentials and may handle extra confirmation steps
+        - Verizon:
+          - Sometimes requires no credentials on Verizon IPs; otherwise submits SAML login flow
+          - Handles possible login failure message
+          - Performs a SAML POST exchange and final confirmation
+        - General case (other MSOs):
+          - Follows provider redirect (including optional meta refresh redirects)
+          - Submits login form with the MSO-specific username/password field names
+          - If required, confirms login
+      - After login, fetches a session from SP/session with requestor_id
+      - If session indicates <pendingLogout>, clears cache and retries; otherwise stores authn_token in cache
+    - authz_token flow:
+      - Retrieve or fetch authz_token using SP/authorize with:
+        - resource_id, requestor_id, authentication_token, mso_id, userMeta
+      - Handle <pendingLogout> and <error> responses
+      - Save authz_token in cache per guid
+    - Update mvpd_headers with values from the authentication token:
+      - simpleSamlNameID and simpleSamlSessionIndex
+    - short authorization:
+      - Call SP/shortAuthorize with authz_token, requestor_id, session_guid, hashed_guid
+      - If <pendingLogout>, clear and retry
+      - Return the short_authorize response (the final token/redirect payload used to access the video)
+  - The file snippet ends with a “Summary:” placeholder, indicating the rest of the extractor (parsing formats, video metadata, etc.) is not shown here. The provided portion focuses entirely on the Adobe Pass MVPD authentication flow.
+
+Main functionality and flow summary
+- Purpose: Acquire a valid MVPD authorization token through the Adobe Pass protocol to authorize access to protected video content.
+- Flow:
+  1) Prepare credentials for a specific MSO (via --ap-mso, and --ap-username/password or netrc)
+  2) Perform the SP redirect/login dance (provider page, possible SAML redirects, meta refresh redirects)
+  3) Establish an authenticated session and obtain an authn_token
+  4) Use the authn_token to request an authz_token for the specific resource
+  5) Use the authz_token to fetch a short media token via shortAuthorize
+  6) Cache tokens to minimize repeated logins and handle token expiry
+- Robustness features:
+  - Handles a variety of provider-specific flows (Comcast, Verizon, and many others with the large MSO mapping)
+  - Manages redirects, including meta refresh redirects
+  - Detects and handles <pendingLogout> states by retrying
+  - Validates token expiry using unified_timestamp
+  - Uses form parsing to submit credentials via hidden form fields
+  - Caches tokens per requestor_id to speed subsequent requests
+
+Notes
+- The code is intricate due to the diversity of Adobe Pass flows across MVPDs and the need to simulate browser-like login sequences, including handling SAML exchanges and multiple redirect patterns.
+- The snippet ends with a partial “Summary:” which suggests the rest of the extractor (parsing video formats, entries, etc.) is not included here. The shown portion is dedicated to the Adobe Pass authentication mechanism.

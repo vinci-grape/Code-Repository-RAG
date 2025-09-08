@@ -1,0 +1,80 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/abcotvs.py
+
+Overview
+- Provides two extractors for ABC Owned Television Stations content:
+  - ABCOTVSIE: main content extractor pulling metadata and video formats via the ABCOTVS API.
+  - ABCOTVSClipsIE: extractor for clips hosted under clips.abcotvs.com, using a clip-specific API endpoint.
+
+Key classes and functionality
+- ABCOTVSIE (InfoExtractor)
+  - IE_NAME: 'abcotvs', IE_DESC: 'ABC Owned Television Stations'
+  - URL matching (_VALID_URL): Handles several subdomains (abc7news, abc7ny, abc7chicago, abc11, abc13, abc30, 6abc, etc.) and captures:
+    - site (e.g., abc7news, 6abc)
+    - display_id (optional)
+    - id (video id)
+  - _SITE_MAP: Maps the site subdomain to internal station codes (e.g., '6abc' -> 'wpvi', 'abc7' -> 'kabc', etc.)
+  - _real_extract(url):
+    - Extracts site, display_id, video_id from URL; uses video_id as fallback display_id if not present.
+    - Determines station code via _SITE_MAP.
+    - Requests data from https://api.abcotvs.com/v2/content with:
+      - id = video_id
+      - key = otv.web.<station>.story
+      - station = station
+    - Data handling:
+      - video = data['featuredMedia']['video'] if present, else data
+      - video_id = first available of ('id', 'publishedKey') from video; fall back to original video_id
+      - title = video['title'] or video['linkText']
+    - Formats extraction:
+      - If m3u8 URL present (video['m3u8']), build formats via _extract_m3u8_formats on the m3u8 URL (strip query string), with m3u8_id='hls', fatal=False (non-fatal if parsing fails).
+      - If MP4 URL present (video['mp4']), add a format with:
+        - abr: 128, format_id: 'https', height: 360, width: 640, url: mp4 URL
+      - Sort formats with _sort_formats(formats)
+    - image = video.get('image') or {}
+    - Return metadata dict including:
+      - id, display_id, title
+      - description: from video['description'] or video['caption'] or video['meta']['description'] (via dict_get/try_get)
+      - thumbnail: image['source']['dynamicSource'] (via dict_get)
+      - timestamp: int_or_none(video.get('date'))
+      - duration: int_or_none(video.get('length'))
+      - formats: collected formats
+
+- ABCOTVSClipsIE (InfoExtractor)
+  - IE_NAME: 'abcotvs:clips'
+  - _VALID_URL: Clips URL pattern:
+    - https://clips.abcotvs.com/.../video/<id>
+  - _TEST: Example clip with id '214814', expected metadata (title, description, upload_date, timestamp)
+  - _real_extract(url):
+    - video_id = extracted via _match_id
+    - Fetches data from https://clips.abcotvs.com/vogo/video/getByIds?ids=<id> and selects results[0]
+    - title = video_data['title']
+    - formats = _extract_m3u8_formats(video_data['videoURL'].split('?')[0], video_id, 'mp4')
+    - _sort_formats(formats)
+    - Returns metadata dict including:
+      - id, title
+      - description: video_data.get('description')
+      - thumbnail: video_data.get('thumbnailURL')
+      - duration: int_or_none(video_data.get('duration'))
+      - timestamp: int_or_none(video_data.get('pubDate'))
+      - formats
+
+Key implementation details
+- Robust data access:
+  - Uses dict_get and try_get for safe traversal of nested JSON.
+  - Uses int_or_none to convert numeric fields safely.
+  - Falls back to alternatives when primary fields are missing (e.g., video title from 'title' or 'linkText').
+- Formats handling:
+  - Supports HLS (m3u8) formats via _extract_m3u8_formats with fatal=False to avoid hard-fail if HLS parsing fails.
+  - Falls back to MP4 format when available, with explicit resolution/bitrate hints (e.g., 360p, 640x360, 128 kbps).
+  - Always sorts formats with _sort_formats.
+- API usage:
+  - ABCOTVSIE queries the ABCOTVS API at /v2/content using the station-specific key otv.web.<station>.story.
+  - ClipsIE uses a separate endpoint /vogo/video/getByIds for clip data.
+- Metadata assembly:
+  - Returns a standard set of fields: id, display_id, title, description, thumbnail, timestamp, duration, and formats.
+  - display_id is preserved when available; otherwise, id is used.
+- Testing:
+  - Includes _TESTS for typical article URLs and a sample for the 6abc site (only_matching) to ensure URL patterns are correct.
+
+In short
+- The file defines two extractors for ABC-owned stations: one for standard station content (ABCOTVSIE) and one for clips (ABCOTVSClipsIE).
+- Both fetch JSON data from ABC endpoints, build video formats from HLS and MP4 sources, and expose metadata like title, description, thumbnail, timestamp, and duration alongside the formats.

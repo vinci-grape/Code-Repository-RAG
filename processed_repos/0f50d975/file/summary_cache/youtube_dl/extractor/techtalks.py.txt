@@ -1,0 +1,63 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/techtalks.py
+
+Overview
+- Implements TechTalksIE, an extractor for techtalks.tv talks.
+- Handles both a single video page and a page that includes a separate slides video, returning either a single video or a playlist with two entries.
+
+Key components
+- Class: TechTalksIE (inherits from InfoExtractor)
+- URL pattern: _VALID_URL = r'https?://techtalks\.tv/talks/(?:[^/]+/)?(?P<id>\d+)'
+  - Captures talk ID as group 'id'
+- Helpers from utils:
+  - get_element_by_attribute: to locate the title element by class
+  - clean_html: to sanitize extracted HTML/text
+
+Main extraction flow (_real_extract)
+- Parse talk_id from URL using the _VALID_URL regex.
+- Download the talk page HTML (webpage).
+- Extract RTMP URL:
+  - rtmp_url = _search_regex(r'netConnectionUrl: \'(.*?)\'', webpage, 'rtmp url')
+- Extract presenter playback path:
+  - play_path = _search_regex(r'href=\'(.*?)\' [^>]*id="flowplayer_presenter"', webpage, 'presenter play path')
+- Extract title:
+  - title = clean_html(get_element_by_attribute('class', 'title', webpage))
+- Build a primary video info dict:
+  - id: talk_id
+  - title: title
+  - url: rtmp_url
+  - play_path: play_path
+  - ext: 'flv'
+- Detect slides video:
+  - Look for a slides link with regex: <a class="slides" href='(.*?)'
+  - If not found, return the single video_info
+  - If found, return a playlist:
+    - _type: 'playlist'
+    - id: talk_id
+    - title: title
+    - entries: [
+        1) the original video_info,
+        2) slides video entry:
+           - id: talk_id + '-slides'
+           - title: title
+           - url: rtmp_url
+           - play_path: slides URL (captured group)
+           - ext: 'flv'
+      ]
+
+Tests (_TESTS)
+- Test 1 (with slides present):
+  - URL: http://techtalks.tv/talks/learning-topic-models-going-beyond-svd/57758/
+  - Expects a playlist with two entries:
+    - Entry 1: id '57758', ext 'flv', title as given
+    - Entry 2: id '57758-slides', ext 'flv', title same
+  - Includes info_dict for the overall talk and skip_download: True (RTMP download skipped in tests)
+- Test 2 (only URL, matching):
+  - URL: http://techtalks.tv/talks/57758
+  - only_matching: True (ensures URL pattern matches)
+
+Implementation details
+- Uses named capture group 'id' for robust ID extraction.
+- Title extraction uses HTML helper to pull from an element with class="title" and cleans it.
+- Slides detection relies on a specific anchor class "slides" to decide between single video and playlist.
+- When slides exist, the slides video uses the same RTMP URL but a different play_path (the slides URL), with the same extension.
+- Returns either a single video_info dict or a playlist dict with two entries, both using ext 'flv'.

@@ -1,0 +1,93 @@
+Summary of ./youtube-dl/youtube_dl/extractor/fourtube.py
+
+Purpose
+- Implements multiple extractors for the FourTube family of adult video sites (4tube, Fux, Porntube, PornerBros) using a shared base class. Each extractor fetches video metadata and dynamically retrieved video formats via a token-based API.
+
+Main classes
+- FourTubeBaseIE (InfoExtractor)
+  - Core logic shared by all site extractors.
+  - Key methods:
+    - _extract_formats(url, video_id, media_id, sources)
+      - Builds a token URL: https://<token_host>/<media_id>/desktop/<sources joined by +>.
+      - Downloads JSON tokens with HTTP headers derived from the video URL (Origin and Referer).
+      - Constructs a list of formats using tokens[format]['token'] as the actual media URL, with format_id as "<format>p", resolution "<format>p", and quality as int(format).
+      - Sorts formats via _sort_formats.
+    - _real_extract(url)
+      - Parses the URL using the extractor’s _VALID_URL to obtain kind, video_id, display_id.
+      - If necessary, rewrites to a canonical URL using _URL_TEMPLATE and video_id.
+      - Downloads the video webpage and extracts metadata:
+        - title (from meta name)
+        - timestamp (uploadDate via parse_iso8601)
+        - thumbnail (thumbnailUrl)
+        - uploader/uploader_id (using specific anchor patterns)
+        - categories (parsed from a Categories / Tags section)
+        - view_count and like_count (from itemprop interactionCount meta tags)
+        - duration (parse_duration of duration meta tag)
+      - Attempts to fetch media_id and sources from the page:
+        - media_id from a data-id attribute on a button with a data-quality attribute
+        - sources from data-quality values on such buttons
+      - Fallback: if media_id or sources missing, loads the embedded player JS and extracts initial parameters to derive media_id and sources.
+        - Locates the player JS via a script tag with id "playerembed" and src URL.
+        - Extracts a JS initialization parameter blob, decodes it from base64, and parses it as JSON to obtain media_id and sources.
+      - Calls _extract_formats(url, video_id, media_id, sources) to obtain available formats.
+      - Returns a dict with id, title, formats, categories, thumbnail, uploader/uploader_id, timestamp, like_count, view_count, duration, and age_limit=18.
+
+- FourTubeIE
+  - Specific extractor for 4tube.com.
+  - _VALID_URL matches 4tube video pages and embeds, with optional m.-host variant.
+  - _URL_TEMPLATE uses the 4tube video page path.
+  - _TKN_HOST = 'token.4tube.com'
+  - Contains _TESTS with example URLs and expected metadata.
+
+- FuxIE
+  - Extractor for fux.com.
+  - _VALID_URL for video or embed pages on fux.com.
+  - _URL_TEMPLATE = 'https://www.fux.com/video/%s/video'
+  - _TKN_HOST = 'token.fux.com'
+  - _TESTS with example URLs and expected metadata.
+
+- PornTubeIE
+  - Extractor for porntube.com.
+  - _VALID_URL matches video pages and embed pages, including mobile variants.
+  - _URL_TEMPLATE = 'https://www.porntube.com/videos/video_%s'
+  - _TKN_HOST = 'tkn.porntube.com'
+  - _TESTS with example URLs and expected metadata.
+
+- PornerBrosIE
+  - Extractor for pornerbros.com.
+  - _VALID_URL matches video pages and embed pages, including mobile variants.
+  - _URL_TEMPLATE = 'https://www.pornerbros.com/videos/video_%s'
+  - _TKN_HOST = 'token.pornerbros.com'
+  - _TESTS with example URLs and expected metadata.
+
+Key implementation details
+- Token-based format retrieval
+  - The actual video segments are obtained via a token service. For given media_id and a list of sources (quality levels), the code requests a JSON object from token_host/media_id/desktop/<quality list>.
+  - Each format uses the returned token URL as the actual video URL and assigns:
+    - format_id: "<quality>p"
+    - resolution: "<quality>p"
+    - quality: int(quality)
+  - Formats are sorted after extraction.
+
+- Metadata extraction
+  - Title: from meta name tag.
+  - Timestamp: parsed from the uploadDate meta tag using parse_iso8601.
+  - Thumbnail: thumbnailUrl meta tag.
+  - Uploader and uploader_id: extracted via targeted HTML regexes (with graceful degradation if not present).
+  - Categories: parsed from a Categories / Tags section; returned as a list of strings if found.
+  - View/Like counts: extracted from interactionCount meta tags (UserPlays, UserLikes); converted to integers when present.
+  - Duration: parsed via parse_duration on the duration meta tag.
+  - Age limit is set to 18 for all entries.
+
+- Media_id and sources extraction/fallback
+  - Primary path: media_id from a button tag with data-id and data-quality attributes; sources from data-quality attributes on such buttons.
+  - Fallback path: if media_id or sources are missing, the code fetches the page’s player JavaScript, locates initialization parameters, and decodes/parses them to recover media_id and sources.
+
+- Embedding and compatibility
+  - Support is provided for pages and embeds (and mobile variants) across all sites via _VALID_URL patterns.
+  - Uses robust parsing utilities and compatibility helpers (compat_urlparse, compat_b64decode, etc.).
+
+- Tests
+  - Each extractor includes _TESTS entries with representative URLs and expected metadata (id, title, uploader, timestamp, duration, etc.) and skip_download hints where appropriate.
+
+In short, the module provides a unified way to extract video metadata and dynamically fetched formats from several adult sites in the FourTube family, using a token-based API to obtain actual video URLs and a resilient page/JS parsing strategy to derive the necessary media identifiers and quality sources.

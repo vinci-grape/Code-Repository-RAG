@@ -1,0 +1,35 @@
+Summary:
+- Purpose: A youtube-dl extractor for videos on fc-zenit.ru (FczenitIE).
+- Class and URL pattern:
+  - FczenitIE(InfoExtractor)
+  - _VALID_URL matches URLs like http(s)://(www.)?fc-zenit.ru/video/<id>
+- Test data:
+  - _TEST includes a sample URL, expected mp4 extension, title, timestamp, and upload date for regression testing.
+- Core extraction flow (_real_extract):
+  1. Extract video_id from URL using _match_id.
+  2. Download the page HTML with _download_webpage.
+  3. Locate an MSI ID from an embedded config object via regex:
+     - Pattern looks for config = { ... video_id: '...'
+  4. Fetch video metadata from the MSI API: http://player.fc-zenit.ru/msi/video with the MSI ID as input (query parameter video=msi_id). Parse the 'data' object.
+  5. Title comes from data['name'].
+  6. Build formats list from data['qualities']:
+     - For each quality with a 'url':
+       - format_id is quality['label']
+       - url is quality['url']
+       - height is int_or_none(quality['label'])
+  7. Sort formats using _sort_formats.
+  8. Extract tags from data.get('tags', []) by collecting tag['label'] values that exist.
+  9. Return a dict with:
+     - id: video_id
+     - title
+     - thumbnail: data.get('preview')
+     - formats
+     - duration: float_or_none(data.get('duration'))
+     - timestamp: int_or_none(data.get('date'))
+     - tags
+- Utilities and helpers:
+  - Uses int_or_none and float_or_none to coerce numeric fields.
+  - Inherits standard helper methods: _download_webpage, _download_json, _match_id, _search_regex, _sort_formats.
+- Data model details:
+  - MSI API response 'data' includes: name (title), qualities (list of {label, url}), tags (list of {label}), preview (thumbnail), duration, date.
+  - Only qualities with a URL are turned into formats; height is derived from the numeric label when possible.

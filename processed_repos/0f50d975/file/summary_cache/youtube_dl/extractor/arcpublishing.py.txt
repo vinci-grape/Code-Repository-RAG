@@ -1,0 +1,97 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/arcpublishing.py
+
+What it does
+- Implements an InfoExtractor for Arc Publishing (arcpublishing:) URLs used by many publishers (e.g., ADN, Boston Globe, CMG, etc.).
+- Converts a given arcpublishing URL (org and video UUID) into a set of playable video formats, along with metadata (title, description, duration, etc.) and optional subtitles.
+- Also provides a helper to discover arcpublishing video URLs from a webpage by scanning for POWA data attributes.
+
+Key classes, functions and data
+- ArcPublishingIE (InfoExtractor)
+  - _UUID_REGEX: Regular expression for a UUID used in data-uuid attributes.
+  - _VALID_URL: Regex to parse arcpublishing URLs: arcpublishing:<org>:<uuid>
+  - _TESTS: Example tests with only_matching entries to validate URL patterns.
+  - _POWA_DEFAULTS: List of tuples mapping org groups to their base API/CDN host patterns. Used to build the correct API URL per publisher. Includes:
+    - A config-prod style CDN base: %s-config-prod.api.cdn.arcpublishing.com/video
+    - A video API CDN: video-api-cdn.%s.arcpublishing.com/api
+  - _extract_urls(webpage): Static method to scan HTML for POWA blocks and emit arcpublishing URLs
+    - Looks for divs with class containing "powa" and data-uuid matching the UUID regex
+    - Reads data-org and data-uuid and yields arcpublishing:<org>:<uuid> entries
+- _real_extract(self, url)
+  - Parses org and uuid from the URL using _VALID_URL
+  - Determines the base API host using _POWA_DEFAULTS; falls back to a default prod CDN API if org not found
+  - Special handling: if org == 'wapo', real org becomes 'washpost'
+  - Fetches video metadata via API:
+    - URL: https://<base_api_tmpl>/<org>/v1/ansvideos/findByUuid?uuid=<uuid>
+    - Expects a list and uses the first element as the video object
+  - Extracted data:
+    - title: video['headlines']['basic']
+    - is_live: video.get('status') == 'live'
+    - thumbnail: video['promo_image']['url'] (via try_get)
+    - description: video['subheadlines']['basic']
+    - duration: int_or_none(video.get('duration'), 100)
+    - timestamp: parse_iso8601(video.get('created_date'))
+- Formats and streams
+  - Iterates over video.get('streams', [])
+  - For each stream:
+    - Deduplicates by URL
+    - stream_type handling:
+      - 'smil':
+        - Use _extract_smil_formats(s_url, uuid, fatal=False)
+        - Special-case formats with app 'cfx/st':
+          - Ensure play_path starts with 'mp4:'; set app to 'cfx/st'
+          - If tbr is a float, convert to vbr = tbr * 1000, remove tbr, and set format_id to 'rtmp-<vbr>'
+        - Append all to formats
+      - 'ts' or 'hls':
+        - Use _extract_m3u8_formats(s_url, uuid, 'mp4', 'm3u8' if is_live else 'm3u8_native', m3u8_id='hls', fatal=False)
+        - If all formats have acodec == 'none', skip
+        - For each format:
+          - If acodec == 'none', set prefference to -40 (audio-only or no audio)
+          - If vcodec == 'none', set preference to -50 (video-only with no audio)
+          - Attempt to infer vbr from the URL using a height-specific pattern: [_x]<height>[_-](<vbr>)
+            - If found, set f['vbr'] = int(vbr)
+        - Append to formats
+      - Other stream types:
+        - Build a format dict with:
+          - format_id: '<stream_type>-<vbr>' if vbr present, else just stream_type
+          - vbr: int_or_none(s.get('bitrate'))
+          - width: int_or_none(s.get('width'))
+          - height: int_or_none(s.get('height'))
+          - filesize: int_or_none(s.get('filesize'))
+          - url: s_url
+          - duration-related or preference: 'preference': -1
+  - _sort_formats is called with priority: ('preference', 'width', 'height', 'vbr', 'filesize', 'tbr', 'ext', 'format_id')
+- Subtitles
+  - Attempts to read video['subtitles']['urls']; if present, adds English ('en') subtitle URLs
+- Return structure
+  - id: uuid
+  - title: video title; if is_live, uses _live_title(title)
+  - thumbnail: promo_image.url
+  - description: subheadlines.basic
+  - formats: list of all collected formats (sorted)
+  - duration: duration (as integer or None, with default behavior explained above)
+  - timestamp: parsed created_date
+  - subtitles: dict of subtitles
+  - is_live: boolean flag indicating live stream
+
+Notable implementation details
+- Publisher-aware API resolution:
+  - Uses _POWA_DEFAULTS to determine which base API/CDN host to query per org/group.
+  - Special case for wapo: maps to washpost.
+  - If an org is not found in the map, a default prod CDN API URL is used.
+- Robust parsing helpers:
+  - extract_attributes to read HTML data- attributes for _extract_urls
+  - try_get to safely access nested dict structures
+  - parse_iso8601 for timestamps
+  - int_or_none for numeric fields with sensible defaults
+- Handling of different streaming formats:
+  - SMIL (SMIL-based): delegated to _extract_smil_formats, with adjustments for certain apps and format IDs
+  - HLS/DASH-like streams (ts, hls): use _extract_m3u8_formats with dynamic type depending on live status; include logic to skip formats without audio, and to derive vbr from URL
+  - Other types: generic format construction with available width/height/bitrate
+- Live vs VOD handling:
+  - Live streams keep their title via _live_title
+  - For live, HLS format type is chosen as 'm3u8' (vs 'm3u8_native' for non-live)
+- Subtitles:
+  - Subtitles are optional and pulled from video['subtitles']['urls'] if present, defaulting gracefully if missing
+
+Overall
+- The extractor focuses on resolving arcpublishing URLs to the correct Arc Publishing API per publisher, retrieving video metadata, enumerating all available video formats (SMIL, HLS/DASH-like, and others), normalizing some fields (vbr, format_id, preferences), and returning a complete metadata dictionary suitable for youtube-dl downstream processing. It includes a URL discovery helper for POWA-embedded pages.

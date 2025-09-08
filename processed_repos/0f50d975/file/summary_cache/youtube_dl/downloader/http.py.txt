@@ -1,0 +1,69 @@
+Concise, high-level summary of the code in ./youtube-dl/youtube_dl/downloader/http.py
+
+Overview
+- Implements HTTP-based file downloading with support for resuming, partial content (Range) requests, chunked transfers, retries, and progress reporting.
+- Class HttpFD extends FileDownloader and provides the real_download implementation used by youtube-dl to fetch a file from a URL.
+
+Main components
+- HttpFD(FileDownloader)
+  - real_download(filename, info_dict): primary entry point for performing the HTTP download.
+  - Internal state helper: DownloadContext (a dict subclass) used as ctx to hold per-download state (filenames, file handle, lengths, times, chunking, etc.).
+  - Nested helpers and control flow:
+    - SucceedDownload, RetryDownload, NextFragment: lightweight exceptions to manage flow (success, retry, fragmenting logic).
+    - establish_connection(): prepares and opens the HTTP connection, handling:
+      - Range requests for resuming or partial downloads.
+      - Dynamic chunk sizing (randomized within a range for non-test runs).
+      - Validation of server support for resume via Content-Range and fallback logic if resume is not supported.
+      - Handling of HTTP errors (416 for range issues, other codes with retry semantics).
+      - Extraction of Content-Length and Content-Range to determine data_len.
+      - Upfront handling of resume state and potential wipe/restart if resume is not supported.
+    - download(): actual data transfer loop:
+      - Honors test mode by capping data_len.
+      - Validates against min_filesize / max_filesize and aborts early if outside bounds.
+      - Lazy file opening: opens the destination file only when data starts arriving; uses sanitize_open for safety.
+      - Writes to a temporary file (ctx.tmpfilename) and supports xattr to store filesize if configured.
+      - Per-block read/write with dynamic block size adjustment (best_block_size) unless disabled.
+      - Rate limiting with slow_down, and progress updates via _hook_progress (downloaded bytes, speed, ETA, elapsed, etc.).
+      - Handles timeouts and socket errors gracefully by retrying (RetryDownload) or aborting if unrecoverable.
+      - On completion, renames tmp file to final filename, updates filetime if enabled, and reports finished progress.
+      - Supports fragmentation: if partial data was downloaded but more remains (ctx.chunk_size and data_len known), raises NextFragment to continue with another request with a Range header.
+  - Retry loop:
+    - Outer loop: while count <= retries.
+    - Tries establish_connection() and download().
+    - On RetryDownload: increments count, reports retry, and repeats.
+    - On NextFragment: continues to fetch the next fragment.
+    - On SucceedDownload: returns True.
+    - If retries exhausted: reports failure and returns False.
+
+Key functionality and behavior
+- Resume support:
+  - Uses frag_resume_len or local file size to determine resume position (ctx.resume_len).
+  - If resume appears possible (Content-Range matches requested start), uses Range requests and appends to file.
+  - If resume not supported or Content-Range is inconsistent, drops back to full download mode (overwrite) and resets resume state.
+  - Special handling for HTTP 416 (range not satisfiable): re-requests without Range to determine actual length; if length matches expectations within a 100-byte tolerance, treats as already downloaded; otherwise forces a restart.
+- Chunked vs non-chunked:
+  - When a chunk_size is specified, the downloader requests specific byte ranges and can download in fragments.
+  - If no chunk_size, may download the whole file in one shot.
+  - For test mode, uses a capped test file size and deterministic chunking behavior.
+- Error handling:
+  - Distinguishes between transient (RetryDownload) and fatal errors (raises HTTPError outside retry scope).
+  - Treats certain socket errors (ECONNRESET, ETIMEDOUT) as retryable.
+  - Handles 5xx and non-HTTP errors accordingly, with appropriate retries.
+- File writing and attributes:
+  - Writes to a temporary file first; only after successful completion renames to final filename.
+  - Uses sanitize_open to safely open file handles.
+  - Optional xattr support to store the expected filesize (user.ytdl.filesize).
+  - Updates file modification time using the server-provided Last-Modified header when updatetime is enabled.
+- Progress and speed:
+  - Reports progress via _hook_progress with fields such as status, downloaded_bytes, total_bytes, tmpfilename, filename, eta, speed, and elapsed.
+  - Calculates speed and ETA, and adapts block size dynamically (best_block_size) unless disabled by noresizebuffer.
+
+Important implementation details
+- Context management: ctx is a simple dict-based object (DownloadContext) allowing attribute-like access for easy state management across nested helpers.
+- Headers: Always sends Youtubedl-no-compression to avoid compressed transfer, and merges any custom http_headers from info_dict.
+- Resume validation: Robust handling of Content-Range and Content-Length from server responses to decide whether resuming is possible or a clean restart is necessary.
+- Fragmentation: The code supports splitting the download into fragments when a chunk_size is defined and the server supports range requests.
+- Test mode considerations: Special constants for test downloads to keep tests deterministic and controlled.
+- Integration with youtube-dl utilities: Uses compat wrappers, sanitized requests, local file time updates, and xattr utilities as part of the broader downloader framework.
+
+Overall, this module provides a resilient, feature-rich HTTP downloader with resume, chunking, and robust error/retry handling suitable for various hosting scenarios encountered by youtube-dl.

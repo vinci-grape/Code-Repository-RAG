@@ -1,0 +1,27 @@
+- Purpose and main idea
+  - This file acts as a centralized aggregator that imports all available extractor classes (InfoExtractor subclasses) from the youtube-dl project.
+  - Its import side effect is to register all extractor classes so they can be discovered dynamically by youtube-dl (e.g., via subclass inspection) when the package is imported.
+
+- What the code contains
+  - A long list of relative import statements, each bringing in a specific extractor class from its module. Examples include:
+    - ABCIE, ABCIViewIE from abc
+    - AbcNewsIE, AbcNewsVideoIE from abcnews
+    - YoutubeIE, YoutubePlaylistIE, YouTube-related extractors from youtube
+    - A wide range of site-specific extractors (BBC, Hulu, Vimeo, Dailymotion, Netflix variants, etc.)
+  - The extractors cover an enormous variety of video and audio sources, each typically named with an IE suffix (e.g., SomethingIE, SomethingPlaylistIE, SomethingEpisodeIE).
+
+- Key implementation details
+  - All imports are relative (from .module import ClassName), pulling in the main extractor classes from their respective modules.
+  - The file starts with:
+    - A flake8 directive (# flake8: noqa) to suppress lint issues due to the sheer number of imports.
+    - from __future__ import unicode_literals for Python 2/3 compatibility.
+  - There are no function or class definitions in this file; there is no runtime logic beyond importing other modules.
+  - The effect of importing this module is to ensure all extractor classes are defined in memory, enabling dynamic discovery via subclassing (InfoExtractor) used elsewhere in youtube-dl.
+
+- Practical implications
+  - This file effectively serves as a registry or registry-like bootstrap for extractors. By importing all extractor classes here, the system can discover and instantiate extractors as needed without importing them individually elsewhere.
+  - It helps keep the codebase modular (each site extractor lives in its own module) while providing a single entry point to load all available extractors.
+
+- Limitations/notes
+  - The file is large and mostly boilerplate import statements, which is why the flake8 check is disabled.
+  - There is no explicit export list (__all__) in this file; its primary purpose is side-effect import to populate classes in the module’s namespace.

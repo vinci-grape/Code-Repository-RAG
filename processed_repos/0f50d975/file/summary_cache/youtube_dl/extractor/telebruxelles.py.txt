@@ -1,0 +1,60 @@
+Summary of ./youtube-dl/youtube_dl/extractor/telebruxelles.py
+
+- Purpose
+  - Implement an information extractor for Tele Bruxelles / BX1 video pages. It handles both on-demand videos and live streams embedded via Wowza RTMP.
+
+- Key class
+  - TeleBruxellesIE (inherits from InfoExtractor)
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?(?:telebruxelles|bx1)\.be/(?:[^/]+/)*(?P<id>[^/#?]+)'
+  - Captures the slug-like display_id from the URL (the last path segment before query/fragment).
+
+- Tests
+  - _TESTS contains:
+    - Two real article URLs with expected id, display_id, title, description, and mp4 ext/MD5 for VOD content.
+    - Several only_matching tests for non-video pages to ensure correct URL matching.
+    - One test for a live stream URL (marked as live via the URL).
+
+- Core extraction logic (_real_extract)
+  1) Determine IDs
+     - display_id = self._match_id(url)
+     - Download the webpage content.
+     - article_id = extract an article numeric ID with regex: <article ... id="post-(\d+)>
+     - title = extract from the first H1 tag; if missing, fall back to Open Graph title via self._og_search_title(webpage)
+     - description = self._og_search_description(webpage, default=None)
+
+  2) RTMP/video URL extraction
+     - rt mp_url = extract a RTMP/Wowza URL with a complex regex targeting different possible embedded formats:
+       - Looks for a JavaScript/file assignment that contains a pattern like rtmp(s)://… and either a vod/mp4 pattern or stream/live pattern.
+     - Correct a common typo in the scheme name for live streams: replace rmtp with rtmp.
+     - Clean up concatenation artifacts in the extracted string by removing occurrences of "\" + "\"".
+     - formats = self._extract_wowza_formats(rtmp_url, article_id or display_id)
+     - self._sort_formats(formats)
+
+  3) Live vs VOD handling
+     - is_live = 'stream/live' in rtmp_url
+     - If live, adjust the title via self._live_title(title)
+
+  4) Build and return the info dictionary
+     - id: article_id or display_id
+     - display_id: display_id
+     - title: title (or live-adjusted title if is_live)
+     - description
+     - formats
+     - is_live
+
+- Important implementation details
+  - Robust metadata extraction:
+    - Title falls back to Open Graph title when the page structure is not exact.
+    - Description uses Open Graph description when present.
+  - RTMP/Wowza extraction:
+    - The code anticipates and fixes a common typo in the RTMP scheme (rmtp -> rtmp) and cleans up string concatenations that appear in the page’s JavaScript.
+    - Uses _extract_wowza_formats to parse Wowza streams into MPEG/DASH-like format entries suitable for the final formats list.
+  - Live stream handling:
+    - Detects live streams by checking for "stream/live" in the RTMP URL and applies a live-title transformation for display.
+  - Article ID vs slug:
+    - Prefers a numeric article_id when available; otherwise uses the slug from the URL as display_id.
+  - Tests emphasize URL matching for non-video pages (only_matching) to ensure the extractor doesn’t falsely process non-video content.
+
+In short, TeleBruxellesIE fetches the page, extracts a numeric article ID (or uses the URL slug as fallback), scrapes the title and description, locates a WOWZA RTMP URL (handling a couple of formatting quirks), builds the video formats, identifies live streams, and returns a structured info dictionary suitable for YouTube-DL.

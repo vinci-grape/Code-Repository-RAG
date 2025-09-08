@@ -1,0 +1,58 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/dctp.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (DctpTvIE) for videos hosted on dctp.tv, using their REST API to obtain video metadata and multiple download formats.
+
+- Key class
+  - DctpTvIE(InfoExtractor)
+    - _VALID_URL: Matches dctp.tv film pages (slug after /filme/ or /#/filme/).
+    - _BASE_URL: http://dctp-ivms2-restapi.s3.amazonaws.com (AWS REST API host)
+
+- How it works (high-level)
+  1. Extract display_id from the URL (the video slug).
+  2. Download version.json from _BASE_URL to determine the REST API version.
+  3. Build restapi_base as "<BASE_URL>/<version_name>/restapi".
+  4. Fetch video info JSON from /slugs/<display_id>.json.
+  5. Fetch media JSON from /media/<object_id>.json (object_id from the info JSON).
+  6. Extract core metadata (uuid, title, is_wide) and build a list of available formats.
+  7. Build format URLs for three sources (HLS, S3, and HTTP) using a helper add_formats.
+  8. If the video is wide (16:9), include both 4x3 and 16x9 variants; additionally, include a 720p variant if wide.
+  9. Collect thumbnails from media.images (if provided) and normalize width/height.
+  10. Return an info dictionary compatible with YouTube-DL, including id, display_id, title, description, timestamp, duration, thumbnails, and formats.
+
+- Formats generation (add_formats)
+  - Helper add_formats(suffix) builds three URLs for a given suffix:
+    - Base URL template: https://<host>/<uuid>_dctp_<suffix>.m4v
+    - HLS (m3u8): format_id 'hls-' + suffix, URL on cdn-segments.dctp.tv with playlist.m3u8, protocol 'm3u8_native'
+    - S3: format_id 's3-' + suffix, URL on completed-media.s3.amazonaws.com
+    - HTTP: format_id 'http-' + suffix, URL on cdn-media.dctp.tv
+  - Suffixes used:
+    - For current aspect: '0500_' + ('16x9' if is_wide else '4x3')
+    - If is_wide: an additional '720p' variant (format_id 'hls-720p', 's3-720p', 'http-720p')
+  - Result: multiple formats per video, including HLS and direct file formats.
+
+- Metadata extraction details
+  - uuid: from media.uuid
+  - title: media.title
+  - is_wide: media.get('is_wide') determines aspect and format variants
+  - description: media.description or media.teaser
+  - alt_title: media.subtitle
+  - timestamp: unified_timestamp(media.created)
+  - duration: float_or_none(media.duration_in_ms, scale=1000) (milliseconds to seconds)
+  - thumbnails: list built from media.images if it’s a list of dicts with fields url, width, height
+
+- Thumbnails handling
+  - images is expected to be a list of dicts; each dict with 'url', 'width', 'height'
+  - Non-dict or missing URL entries are skipped
+  - Each valid image contributes a thumbnail dict with url, width, height
+
+- Tests
+  - _TESTS contains two tests:
+    - First test target: 4:3 video URL, with expected md5 and an info_dict including id (uuid), display_id, ext (m4v), title, description, thumbnail pattern, duration, timestamp, and upload_date.
+    - Second test: 16:9 video URL, marked only_matching (not fully checked in test suite).
+
+- Implemented utilities
+  - Uses YouTube-DL utilities: float_or_none, int_or_none, unified_timestamp, url_or_none
+  - compat_str ensures string conversion for IDs used in URLs
+
+In short: DctpTvIE fetches version and video metadata from DCTP’s REST API, constructs multiple video formats (HLS and direct formats) for different suffixes based on aspect ratio (and an extra 720p variant for wide videos), gathers thumbnails, and returns a complete YouTube-DL compatible info dictionary.

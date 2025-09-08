@@ -1,0 +1,62 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/photobucket.py
+
+Purpose
+- Implement a YouTube-DL extractor for Photobucket video pages. It fetches the page, discovers embedded metadata in a JavaScript blob, resolves the actual media URL, and returns a structured info dictionary (id, url, uploader, timestamp, title, ext, thumbnail).
+
+Key components
+- PhotobucketIE(InfoExtractor): Main extractor class.
+- _VALID_URL: Regular expression that matches Photobucket video URLs and captures:
+  - id: the video identifier
+  - ext: the file extension (flv or mp4)
+  The pattern accounts for subdomains and typical Photobucket URL formats.
+- _TEST: A test case with a sample URL, expected MD5 of the video, and expected info fields (id, ext, timestamp, upload_date, uploader, title) to validate extraction.
+
+Main workflow in _real_extract(self, url)
+1. Parse URL
+   - Use the _VALID_URL regex to extract:
+     - video_id = group 'id'
+     - video_extension = group 'ext' (flv or mp4)
+
+2. Download the page
+   - webpage = self._download_webpage(url, video_id)
+
+3. Prepare for extraction
+   - Log the start of extraction via self.report_extraction(video_id)
+
+4. Extract embedded metadata
+   - Locate a JavaScript-embedded JSON blob with:
+     info_json = self._search_regex(r'Pb\.Data\.Shared\.put\(Pb\.Data\.Shared\.MEDIA, (.*?)\);', webpage, 'info json')
+   - Parse the JSON into a Python object:
+     info = json.loads(info_json)
+
+5. Resolve the actual media URL
+   - The final video URL is embedded inside info['linkcodes']['html'] as a query parameter file=...mp4 (or the corresponding extension).
+   - Extract and unquote it:
+     url = compat_urllib_parse_unquote(self._html_search_regex(r'file=(.+\.mp4)', info['linkcodes']['html'], 'url'))
+
+6. Build and return the result
+   - Return a dictionary with:
+     - id: video_id
+     - url: resolved video URL
+     - uploader: info['username']
+     - timestamp: info['creationDate']
+     - title: info['title']
+     - ext: video_extension
+     - thumbnail: info['thumbUrl']
+
+Implementation details and notes
+- The extractor relies on several helper methods from InfoExtractor:
+  - _download_webpage(url, video_id)
+  - _search_regex(pattern, string, name)
+  - _html_search_regex(pattern, string, name)
+- It uses compat_urllib_parse_unquote to percent-decode the extracted URL.
+- The embedded info JSON is retrieved from a specific JavaScript snippet that assigns data to Pb.Data.Shared.MEDIA. The code then parses this JSON to access fields like:
+  - info['username'] (uploader)
+  - info['creationDate'] (timestamp)
+  - info['title'] (video title)
+  - info['thumbUrl'] (thumbnail)
+  - info['linkcodes']['html'] (contains the final file= URL)
+- The final 'ext' in the output is taken from the original URL (either mp4 or flv), ensuring consistency with the source.
+- The _TEST example demonstrates a Photobucket URL returning an mp4, with expected metadata including timestamp and upload_date (the timestamp is used to derive upload_date in YouTube-DL’s framework).
+
+In short, PhotobucketIE fetches a Photobucket page, scrapes a JSON blob embedded in JavaScript to obtain metadata and a secondary HTML blob, extracts the actual media URL from that blob, and returns a standard info dict suitable for download by youtube-dl.

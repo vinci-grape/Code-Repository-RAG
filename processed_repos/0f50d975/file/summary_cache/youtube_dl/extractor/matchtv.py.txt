@@ -1,0 +1,41 @@
+- Purpose
+  - Implement a youtube-dl extractor for Match TV live streams. It handles URLs like http(s)://matchtv.ru/on-air/ or http(s)://matchtv.ru/#live-player and extracts live video formats.
+
+- Class and inheritance
+  - MatchTVIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL = r'https?://matchtv\.ru(?:/on-air|/?#live-player)'
+  - Matches on-air and live-player fragments of Match TV pages.
+
+- Tests
+  - _TESTS defines two tests:
+    - A live-player URL expecting id 'matchtv-live', extension 'flv', a specific Russian live title pattern, and is_live = True; skip_download is True.
+    - An on-air URL with only_matching = True.
+
+- Core extraction flow (_real_extract)
+  - Video ID
+    - Uses a fixed video_id = 'matchtv-live'.
+  - Acquire SMIL/stream URL
+    - Performs a JSON request to http://player.matchtv.ntvplus.tv/player/smil with:
+      - ts, quality=SD, contentId=561d2c0df7159b37178b4567, sign, includeHighlights=0, userId, sessionId (random int 1..1e9), contentType=channel, timeShift=0, platform=portal
+    - Sets Referer header to http://player.matchtv.ntvplus.tv/embed-player/NTVEmbedPlayer.swf
+    - Reads the response and uses data['videoUrl'] as the SMIL URL.
+  - Parse SMIL and extract F4M URL
+    - Fetches the SMIL/XML via _download_xml(video_url, video_id)
+    - Extracts the <to> element value using xpath_text(..., './to') to obtain the actual F4M manifest URL (f4m_url)
+  - Extract formats
+    - Uses _extract_f4m_formats(f4m_url, video_id) to build available streaming formats from the F4M manifest.
+    - Calls _sort_formats(formats) to order them appropriately.
+  - Return info
+    - id: video_id ('matchtv-live')
+    - title: self._live_title('Матч ТВ - Прямой эфир') to produce a live title
+    - is_live: True
+    - formats: list of extracted formats
+
+- Key implementation details
+  - The live stream URL is obtained through a JSON API that returns a SMIL URL, which is then converted to an F4M manifest for format extraction.
+  - A random sessionId is generated for the API request to help fetch a stream URL.
+  - Request includes a Referer header to mimic the embedded player origin.
+  - Uses youtube-dl utilities: _download_json, _download_xml, xpath_text, _extract_f4m_formats, _sort_formats, and _live_title.
+  - The live title is a fixed Russian string indicating “Матч ТВ - Прямой эфир” with live status handling via _live_title.

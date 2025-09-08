@@ -1,0 +1,51 @@
+- Purpose: TeleMBIE is a YouTube-DL extractor for telemb.be video pages. It parses the page to collect available video formats (including RTMP), and extracts metadata such as title, description, and thumbnail.
+
+- Class and inheritance:
+  - TeleMBIE(InfoExtractor): main extractor class implementing _real_extract.
+
+- URL matching:
+  - _VALID_URL = r'https?://(?:www\.)?telemb\.be/(?P<display_id>.+?)_d_(?P<id>\d+)\.html'
+  - Extracts display_id (slug) and id (numeric video id) from the page URL.
+
+- Tests:
+  - _TESTS contain two cases:
+    - ASCII example with id 13466 and expected mp4 format, title, description hash, and thumbnail pattern.
+    - Non-ASCII URL example to ensure non-ASCII support in download URLs, with id 13514 and corresponding metadata.
+
+- _real_extract workflow:
+  1) Parse id and display_id from the URL using the regex.
+  2) Download the page Webpage via _download_webpage(url, display_id).
+  3) Collect formats by scanning the page for video URLs:
+     - Searches for video URLs with re.findall(r'file\s*:\s*"([^"]+)"', webpage).
+     - For each video_url found:
+       - Create a format dict fmt with:
+         - 'url': video_url
+         - 'format_id': video_url.split(':')[0] (scheme, e.g., http or rtmp)
+     - If video_url matches an RTMP pattern:
+       - rtmp = re.search(r'^(?P<url>rtmp://[^/]+/(?P<app>.+))/(?P<playpath>mp4:.+)$', video_url)
+       - If matched, enrich fmt with:
+         - 'play_path': <playpath>
+         - 'app': <app>
+         - 'player_url': 'http://p.jwpcdn.com/6/10/jwplayer.flash.swf'
+         - 'page_url': 'http://www.telemb.be'
+         - 'preference': -1
+     - Append each fmt to the formats list.
+  4) Sort formats with self._sort_formats(formats).
+  5) Metadata extraction:
+     - title: remove leading 'TéléMB : ' from the page's OpenGraph title using remove_start(self._og_search_title(webpage), 'TéléMB : ').
+     - description: extract from og:description meta tag using _html_search_regex(..., fatal=False).
+     - thumbnail: extract using _og_search_thumbnail(webpage).
+  6) Return a dict with:
+     - 'id': video_id
+     - 'display_id': display_id
+     - 'title', 'description', 'thumbnail'
+     - 'formats': formats
+
+- Important implementation details:
+  - Uses a simple heuristic to find video URLs in the page via 'file: "URL"'.
+  - Supports both HTTP(S) and RTMP streams; RTMP streams are parsed to extract app and playpath, and are annotated with JWPlayer flash SWF URL and other RTMP-related fields.
+  - Metadata relies on OpenGraph tags (title/description/thumbnail) with a cleanup step to remove the 'TéléMB : ' prefix for cleaner titles.
+  - remove_start utility is used to strip a known prefix from the OG title.
+  - The tests ensure handling of non-ASCII URLs as well as proper metadata extraction.
+
+Overall, the extractor focuses on locating video URLs embedded in the TeleMB page, supporting RTMP and HTTP formats, and assembling a metadata-rich result suitable for download by youtube-dl.

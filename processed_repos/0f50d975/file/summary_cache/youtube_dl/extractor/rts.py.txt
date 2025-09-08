@@ -1,0 +1,83 @@
+concisely summarizes the RTSIE extractor
+
+- Purpose
+  - RTSIE extracts video, audio, or playlist items from RTS.ch (RTS) using the YouTube-DL SRGSSR-based framework. It handles RTS articles, embedded videos, audio programs, and playlists, producing standard YouTube-DL info dicts with formats, metadata, and thumbnails.
+
+- Class and inheritance
+  - Class RTSIE(SRGSSRIE)
+  - IE_DESC: 'RTS.ch'
+  - _VALID_URL supports two patterns:
+    - Internal RTS ID syntax: rts:<id>
+    - Full RTS article/video URLs: https://...rts.ch/.../<two+ path segments>...<numeric id>-<display_id>.html
+  - Inherits helper methods from SRGSSRIE for handling SRG SSR content and common format extraction.
+
+- Entry points and URL handling
+  - _real_extract(url) is the main entry.
+  - Extracts media_id from the URL via groups 'rts_id' or 'id'; display_id from 'display_id' or media_id.
+  - download_json(internal_id) fetches JSON article data from
+    http://www.rts.ch/a/{internal_id}.html?f=json/article
+  - Primary data source is all_info = download_json(media_id)
+
+- Handling of article data vs direct media
+  - If the initial JSON lacks 'video' and 'audio', RTS may be delivering a page with multiple items:
+    - Build entries from all_info['items'], using self.url_result(item_url, 'RTS') for each item.
+    - If no items, fetch the page and try to locate embedded content:
+      - Look for data-video-urns in articles or srg-player iframes; convert URNs to SRGSSR entries.
+    - If any entries are found, return a playlist_result(entries, media_id, all_info.get('title')).
+    - Otherwise, try to find an internal id in the page and refetch the JSON with that id.
+  - If the initial JSON contains video or audio, proceed to extract the media data directly.
+
+- Media type determination and error checks
+  - media_type is 'video' if 'video' in all_info else 'audio'
+  - Calls _get_media_data('rts', media_type, media_id) to raise errors if RTS indicates problems.
+
+- Info extraction
+  - info is all_info['video']['JSONinfo'] if 'video' in all_info else all_info['audio']
+  - title = info['title']
+
+- Bitrate extraction helper
+  - extract_bitrate(url) pulls an integer bitrate from the URL via pattern -<num>k. (e.g., -2000k.)
+
+- Formats extraction
+  - formats = []
+  - streams = info.get('streams', {})
+    - Skip certain variants: if 'hds_sd' present and 'hds' in streams, skip; similarly skip 'hls_sd' if 'hls' present.
+    - ext = determine_ext(format_url)
+    - If ext in ('m3u8', 'f4m'):
+      - format_url = self._get_tokenized_src(format_url, media_id, format_id)
+      - If ext == 'f4m': build formats via _extract_f4m_formats with hdcore=3.4.0 and fatal=False
+      - If ext == 'm3u8': build formats via _extract_m3u8_formats with m3u8_native and m3u8_id
+    - Else: append a basic format with {'format_id': format_id, 'url': format_url, 'tbr': extract_bitrate(format_url)}
+- Additional formats from RTS download API
+  - download_base = 'http://rtsww{a|}d.rts.ch/' where ''-a' for audio, '' for video
+  - info.get('media', []) contains extra downloads:
+    - For each media entry with a non-URL URL, build a format with:
+      - format_id = ext and optional suffix -{rate}k if rate exists
+      - url = urljoin(download_base, media_url)
+      - tbr = rate or extract_bitrate(media_url)
+  - This yields additional non-M3U8/F4M formats.
+
+- Finalization
+  - _check_formats(formats, media_id) and _sort_formats(formats) to validate and order.
+  - duration extraction: duration = info.get('duration') or info.get('cutout') or info.get('cutduration'); convert to seconds if string via parse_duration.
+  - Build and return the final info dict:
+    - id, display_id, titles, formats
+    - description (info.get('intro')), duration, view_count (int_or_none(info.get('plays')))
+    - uploader (info.get('programName')), timestamp (parse_iso8601(info.get('broadcast_date')))
+    - thumbnail (unescapeHTML(info.get('preview_image_url')))
+
+- Important implementation details
+  - Robust handling of articles with multiple items vs direct media pages.
+  - Fallbacks for embedded content: supports SRG SSR URNs (srgssr:) and embedded iframes.
+  - Supports multiple RTS content delivery modes: M3U8, F4M, and direct media URLs.
+  - Tokenized sources via _get_tokenized_src for protected streams.
+  - HD variant filtering to avoid duplicates or unsupported streams when alternative formats exist.
+  - Duration normalization and conversion from various RTS time representations.
+  - Warnings for failed f4m/m3u8 fetches are accounted in tests and behavior.
+
+- Tests
+  - Includes several scenarios: archives with metadata, video pages with multiple items, audio programs, and embedded rhs videos.
+  - Tests expect fields like id, display_id, ext, duration, title, description, uploader, upload_date, timestamp, thumbnail, view_count, and behavior for blocked regions.
+
+- Output
+  - Returns either a single video/audio info dict or a playlist entry list via playlist_result when multiple items are found, with properly populated formats and metadata.

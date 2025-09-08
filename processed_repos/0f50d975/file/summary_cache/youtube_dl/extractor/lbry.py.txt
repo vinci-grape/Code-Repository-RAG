@@ -1,0 +1,125 @@
+Below is a concise, function-focused summary of the code in ./youtube-dl/youtube_dl/extractor/lbry.py.
+
+Overview
+- Implements LBRY/Odysee extractors for youtube-dl:
+  - LBRYIE: Generic extractor for individual LBRY/Odysee streams (video and audio, including HLS).
+  - LBRYChannelIE: Channel-level extractor that lists streams within a channel.
+- Both rely on a LBRY JSON-RPC proxy (api.lbry.tv) to resolve URLs and fetch streaming data.
+- Uses a shared base class LBRYBaseIE for common utilities and parsing.
+
+Key classes and main functionality
+1. LBRYBaseIE (InfoExtractor)
+- Purpose: Shared utilities for resolving LBRY URLs and parsing stream metadata.
+- Important constants:
+  - _BASE_URL_REGEX: matches lbry.tv and odysee.com base URLs.
+  - _CLAIM_ID_REGEX: 1-40 hex chars (claim IDs).
+  - _OPT_CLAIM_ID: optional portion for claims in URLs.
+  - _SUPPORTED_STREAM_TYPES: ['video', 'audio'].
+- Core methods:
+  - _call_api_proxy(method, display_id, params, resource)
+    - Calls https://api.lbry.tv/api/v1/proxy with a JSON-RPC payload.
+    - Returns the 'result' field from the response.
+  - _resolve_url(url, display_id, resource)
+    - Uses the proxy to resolve a LBRY URL to its manifest data.
+  - _permanent_url(url, claim_name, claim_id)
+    - Builds a permanent LBRY URL for a given claim: lbry://<claim_name>:<claim_id>.
+  - _parse_stream(stream, url)
+    - Parses a stream object to an info dict:
+      - Extracts thumbnail, description, license, timestamps, tags, duration, channel info, etc.
+      - Determines file extension from source or mime type.
+      - Sets vcodec='none' for audio-only streams; includes width/height for video.
+      - Computes channel_url if signingChannel data is present.
+    - Returns a dictionary suitable for building a standard YouTube-dl info dict.
+
+2. LBRYIE (LBry Individual Entry)
+- Inherits from LBRYBaseIE.
+- IE_NAME: 'lbry'
+- _VALID_URL: Complex pattern to match various LBRY/Odysee URL forms (lbry.tv, odysee.com, channel/claim formats, etc.).
+- _TESTS: Multiple tests for video, audio, and HLS (with expected info_dict fields and some only_matching cases).
+- _real_extract(url)
+  - Normalizes display_id from the URL:
+    - If it starts with $/, uses a special parsing to extract the remainder, then formats as lbry://<display_id>.
+    - Otherwise, replaces ':' with '#' and unquotes.
+  - Resolves the URL via _resolve_url to get stream metadata.
+  - Validates that stream_type is one of _SUPPORTED_STREAM_TYPES; extracts claim_id and title.
+  - Fetches a streaming URL via _call_api_proxy('get', claim_id, {'uri': uri}, 'streaming url') -> 'streaming_url'.
+  - Parses stream metadata with _parse_stream.
+  - Performs a HEAD/GET on streaming_url to follow redirects and inspect the final URL:
+    - If the final URL is an HLS playlist (m3u8), extracts formats with _extract_m3u8_formats (mp4 container, native HLS), sorts formats.
+    - Otherwise, uses the streaming_url directly as the single format.
+  - Adds 'id' (claim_id) and 'title' to the info dict and returns it.
+
+3. LBRYChannelIE (Channel Entry)
+- Inherits from LBRYBaseIE.
+- IE_NAME: 'lbry:channel'
+- _VALID_URL: Matches channel URLs like https://lbry.tv/@ChannelName or with optional claim_id, etc.
+- _TESTS: Includes a channel example with id, title, description, and playlist_count; also a test for a route that should be matched but treated as non-fetchable (only_matching).
+- _PAGE_SIZE: 50 (pagination size for channel listing).
+- _fetch_page(claim_id, url, params, page)
+  - Internal generator to fetch a single page of channel content:
+    - Increments page, builds page_params for claim_search:
+      - channel_ids: [claim_id]
+      - claim_type: 'stream'
+      - no_totals: True
+      - page, page_size
+      - Merges additional params (filters).
+    - Calls _call_api_proxy('claim_search', claim_id, page_params, 'page %d' % page)
+    - Iterates over items; for each item with a valid stream name and claim_id:
+      - Builds info using _parse_stream(item, url)
+      - Augments info with:
+        - _type: 'url'
+        - id: stream_claim_id
+        - title: value['title']
+        - url: _permanent_url(url, stream_claim_name, stream_claim_id)
+      - Yields the info dict.
+- _real_extract(url)
+  - Extracts display_id from URL and normalizes it (':' replaced with '#').
+  - Resolves the channel via _resolve_url('lbry://' + display_id, ...).
+  - Retrieves claim_id and parses query string to build filters:
+    - content: 'audio' or 'video' or None (defaults to all supported types)
+    - fee_amount: default >=0
+    - order_by: maps 'new','top','trending' to internal sort keys
+    - duration: maps 'long','short' to duration constraints
+    - language: if not 'all', builds any_languages with the requested language (and 'none' if language is 'en')
+  - Sets stream_types to the requested content type or all _SUPPORTED_STREAM_TYPES.
+  - Creates an OnDemandPagedList using functools.partial(self._fetch_page, claim_id, url, params) and _PAGE_SIZE.
+  - Builds a playlist result from the paged entries:
+    - Title and description from the channel's value.
+  - Returns the playlist result.
+
+Key implementation details and behaviors
+- API interactions:
+  - All data fetches rely on a JSON-RPC proxy at api.lbry.tv/api/v1/proxy.
+  - _call_api_proxy handles the low-level RPC call and returns result field.
+  - _resolve_url resolves an lbry:// URL to its stream data, including claim_id and value.
+  - Streaming URL is retrieved via a separate 'get' RPC call with the full lbry:// URI.
+- URL normalization:
+  - display_id handling accounts for lbry.tv vs odysee formats and $/embed/download nuances.
+  - Permanent URLs are created as lbry://<claim_name>:<claim_id>.
+- Stream parsing:
+  - _parse_stream consolidates metadata: thumbnail, description, license, timestamps, duration, tags, channel info, and technical details (width/height for video, vcodec for audio).
+  - ext is derived from the source name or mime type.
+  - Audio streams set vcodec to 'none' to reflect audio-only streams.
+- Formats handling:
+  - If the final streaming URL returns an m3u8, formats are extracted via _extract_m3u8_formats with m3u8_id 'hls' and native protocol handling.
+  - Otherwise, a single format is used with info['url'].
+- Channel pagination:
+  - Uses OnDemandPagedList to lazily fetch pages of channel content via _fetch_page.
+  - Each item is converted to a URL-based entry with a per-item id, title, and permanent URL.
+- Query-based filtering for channels:
+  - Supports duration (long/short), language (with a special case for 'en' adding 'none'), and order (new/top/trending) filters.
+  - Content type filtering allows selecting audio, video, or all supported types.
+
+Tests and regex coverage
+- The _TESTS sections cover:
+  - A video example, an audio example, and an HLS example.
+  - Various URL formats to ensure matching rules (some entries marked only_matching to indicate non-fetchable or ambiguous URLs).
+- Regexes are designed to recognize a wide range of LBRY/Odysee URL shapes (including @channel paths, Episode-style paths, and id-based paths) and map to internal identifiers accordingly.
+
+In short
+- This file adds robust LBRY/Odysee support to youtube-dl by:
+  - Resolving LBRY URLs via a JSON-RPC proxy.
+  - Fetching and parsing stream metadata.
+  - Handling both direct and HLS streaming formats.
+  - Supporting channel-based browsing with pagination and refined filters.
+  - Producing standard youtube-dl info dicts for videos, audios, and playlists.

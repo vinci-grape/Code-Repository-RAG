@@ -1,0 +1,53 @@
+Summary of ./youtube-dl/youtube_dl/extractor/crackle.py
+
+Purpose
+- Implement Crackle video extractor (CrackleIE) for youtube-dl.
+- Retrieve video metadata and available formats from Crackle, handling geo-restrictions and multiple delivery protocols.
+
+Key classes/functions
+- CrackleIE(InfoExtractor)
+  - _VALID_URL: Regex to match Crackle video URLs (including crackle: scheme or http(s) URLs on crackle domains) and capture the video id.
+  - _TESTS: Example test cases including geo-restricted and domain-alias variations.
+  - _MEDIA_FILE_SLOTS: Mapping of specific non-protocol HTTP video file slots to their resolution (width/height) for HTTP(S) URLs without streaming protocols.
+  - _real_extract(self, url): Core extraction logic.
+    - video_id: Extracted from URL via _match_id.
+    - Geo handling: Builds a list of target countries. If geo_bypass_country is set in the downloader, use that single country; otherwise use a default set of countries (US, CA, AU, etc., plus territories).
+    - Geo-rotation loop: Tries to fetch media details using multiple country codes to bypass geo restrictions.
+      - Builds media_detail_url for Crackle’s API: https://web-api-us.crackle.com/Service.svc/details/media/{video_id}/{country}?disableProtocols=true
+      - Authorization header: Computes an HMAC-SHA1 signature using key "IGSLUQCBDFHEOIFM" on the string "<media_detail_url>|<timestamp>". Header includes: hmac, timestamp, "117", "1" in a pipe-delimited Authorization value.
+      - timestamp: Current GMT time formatted as YYYYmmddHHMM.
+      - Currency of response: JSON from media_detail_url with headers Accept: application/json and constructed Authorization.
+      - If a 401 HTTP error occurs, treat as geo-restriction for that country and try next country (store last_e); otherwise re-raise.
+    - Media URL extraction:
+      - media.get('MediaURLs') must be a list. Each entry is checked:
+        - Skip if UseDRM is True.
+        - Path is the actual URL for the format.
+        - ext = determine_ext(format_url)
+        - If ext is m3u8: use _extract_m3u8_formats (native HLS), non-fatal on failure.
+        - If ext is mpd: use _extract_mpd_formats (MPEG-DASH), non-fatal on failure.
+        - If Path ends with .ism/Manifest: use _extract_ism_formats (Smooth Streaming), non-fatal on failure.
+        - Else: fall back to non-streaming HTTP format; map Type field through _MEDIA_FILE_SLOTS to assign width/height and build a simple format entry.
+      - _sort_formats(formats) to order formats by quality/preference.
+    - Metadata extraction:
+      - title, description, duration (from DurationInSeconds or parse_duration(Duration)), view_count, average_rating, age_limit (parse_age_limit(Rating)), genre, release_year, creator (Directors), artist (Cast).
+      - If MediaTypeDisplayValue == 'Full Episode':
+        - series = ShowName
+        - episode = Title
+        - season_number, episode_number from Season/Episode fields
+      - Else: series, episode, season_number, episode_number = None
+    - Subtitles and thumbnails:
+      - Subtitles: ClosedCaptionFiles list, each with Path (URL) and Locale (default 'en'); build subtitles dict by language.
+      - Thumbnails: Images dict/list; parse Img_<width>x<height> keys with regex and build list of thumbnail dicts with url, width, height.
+    - Return value: dict containing id, title, description, duration, view_count, average_rating, age_limit, genre, creator, artist, release_year, series, episode, season_number, episode_number, thumbnails, subtitles, formats.
+    - If a successful country was found, returns the video info; otherwise, after exhausting countries, raises the last_e captured (geo-related 401 error).
+
+Important implementation details
+- Geo bypass mechanism: Attempts multiple country codes due to geo restrictions; a 401 from the Crackle API signals geo localization denial and triggers a retry with the next country code.
+- Authorization for Crackle API: Reconstructs the request authorization using an HMAC-SHA1 signature with a fixed key and a timestamp, mirroring Crackle’s client behavior found in their JavaScript. This is used to form the Authorization header along with the timestamp and fixed components ("117", "1").
+- Media formats handling: Supports common streaming protocols (HLS/m3u8, DASH/mpd, Smooth Streaming/ISM) via dedicated extractor methods. If a direct HTTP URL is provided, uses pre-mapped resolutions from _MEDIA_FILE_SLOTS to provide width/height metadata.
+- Metadata extraction: Robust extraction of multiple video properties (duration, view count, rating, age limit, genre, release year, creators, cast) and episode metadata when applicable.
+- Subtitles and thumbnails: Extracts closed captions with language handling and builds a list of thumbnails from Images metadata, parsing dimensions from image keys like Img_640x360.
+- Error handling: If all geo attempts fail, raises the last encountered ExtractorError (typically a geo-restriction). Non-fatal errors for specific format types are handled by continuing to accumulate other formats.
+
+In short
+CrackleIE fetches Crackle video details via a geo-aware API, authenticates requests with a reconstructed header, collects multiple playable formats (HLS/DASH/ISM or direct HTTP), and assembles rich metadata (title, description, duration, counts, ratings, genres, cast, episode info, thumbnails, and subtitles) into a structured dict for youtube-dl.

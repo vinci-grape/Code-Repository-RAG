@@ -1,0 +1,68 @@
+Here's a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/tubitv.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for tubitv.com videos, handling both free and restricted content (with login) and geo restrictions.
+
+- Main class
+  - TubiTvIE(InfoExtractor): Core extractor class.
+
+- URL matching and metadata
+  - _VALID_URL = r'https?://(?:www\.)?tubitv\.com/(?:video|movies|tv-shows)/(?P<id>[0-9]+)'
+    - Extracts video_id from URLs like /video/12345, /movies/67890, /tv-shows/...
+  - _GEO_COUNTRIES = ['US']
+    - Indicates geo-restriction handling targets the US.
+  - _NETRC_MACHINE = 'tubitv'
+    - Supports netrc login info for credentials.
+
+- Login/authentication
+  - _LOGIN_URL = 'http://tubitv.com/login'
+  - _real_initialize calls self._login() to perform login before extraction when needed.
+  - _login():
+    - Fetches username/password via _get_login_info().
+    - If provided, issues a POST to the login URL with form data (username, password) using sanitized_Request and proper content-type.
+    - Verifies login success by checking for id="tubi-logout" in the response; otherwise raises ExtractorError.
+    - Uses urlencode_postdata to encode POST data.
+  - If login info is not supplied, skip login (non-fatal).
+
+- Real extraction flow
+  - _real_extract(self, url):
+    - video_id = self._match_id(url)
+    - Retrieves video metadata JSON from http://tubitv.com/oz/videos/{video_id}/content
+    - Expects fields like: title, url (for formats), thumbnails, subtitles, description, duration, publisher_id, year.
+    - Formats:
+      - Uses self._extract_m3u8_formats on the URL (normalized with _proto_relative_url) to obtain MP4/M3U8 formats, with 'm3u8_native' as the format protocol.
+      - Calls self._sort_formats(formats) to order formats by quality/bitrate.
+    - Thumbnails:
+      - Builds a list from video_data.get('thumbnails', []) while filtering out falsy values.
+      - Each thumbnail uses _proto_relative_url.
+    - Subtitles:
+      - Builds a dict mapping language to a list of subtitle dicts with 'url' keys (language defaults to 'English' if not provided).
+      - Each subtitle URL is normalized with _proto_relative_url.
+    - Returns a dict with:
+      - id: video_id
+      - title: video_data['title']
+      - formats: list of formats
+      - subtitles: subtitles dict
+      - thumbnails: list of thumbnail dicts
+      - description: video_data.get('description')
+      - duration: int_or_none(video_data.get('duration'))
+      - uploader_id: video_data.get('publisher_id')
+      - release_year: int_or_none(video_data.get('year'))
+
+- Important implementation details
+  - _proto_relative_url(...) is used to normalize all URLs (video stream, thumbnails, subtitles) to protocol-relative URLs as needed.
+  - int_or_none(...) is used to safely parse duration and year from the JSON data.
+  - The code handles missing fields gracefully (e.g., optional thumbnails/subtitles).
+  - The login flow only runs if credentials are available; otherwise extraction proceeds (likely for public content).
+  - Tests (_TESTS) cover:
+    - A sample video URL with expected id, title, description, uploader_id, and md5 of the downloaded MP4.
+    - Other URLs that should match the extractor or be skipped (only_matching).
+    - A test with a specific video that includes release_year and md5 for verification, with skip_download for the test.
+
+- Key data sources and formats
+  - Video metadata source: http://tubitv.com/oz/videos/{video_id}/content
+  - Video formats: extracted from video_data['url'] via M3U8 (hls) with m3u8_native protocol.
+  - Thumbnails: video_data.get('thumbnails')
+  - Subtitles: video_data.get('subtitles') with per-entry 'url' and 'lang'
+
+Overall, the extractor handles authentication, fetches structured video metadata, derives stream formats and media assets, and returns a rich information dictionary suitable for downstream processing by youtube-dl.

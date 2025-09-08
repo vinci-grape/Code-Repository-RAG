@@ -1,0 +1,94 @@
+Here’s a concise, implementation-focused summary of the code in youtube-dl/youtube_dl/extractor/dplay.py.
+
+Purpose
+- Implement extractors for DPlay, Discovery Plus, and HGTV (De) video pages. They fetch video metadata and streaming formats via the Discovery/DPlay API (the “disco-api”), handling token-based authentication, geo-restrictions, and different streaming formats (MPD/HLS or direct URLs).
+
+Main classes
+- DPlayIE (InfoExtractor)
+  - Base extractor for DPlay-family domains.
+  - URL matching via _VALID_URL and _PATH_REGEX to capture a display id containing a path-like segment.
+  - _real_extract delegates to _get_disco_api_info with appropriate disco host/realm based on the domain country.
+  - Core functionality lives in _get_disco_api_info.
+
+- DiscoveryPlusIE (DPlayIE)
+  - Subclass for discoveryplus.com.
+  - _VALID_URL tailored to Discovery Plus video URLs.
+  - Overrides:
+    - _update_disco_api_headers: sets x-disco-client header to a fixed value for DPlus.
+    - _download_video_playback_info: uses the v3 Playback API with a POST-like payload containing device and wisteriaProperties; returns streaming attributes.
+  - _real_extract uses the DPlay flow but targets discoveryplus endpoints and realm.
+
+- HGTVDeIE (DPlayIE)
+  - Subclass for de.hgtv.com/sendungen.
+  - _VALID_URL tailored for HGTV Germany.
+  - _real_extract calls _get_disco_api_info with a German disco API host and appropriate realm/country.
+
+Key methods and implementation details
+- _process_errors(self, e, geo_countries)
+  - Parses error payload from API responses and handles known error codes:
+    - access.denied.geoblocked → raise_geo_restricted with geo_countries.
+    - access.denied.missingpackage or invalid.token → ExtractorError suggesting cookies.
+    - Otherwise raises ExtractorError with the error detail.
+
+- _update_disco_api_headers(self, headers, disco_base, display_id, realm)
+  - Retrieves an access token from disco_base + 'token' using realm, and sets Authorization: Bearer <token> in headers.
+
+- _download_video_playback_info(self, disco_base, video_id, headers)
+  - For DPlay: GETs disco_base + 'playback/videoPlaybackInfo/' + video_id and collects streaming entries.
+  - For Discovery Plus (overridden): POST-like payload to disco_base + 'playback/v3/videoPlaybackInfo' returning streaming data in a different shape.
+
+- _get_disco_api_info(self, url, display_id, disco_host, realm, country)
+  - Geo bypass setup for the specific country (single-country geo bypass).
+  - Build disco_base from host and initialize headers (Referer: url).
+  - Retrieve token via _update_disco_api_headers.
+  - Fetch video metadata at disco_base + 'content/videos/' + display_id with fields/include parameters to expand related data (images, channel, show, tags, etc.).
+    - On 400, call _process_errors to handle geo or auth-related issues.
+  - Extract video_id and attributes (title, description, duration, publishStart, seasonNumber, episodeNumber, etc.).
+  - Fetch playback formats via _download_video_playback_info (handling possible 403 via _process_errors).
+  - Build formats list:
+    - If a format entry has type 'dash' or extension mpd, extract MPD formats.
+    - If a format entry has type 'hls' or extension m3u8, extract HLS formats.
+    - Otherwise, append a direct URL format with format_id.
+  - Collect metadata from the included section:
+    - channel/name → creator
+    - show/name → series
+    - image entries → thumbnails (with width/height)
+    - tag names → tags
+  - Return a dict with:
+    - id, display_id, title
+    - description
+    - duration (derived from videoDuration, divided by 1000)
+    - timestamp (parsed from publishStart)
+    - upload_date
+    - series, season_number, episode_number
+    - creator, tags, thumbnails
+    - formats (sorted)
+
+- _real_extract(self, url) in DPlayIE
+  - Parses URL via _VALID_URL to obtain display_id, domain, and country/subdomain country.
+  - Determines disco host (disco-api.<domain> when domain starts with 'd', otherwise eu2-prod.disco-api.com).
+  - Calls _get_disco_api_info with the assembled values.
+
+- _real_extract methods in DiscoveryPlusIE and HGTVDeIE
+  - They provide correct display_id extraction and call _get_disco_api_info with the appropriate disco_host, realm, and country values for their services.
+
+URL patterns and tests
+- DPlayIE._VALID_URL handles multiple DPlay hosts and geo variants, matching a path that yields a display_id like domain/path/id.
+- DiscoveryPlusIE and HGTVDeIE have their own _VALID_URLs that reuse the DPlay path component.
+- _TESTS include multiple real-world URLs for:
+  - non-geo-restricted and geo-restricted DPlay
+  - Disco API-based playback
+  - Italian HGTV/Discovery-like routes
+  - 'only_matching' tests for URLs that should not be extracted
+- Test expectations cover id, display_id, title, description, duration, timestamp, upload_date, series, season_number, episode_number, creator, thumbnails, and formats. Some tests also expect endurance of geo-restricted paths or premium-only content.
+
+Important implementation notes
+- Formats are assembled from the streaming metadata, supporting MPD (dash) and HLS (m3u8) formats via _extract_mpd_formats and _extract_m3u8_formats with careful handling of mp4 container defaults.
+- Duration is converted from videoDuration (likely in milliseconds) to seconds by using float_or_none(..., 1000).
+- Timestamps use unified_timestamp on publishStart.
+- Metadata extraction uses the included/relationship objects (channel, show, image, tag) to populate creator, series, thumbnails, and tags.
+- Geo restrictions are detected via API error payload and translated to user-friendly restriction errors.
+- Keeps compatibility across DPlay, Discovery Plus, and HGTV De by centralizing API access in _get_disco_api_info and tailoring headers/paths per service in the subclasses.
+
+In short
+- The file implements a robust extractor framework for DPlay and related services, centering on a common disco API flow: fetch token, query video metadata, fetch streaming sources, build a rich metadata object with formats, and handle geo/auth errors gracefully. Discovery Plus and HGTV Germany variants extend the base behavior with slight API/header differences.

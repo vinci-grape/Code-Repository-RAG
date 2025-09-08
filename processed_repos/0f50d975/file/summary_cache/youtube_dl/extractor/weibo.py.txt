@@ -1,0 +1,70 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/weibo.py
+
+Overview
+- Provides two extractors for Weibo video content:
+  - WeiboIE: for desktop Weibo pages (https://weibo.com/...).
+  - WeiboMobileIE: for mobile Weibo status pages (https://m.weibo.cn/status/...).
+
+Key classes and main functionality
+- WeiboIE (InfoExtractor)
+  - _VALID_URL: matches desktop Weibo video pages with URL pattern weibo.com/[digits]/<video-id>.
+  - _real_extract(url):
+    - Extracts the video_id from URL.
+    - Downloads the initial page to get a Referer for the Weibo visitor flow.
+    - If the redirected/visited URL contains passport.weibo.com, performs a “first visit” visitor generation flow:
+      - Calls passport.weibo.com/visitor/genvisitor (POST, with JSONP-like callback, and a fingerprint payload) to obtain tid and confidence.
+      - Calls passport.weibo.com/visitor/visitor with parameters including tid and the computed confidence to initialize the session.
+      - Re-downloads the original page after the visitor step.
+    - Parses the page title from the HTML (<title>...).
+    - Extracts video sources from the page via a JavaScript-encoded parameter video-sources (formatted as a JSON-like string but escaped). Uses:
+      - _search_regex to locate video-sources, then compat_parse_qs to parse it into a dict mapping resolutions (e.g., "480", "720") to URL lists.
+    - Builds a list of formats for resolutions 480 and 720 (if available), taking the first URL for each height.
+    - Sorts formats with _sort_formats.
+    - Extracts uploader nickname from Open Graph property nick-name via _og_search_property.
+    - Returns a dictionary with id, title, uploader, and formats.
+  - Important implementation details:
+    - Uses Referer-based Weibo visitor flow to bypass anti-scraping measures.
+    - video_formats is obtained by parsing a JSON-like string embedded in the page and then converting to a dict with compat_parse_qs.
+    - Only 480p and 720p formats are collected; other resolutions are ignored.
+    - The test entry _TEST validates id, extension (mp4), and a sample title pattern.
+
+- WeiboMobileIE (InfoExtractor)
+  - _VALID_URL: matches mobile Weibo status pages with URL pattern m.weibo.cn/status/<id>.
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Downloads the page content.
+    - Locates a JavaScript snippet containing a render data structure:
+      - Looks for a pattern like: var $render_data = [({...})][0] || {};
+    - Parses this data via:
+      - _search_regex (capture the JS object as text), then _parse_json with transform_source=js_to_json to convert JS-style object to JSON.
+    - From the parsed data, accesses:
+      - status_title for the title.
+      - status.user.screen_name for the uploader.
+      - status.page_info.media_info.stream_url for the direct video URL.
+    - Returns a dict with id, title, uploader, and url.
+  - Important implementation details:
+    - The extractor relies on a mobile-specific embedded render data structure, rather than the desktop video-sources approach.
+    - Uses js_to_json to safely convert the JS structure to JSON before parsing.
+    - The returned URL is the direct media stream URL from the render data.
+
+Key implementation details and utilities used
+- Inheritance: both extractors subclass InfoExtractor.
+- URL handling:
+  - WeiboIE uses a two-step visiting flow to obtain necessary cookies/tokens (genvisitor/visitor) when redirected to passport.weibo.com.
+  - WeiboMobileIE relies on a JS-rendered data structure embedded in the page.
+- JSON/JS handling:
+  - strip_jsonp: used to clean JSONP responses from the genvisitor endpoint.
+  - js_to_json: used to convert JavaScript object literals to JSON for parsing.
+  - compat_parse_qs: parses query-string style data embedded in a string into a Python dict.
+  - urlencode_postdata: formats POST data payloads for the genvisitor request.
+- Formatting:
+  - WeiboIE collects formats for 480p and 720p only, assembling a list of dicts with 'url' and 'height'.
+  - _sort_formats is used to order formats by quality/height.
+- Metadata extraction:
+  - _html_search_regex is used to grab the title from the page.
+  - _og_search_property retrieves uploader metadata from Open Graph metadata (nick-name).
+- Testing hints:
+  - _TEST in WeiboIE and WeiboMobileIE provide sample URLs and expected info_dict (id, ext, title, and uploader where applicable).
+
+In short
+- The module implements two Weibo video extractors: desktop Weibo (WeiboIE) with a visitor-based anti-scraping bypass and 480/720p format extraction, and mobile Weibo (WeiboMobileIE) that parses a JS-rendered data structure to obtain the video URL and metadata. Both return a standard info dictionary with id, title, uploader (where available), and formats/URL.

@@ -1,0 +1,50 @@
+Concise but comprehensive summary of the code in ./youtube-dl/test/test_write_annotations.py
+
+- Purpose
+  - A unit test that verifies youtube-dl’s ability to write YouTube video annotations to an XML file and that the content includes specific text annotations.
+
+- Key functionality
+  - Downloads a YouTube video (or more precisely, runs the annotation write path) with writeannotations enabled and skip_download set to True, ensuring only annotation data is produced.
+  - Parses the produced annotations XML file (gr51aVj-mLg.annotations.xml) and validates its structure and content.
+
+- Main components
+  - YoutubeDL subclass
+    - A small wrapper around youtube_dl.YoutubeDL that rebinds to_stderr to to_screen, ensuring messages are directed to standard error.
+  - Parameters setup
+    - params = get_params with:
+      - writeannotations: True
+      - skip_download: True
+      - writeinfojson: False
+      - format: 'flv'
+    - These settings trigger annotation file creation without downloading media.
+  - Test constants
+    - TEST_ID = 'gr51aVj-mLg'
+    - ANNOTATIONS_FILE = TEST_ID + '.annotations.xml'
+    - EXPECTED_ANNOTATIONS = ['Speech bubble', 'Note', 'Title', 'Spotlight', 'Label']
+  - Test flow (TestAnnotations)
+    - setUp: clears any pre-existing ANNOTATIONS_FILE to ensure test isolation.
+    - test_info_json:
+      - Creates a YoutubeIE extractor and a YoutubeDL instance (using the custom subclass).
+      - Attaches the extractor to the downloader and invokes download([TEST_ID]).
+      - Confirms ANNOTATIONS_FILE exists.
+      - Parses the XML using xml.etree.ElementTree (utf-8) and validates:
+        - Root tag is 'document'
+        - There is a child 'annotations' element
+        - Iterates over all 'annotation' elements
+          - Only processes those with attribute type='text'
+          - Reads the TEXT child and ensures its text is in the expected list
+          - Removes the matched text from the local copy of EXPECTED_ANNOTATIONS to handle duplicates
+        - After processing, asserts that all expected texts were found (len(expected) == 0)
+    - tearDown: removes ANNOTATIONS_FILE if present (cleanup)
+  - XML expectations
+    - The test expects an XML structure with a root 'document', a child 'annotations', and multiple 'annotation' elements.
+    - For text-type annotations, there should be a TEXT subelement whose text matches one of the expected annotation texts.
+
+- Important implementation details
+  - Uses a dedicated test helper (get_params, try_rm) to configure the environment and clean up files.
+  - The test handles the fact that multiple annotations may have identical text by copying EXPECTED_ANNOTATIONS and removing matched texts as they are encountered.
+  - Reads the annotations XML with explicit encoding='utf-8' to ensure correct handling of non-ASCII content.
+  - The test acknowledges that not all annotations have a TEXT child and that the list of annotations may be unsorted.
+
+- Execution
+  - When run as a script or via unittest, it performs the described validation to ensure youtube-dl correctly writes and exposes annotation data for the given video ID.

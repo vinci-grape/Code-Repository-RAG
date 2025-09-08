@@ -1,0 +1,40 @@
+Here is a concise summary of the GameInformer extractor file.
+
+Purpose
+- Implement GameInformerIE to extract video data from gameinformer.com pages that host Brightcove videos, delegating to the BrightcoveNew extractor.
+
+Main functionality
+- For a given Game Informer article URL, fetch the page, locate a Brightcove video ID, and then construct a Brightcove URL to let the BrightcoveNew extractor handle the video extraction.
+- If a Brightcove ID is present in the page (via a specific CSS class or an element ID), build the Brightcove URL using a template.
+- If no direct Brightcove ID is found, fall back to BrightcoveNewIE._extract_url to obtain the video URL from the page.
+- Return a URL result that uses the BrightcoveNew extractor with the discovered video ID.
+
+Key components
+- Class: GameInformerIE(InfoExtractor)
+- _VALID_URL: Regex to match Game Informer article pages and capture an ID component
+- _TESTS: Two sample tests
+  - Test 1: A page with a Brightcove embed, expecting a specific Brightcove video ID and metadata (title, timestamps, uploader).
+  - Test 2: A page where Brightcove ID is inside a unique element; expects the corresponding video ID and metadata.
+- BRIGHTCOVE_URL_TEMPLATE: Template to construct the Brightcove player URL
+  - http://players.brightcove.net/694940074001/default_default/index.html?videoId=%s
+
+Key implementation details
+- _real_extract(self, url):
+  - Display ID extracted via self._match_id(url)
+  - webpage = self._download_webpage(url, display_id, headers=self.geo_verification_headers()) to honor geo restrictions
+  - brightcove_id = clean_html(get_element_by_class('field--name-field-brightcove-video-id', webpage) or get_element_by_id('video-source-content', webpage))
+    - Looks for Brightcove ID in either:
+      - An element with class field--name-field-brightcove-video-id
+      - An element with id video-source-content
+    - clean_html is used to sanitize the extracted value
+  - brightcove_url = BRIGHTCOVE_URL_TEMPLATE % brightcove_id if brightcove_id else BrightcoveNewIE._extract_url(self, webpage)
+    - If an ID is found, construct a direct Brightcove URL
+    - Otherwise, attempt to extract a Brightcove URL from the page using BrightcoveNewIE
+  - Return self.url_result(brightcove_url, 'BrightcoveNew', brightcove_id)
+
+Dependencies
+- BrightcoveNewIE: Used when constructing or delegating to Brightcove
+- Utilities: clean_html, get_element_by_class, get_element_by_id
+
+Overall behavior
+- The extractor enables YouTube-dl to fetch Game Informer videos by identifying a Brightcove video ID on the page and delegating to the BrightcoveNew extractor, ensuring consistent handling of Brightcove-hosted content across both direct ID references and embedded players.

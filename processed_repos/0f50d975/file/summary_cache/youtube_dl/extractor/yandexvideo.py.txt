@@ -1,0 +1,79 @@
+Here’s a concise, comprehensive summary of the code in youtube-dl/youtube_dl/extractor/yandexvideo.py:
+
+Main purpose
+- Implement a YouTube-DL (youtube-dl) extractor for Yandex Video content (Yandex Video / Efir).
+- Retrieve video metadata and available formats (including HLS/DASH) and return a standardized InfoDict.
+
+Key class
+- YandexVideoIE(InfoExtractor)
+  - Inherits standard extraction utilities from youtube-dl’s InfoExtractor.
+
+URL matching
+- _VALID_URL regex matches:
+  - Yandex portal video/efir URLs with a stream_id parameter (e.g., yandex.ru/portal/video?stream_id=...).
+  - Frontend player URLs (frontend.vh.yandex.ru/player/...).
+  - Captures video id as either 32 hex characters or 12 word/dash characters.
+
+Tests
+- _TESTS includes:
+  - A main test with a real URL, verifying id, title, description (via md5), thumbnail, timestamp, duration, age_limit, upload_date, view/like/dislike counts, and extension mp4.
+  - Several only_matching tests to ensure various URL forms are recognized by _VALID_URL.
+
+Extraction workflow (_real_extract)
+- Extract video_id from URL using _match_id.
+- Primary data source: GraphQL request to https://frontend.vh.yandex.ru/graphql
+  - Query: player(content_id: "<video_id>") requesting fields like computed_title, content_url, description, durations, likes/dislikes, program_title, release_date, season, streams, thumbnail, title, views_count, etc.
+  - Uses _download_json with fatal=False and wraps in try_get to gracefully handle failures.
+- Fallback data source: If GraphQL data is unavailable or contains an error, fetch:
+  - https://frontend.vh.yandex.ru/v23/player/<video_id>.json with query parameters stream_options=hires and disable_trackings=1
+- From the fetched data, use player['content'] as the content payload.
+
+Metadata extraction
+- Title selection: content['title'] or content['computed_title'].
+- Content URL handling:
+  - Start with streams = content.get('streams') or [].
+  - Always append a direct content URL: streams.append({'url': content.get('content_url')})
+  - For each stream, normalize URL with url_or_none and skip if missing.
+  - Determine file extension via determine_ext(content_url).
+  - Skip if extension is ismC (isMC; DRM-related or unsupported).
+  - If m3u8: use _extract_m3u8_formats to parse HLS (native) with m3u8_id='hls', fatal=False.
+  - If mpd: use _extract_mpd_formats to parse MPEG-DASH with mpd_id='dash', fatal=False.
+  - Otherwise: treat as a direct URL format.
+- Sort formats with _sort_formats.
+
+Additional metadata fields
+- timestamp: derived from release_date, release_date_ut, or start_time (prefer release_date, then release_date_ut, then start_time) using int_or_none.
+- season: content['season'] (or {} if missing); used to populate season_number (int) and season_id.
+- duration: int_or_none(content['duration']).
+- series: content.get('program_title') (the show/series title).
+- age_limit: int_or_none(content.get('restriction_age')).
+- view_count: int_or_none(content.get('views_count')).
+- like_count: int_or_none(content.get('likes')).
+- dislike_count: int_or_none(content.get('dislikes')).
+- release_year: int_or_none(content.get('release_year')).
+- Assemble final InfoDict:
+  - id: video_id
+  - title
+  - description: content.get('description')
+  - thumbnail: content.get('thumbnail')
+  - timestamp
+  - duration
+  - series
+  - age_limit
+  - view_count
+  - like_count
+  - dislike_count
+  - season_number
+  - season_id
+  - release_year
+  - formats: list of discovered formats
+
+Implementation details
+- Utilized utilities: determine_ext, int_or_none, try_get, url_or_none.
+- GraphQL path is preferred; fallback to older v23 JSON API to maximize compatibility.
+- Content URL extraction supports multiple streaming formats (HLS, DASH) and direct URLs.
+- Robust against missing fields and non-standard cases via fallbacks and cautious None handling.
+- Keeps DRM/unsupported streams out by skipping ismC extensions.
+
+Overall
+- The extractor fetches metadata for a Yandex video via GraphQL (with a fallback to a JSON API), builds a list of video formats (HLS/DASH/direct), and returns a richly populated InfoDict with standard fields like id, title, description, timestamps, counts, and series/season data. It handles various URL schemes, content_url sources, and edge cases to maximize compatibility.

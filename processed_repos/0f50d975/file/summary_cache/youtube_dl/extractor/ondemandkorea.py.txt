@@ -1,0 +1,45 @@
+Concise summary of the file:
+
+What it does
+- Defines an extractor for OnDemandKorea videos (OnDemandKoreaIE) for youtube-dl.
+- Retrieves video formats and metadata from the JWPlayer configuration embedded in the page.
+- Applies geo-restrictions (only US/CA) and handles access restrictions (captcha, membership gating).
+
+Key components
+- Class OnDemandKoreaIE(InfoExtractor): main extractor.
+- _VALID_URL: regex to match URLs like http(s)://www.ondemandkorea.com/<id>.html and capture the video id.
+- _GEO_COUNTRIES: ['US', 'CA'] — countries allowed; used to raise geo-restriction errors when needed.
+- _TEST: sample test case for automated testing, including expected id, extension, title, and thumbnail; demonstrates skipping m3u8 download in tests.
+
+Main workflow in _real_extract
+1. Extract video_id from the URL.
+2. Download the page (fatal=False to allow graceful handling of blocked pages).
+3. If no page content is returned, raise an ExtractorError indicating potential block/captcha.
+4. Detect geo-block indicator ('msg_block_01.png') and raise a geo-restriction error for US/CA.
+5. Detect ODK PLUS membership message and raise an ExtractorError (expected).
+6. Extract title from OpenGraph metadata (_og_search_title).
+7. Locate and parse JWPlayer config from the page:
+   - Uses a regex to find jwplayer("...").setup({...}); and captures the options object.
+   - Transforms the captured JavaScript object into JSON via js_to_json.
+   - Parses the JWPlayer data with _parse_jwplayer_data, requesting m3u8/hls formats.
+8. Merge additional metadata into the result:
+   - title: from OG metadata
+   - thumbnail: from OG metadata (_og_search_thumbnail)
+9. Return the assembled info dictionary containing video formats, metadata, and IDs.
+
+Important implementation details
+- JWPlayer config extraction:
+  - Regex pattern: searches for jwplayer(<quote>...<quote>).setup(<options>); with a non-greedy capture of the options object.
+  - Uses js_to_json to convert JavaScript object notation to JSON for parsing.
+  - _parse_jwplayer_data is invoked with video_id, require_title=False, m3u8_id='hls', and base_url=url to resolve resources properly.
+- Metadata extraction:
+  - Title is taken from OpenGraph data rather than the JWPlayer config.
+  - Thumbnail is taken from OpenGraph data as well.
+- Error handling:
+  - Handles access issues (captcha/page block) gracefully.
+  - Explicitly handles geo-restrictions and PLUS-member gating with user-friendly messages.
+- Inheritance and utilities:
+  - Leverages common extractor helpers from youtube-dl: _download_webpage, _match_id, _og_search_title/_og_search_thumbnail, _search_regex, _parse_json, _parse_jwplayer_data, raise_geo_restricted, and ExtractorError.
+
+Overall
+- The extractor focuses on pulling video formats and metadata by parsing the JWPlayer configuration embedded in OnDemandKorea pages, with robust handling for regional blocks and membership-based access.

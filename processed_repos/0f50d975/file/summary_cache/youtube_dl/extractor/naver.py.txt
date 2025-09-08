@@ -1,0 +1,63 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/naver.py
+
+- Purpose: Naver video extractor for TV/Naver Cast pages. Fetches video metadata, formats, subtitles, and extra info from Naver’s APIs and publishes a standardized info dict for youtube-dl.
+
+Core components
+- NaverBaseIE (InfoExtractor)
+  - Central helper for extracting video info for Naver sources.
+  - _extract_video_info(video_id, vid, key): downloads video data from Naver play API and builds a list of available formats, subtitles, and metadata.
+  - get_list lambda: reads lists from video_data safely (video(s)) using try_get.
+  - extract_formats(streams, stream_type, query): internal helper to convert raw stream entries into youtube-dl format dictionaries. Handles:
+    - format_id combining stream type and encoding option id/name.
+    - URL construction with query parameters via update_url_query.
+    - width/height from encoding options; vbr/abr from bitrate.
+    - filesize from stream data.
+    - protocol = 'm3u8_native' for HLS formats; otherwise None.
+  - Processing logic:
+    - Always extracts formats from video’s primary video list (video streams) as H264.
+    - Iterates video_data['streams'] for additional streams, applying per-stream query keys.
+    - If a stream_set has videos, uses extract_formats on them. If type is HLS and no videos, fetches m3u8 formats via _extract_m3u8_formats with proper query.
+  - Subtitles and captions:
+    - Handles caption tracks, supporting ttml and vtt subformats when caption URLs end with .ttml or .vtt; otherwise uses the provided URL directly.
+    - Supports automatic captions vs user-provided subtitles, keyed by locale/language and caption type ('auto' or not).
+  - Metadata mapping:
+    - id, title, thumbnail (meta['cover']['source']), view_count, uploader_id, uploader, uploader_url.
+    - Subtitles: 'subtitles' and 'automatic_captions' dictionaries.
+- NaverIE (inherits NaverBaseIE)
+  - _VALID_URL: r'https?://(?:m\.)?tv(?:cast)?\.naver\.com/(?:v|embed)/(?P<id>\d+)'
+  - _GEO_BYPASS: False
+  - _TESTS: sample URLs for various scenarios (regular video, geo-restricted, and a cast URL).
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Calls https://tv.naver.com/api/json/v/<video_id> with geo verification headers.
+    - Reads playerInfoJson and currentClip to obtain vid (videoId) and inKey (authentication key).
+    - If vid or inKey is missing, checks for geo/login restrictions via playerOption.auth; raises geo-restricted or login-required accordingly, or a generic extraction error.
+    - Calls _extract_video_info(video_id, vid, in_key) to gather formats/subtitles and base metadata.
+    - Augments the returned info with:
+      - description (cleaned HTML from currentClip.description)
+      - timestamp (firstExposureTime, converted from ms)
+      - duration (displayPlayTime parsed as duration)
+      - like_count (recommendPoint)
+      - age_limit (19 if adult flag is set)
+    - Returns the complete info dict.
+
+Key implementation details
+- Endpoints:
+  - Video data: http://play.rmcnmv.naver.com/vod/play/v2.0/<vid>?key=<in_key>
+  - Page data: https://tv.naver.com/api/json/v/<video_id>
+- Formats handling:
+  - Supports both direct stream entries and HLS (m3u8) streams.
+  - Formats include width/height, vbr/abr, filesize, and protocol (HLS uses m3u8_native).
+  - format_id combines stream type (or stream['type']) and encoding option id/name.
+- Captions/subtitles:
+  - Supports both TTML/VTT captions (when caption URLs end with .ttml/.vtt) and generic caption URLs.
+  - Automatic vs manual subtitles separated into automatic_captions vs subtitles, organized by locale/language.
+  - helper _CAPTION_EXT_RE for caption extension recognition and replace_ext to adjust caption extensions (.ttml/.vtt).
+- Error handling and geo restrictions:
+  - If vid/in_key unavailable, checks geo and login requirements and raises appropriate extractor errors.
+  - geo_verification_headers used for API call to enforce geolocation checks.
+- Data mapping:
+  - Title, description, timestamps, duration, uploader info, and thumbnail all mapped from nested JSON fields with safe access helpers (dict_get, try_get, int_or_none, parse_duration, clean_html).
+
+Overall flow
+- NaverIE acts as an entry point for Naver video pages; it fetches a page-specific JSON to obtain videoId and inKey, then delegates to NaverBaseIE to fetch detailed video data, formats, and captions, assembling a complete youtube-dl info dictionary.

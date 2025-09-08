@@ -1,0 +1,60 @@
+You asked for a concise yet comprehensive summary of the code in youtube-dl/youtube_dl/extractor/eagleplatform.py. Here it is.
+
+Key purpose
+- Implement a YouTube-DL extractor for Eagle Platform video hosting. It detects Eagle Platform embeds, fetches video metadata, and builds a list of playable formats (primarily HLS/MP4) for each video.
+
+Main class and methods
+- EaglePlatformIE(InfoExtractor)
+  - _VALID_URL: Regex to match:
+    - eagleplatform:<custom_host>:<id>  OR
+    - https://<host>.media.eagleplatform.com/index/player?...record_id=<id>
+    - Captures the video id and host information.
+  - _TESTS: Examples illustrating:
+    - A lenta.ru-like page via a lentaru.media.eagleplatform.com host
+    - A direct eagleplatform:host:id style URL
+    - A referrer-protected example (only_matching)
+  - _extract_url(webpage): Detects embedding patterns in a page and returns a concrete EaglePlatform URL when found.
+    - Embedding via iframe: extracts the iframe src pointing to a player URL.
+    - Basic usage embedding: detects a script loading player.js and a div with class eagleplayer data-id, returning eagleplatform:host:id.
+    - Generalized embeddings: detects code creating new EaglePlayer({ id: ... }) and extracts host/id, returning eagleplatform:host:id.
+  - _handle_error(response): If response status != 200, raises an ExtractorError with the provided error messages.
+  - _download_json(self, url_or_request, video_id, *args, **kwargs): Overrides parent to add error handling for HTTP errors.
+    - If an ExtractorError is raised and the cause is a HTTPError, it parses the HTTP body as JSON and triggers _handle_error, then re-raises as needed.
+  - _get_video_url(self, url_or_request, video_id, note): Downloads a JSON object and returns the first item of data (i.e., data[0]) which points to a concrete URL (e.g., for m3u8).
+  - _real_extract(self, url):
+    - unsmuggle_url(url, {}): Restores any smuggled data (e.g., referrer).
+    - Extracts host and id from the URL using _VALID_URL.
+    - Builds a request to http://<host>/api/player_data with id and optional referrer (as Referer header and query param).
+    - Retrieves metadata:
+      - media = player_data['data']['playlist']['viewports'][0]['medialist'][0]
+      - title, description, thumbnail (via _proto_relative_url with snapshot), duration, view_count
+      - age_limit based on age_restriction (0 if allow_all, else 18)
+      - secure_m3u8 URL from media['sources']['secure_m3u8']['auto'] (normalized via _proto_relative_url)
+    - Formats extraction:
+      - m3u8 formats: Fetch m3u8 URL via _get_video_url(..., 'Downloading m3u8 JSON'), then _extract_m3u8_formats with entry_protocol='m3u8_native', m3u8_id='hls', fatal=False.
+      - Build a map of m3u8 formats by height for quick lookup.
+      - MP4 data fallback: Construct a corresponding MP4 JSON URL by changing the path in the secure_m3u8 URL (replace m3u8/hlsvod/hls/f4m with mp4s). If available, iterate through mp4_data['data'], and for each format:
+        - If a matching height exists in m3u8 formats, copy that hls format, convert to an HTTP format, and update format_id to replace 'hls' with 'http'.
+        - Otherwise, create a new HTTP format with format_id 'http-<height>' and set height accordingly.
+        - Set f['url'] to the MP4 URL.
+      - Add all formats to a list and sort them via _sort_formats.
+    - Return a dict with:
+      - id, title, description, thumbnail, duration, view_count, age_limit, formats
+
+Important implementation details
+- Flexible embedding detection: _extract_url supports multiple embedding patterns (iframe, basic usage with eagleplayer div, and generic EaglePlayer() JavaScript usage). This helps locate the actual Eagle Platform video regardless of how it’s embedded.
+- Robust error handling: _handle_error and the overridden _download_json provide a path to surface server-side errors returned by the Eagle API.
+- Metadata-driven formatting: The extractor relies on the API response structure:
+  - data.playlist.viewports[0].medialist[0] for video metadata
+  - media.sources.secure_m3u8.auto for HLS URL
+  - Optional mp4 fallback data via a derived MP4 JSON URL
+- Formats construction:
+  - Primary formats come from the m3u8 playlist (m3u8_formats)
+  - MP4 URLs are fetched via a derived endpoint and merged with the m3u8 formats when heights match, ensuring consistency and avoiding duplicates
+  - When merging, hls formats are updated to http protocol and format_id adjusted accordingly
+- URL handling and headers:
+  - Supports an optional referrer when present (used as both HTTP Referer header and query parameter referrer)
+  - Uses unsmuggle_url to recover embedded data safely
+
+In short
+- This extractor parses Eagle Platform embeds (via iframe or script-based patterns), fetches video metadata from the host’s API, builds format lists from HLS and MP4 sources, handles errors, and returns a standard YouTube-DL info dict with id, title, description, thumbnail, duration, view_count, age_limit, and a complete formats array.

@@ -1,0 +1,49 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/aliexpress.py
+
+- Purpose
+  - Implement an InfoExtractor for AliExpress Live streaming pages to extract video metadata and available formats.
+
+- Main class
+  - AliExpressLiveIE: Subclass of InfoExtractor that handles AliExpress live URLs.
+
+- URL pattern
+  - _VALID_URL = r'https?://live\.aliexpress\.com/live/(?P<id>\d+)'
+  - Matches live.aliexpress.com/live/<id> where id is numeric.
+
+- Test data
+  - _TEST provides a sample URL, expected MD5 for the video, and an info_dict with:
+    - id, ext (mp4), title, thumbnail, uploader, timestamp, and upload_date.
+
+- Core extraction flow (_real_extract)
+  - Extract video_id via self._match_id(url).
+  - Download the webpage with self._download_webpage(url, video_id).
+  - Locate and parse JSON data embedded in the page:
+    - Uses _search_regex to find a JavaScript object assigned to runParams with a pattern: (?s)runParams\s*=\s*({.+?})\s*;?\s*var
+    - Parses the JSON string with self._parse_json(..., video_id) into data.
+  - Title extraction: title = data['title'].
+
+- Formats extraction
+  - Extracts HLS formats from the provided M3U8 URL:
+    - formats = self._extract_m3u8_formats(data['replyStreamUrl'], video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls')
+  - Uses HLS (m3u8_native) to build the available video formats.
+
+- Returned information
+  - A dict containing:
+    - id: video_id
+    - title: title
+    - thumbnail: data.get('coverUrl')
+    - uploader: safely extracted via try_get(data, lambda x: x['followBar']['name'], compat_str)
+    - timestamp: float_or_none(data.get('startTimeLong'), scale=1000) converting ms to seconds
+    - formats: the list of extracted formats
+
+- Utility helpers used
+  - compat_str for string compatibility
+  - float_or_none to safely convert timestamps (ms to seconds)
+  - try_get to safely access nested dictionary values
+
+- Notable implementation details
+  - The extractor relies on a JSON object embedded in the page (runParams) to obtain metadata and the stream URL.
+  - Uses HLS (M3U8) formats via _extract_m3u8_formats, with explicit m3u8_id and entry_protocol.
+  - Handles potential missing fields gracefully (e.g., thumbnail via get, uploader via try_get).
+
+Overall, this extractor fetches AliExpress Live pages, parses embedded runParams JSON to obtain the stream URL and metadata, derives playable formats from the M3U8 manifest, and returns a structured info dictionary suitable for youtube-dl.

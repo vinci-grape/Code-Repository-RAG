@@ -1,0 +1,79 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/raywenderlich.py
+
+Overview
+- Provides two YouTube-DL extractors for Ray Wenderlich content:
+  - RayWenderlichIE: extracts a single lesson video (usually hosted on Vimeo).
+  - RayWenderlichCourseIE: extracts a playlist of lessons from a course page.
+- Integrates with VimeoIE for actual video playback pages and uses RayWenderlich’s API/data structures to locate the correct video.
+
+Key classes and main flow
+1) RayWenderlichIE (single lesson extractor)
+- _VALID_URL
+  - Matches lesson pages for both:
+    - https://videos.raywenderlich.com/courses/…/lessons/...
+    - https://www.raywenderlich.com/…/lessons/...
+  - Captures course_id and id (lesson number) from the URL.
+- _real_extract(url)
+  - Downloads the lesson page and derives:
+    - thumbnail via og:image or twitter:image meta.
+    - If page contains “>Subscribe to unlock”, raises ExtractorError (subscriber-only content).
+  - Attempts to obtain a Vimeo ID (vimeo_id) from the page via data-vimeo-id attribute.
+  - If no direct Vimeo ID is found:
+    - Looks for a data-collection JSON in the page (data-collection attribute) and parses it.
+    - Uses _extract_video_id(data, lesson_id) to locate the video associated with the given lesson ordinal, extracting an identifier as video_id.
+    - If still not found, falls back to deriving a video_id from the thumbnail link (pattern /videos/(\d+)/).
+    - Prepares headers for an API request (Referer, X-Requested-With). If a CSRF token is present in the page (csrf-token meta), includes X-CSRF-Token.
+    - Fetches video metadata from https://videos.raywenderlich.com/api/v1/videos/{video_id}.json, with headers.
+    - Extracts video data: the first clip’s provider_id becomes vimeo_id.
+    - Populates info with title, description, duration, timestamp (unified_timestamp).
+    - Sets _type to 'url_transparent' to delegate to VimeoIE via a transparent URL.
+  - If a vimeo_id was found early, info remains minimal (thumbnail) and the code directly yields a Vimeo URL via url_result.
+  - Returns a merged dictionary containing info and a URL to the Vimeo video using VimeoIE (via _smuggle_referrer to preserve the original page as the referrer).
+- _extract_video_id(data, lesson_id)
+  - Helper to locate a video_id when the page provides a nested data structure.
+  - Navigates data['groups'] and data['contents'], matching contents where content['ordinal'] == lesson_id.
+  - Returns content['identifier'] (as string) if found.
+
+Implementation details and notable points
+- Data sources:
+  - Primary: in-page data-vimeo-id attribute.
+  - Fallback: data-collection JSON object embedded in the page; _extract_video_id traverses groups/contents to map an ordinal (lesson) to a video identifier.
+  - Final fallback: derive video_id from thumbnail URL via /videos/ID pattern.
+- API usage:
+  - If needed, fetches video metadata from Ray Wenderlich’s internal API to obtain title, description, duration, and creation date.
+  - Requires CSRF token handling if present (via X-CSRF-Token header).
+- Vimeo integration:
+  - When a vimeo_id is known (either from page or API), the code returns a URL to the Vimeo player using VimeoIE.
+  - Uses _smuggle_referrer to pass the original lesson URL as the referrer for Vimeo requests.
+- Error handling:
+  - Subscriber-only content triggers a user-friendly ExtractorError with expected=True.
+  - A 403 warning is anticipated in tests for some cases.
+- Metadata extraction:
+  - Thumbnail, title, description, duration, and upload/timestamp extraction using utils helper functions (unified_timestamp, int_or_none, etc.).
+- Output:
+  - If a vimeo_id is available early, returns a direct Vimeo video entry.
+  - Otherwise, returns a URL-transparently loaded Vimeo video with enriched metadata (title, description, duration, timestamp).
+
+2) RayWenderlichCourseIE (course/playlist extractor)
+- _VALID_URL
+  - Matches course pages under either videos.raywenderlich.com/courses/ or raywenderlich.com domain.
+  - Captures id (the course slug) for the playlist.
+- _TEST
+  - Demonstrates a course page with 29 lessons, expecting a playlist with those items.
+- suitable(url)
+  - Ensures this extractor is only used when RayWenderlichIE.suitable(url) is False, i.e., when the URL is a course page, not a single lesson.
+- _real_extract(url)
+  - Downloads the course page and searches for lesson links:
+    - Regex looks for anchors with hrefs like /<course_id>/lessons/<id>.
+    - Builds a unique set of lesson URLs, converts them to absolute URLs, and creates entries as RayWenderlichIE URLs (each entry is a lesson page).
+  - Extracts a title from og:title or twitter:title meta, and returns a playlist_result(entries, course_id, title).
+  - The result is a playlist of individual lesson entries, each handled by RayWenderlichIE.
+
+Key implementation details
+- Uses a combination of regex, HTML meta parsing, and JSON parsing to locate video data.
+- Relies on VimeoIE for actual video playback pages, with careful handling to set the correct referral context.
+- Uses helper utilities from youtube-dl (try_get, compat_str, unescapeHTML, merge_dicts, etc.) for robust parsing and compatibility.
+- Handles subscriber-only content and different domain variations (videos.raywenderlich.com vs raywenderlich.com).
+- The two extractors are designed to work together: CourseIE enumerates lessons as RayWenderlichIE entries, which themselves resolve to Vimeo videos.
+
+In short, this file enables YouTube-DL to fetch Ray Wenderlich lesson videos (via Vimeo) and to assemble entire courses into playlists by enumerating individual lesson pages.

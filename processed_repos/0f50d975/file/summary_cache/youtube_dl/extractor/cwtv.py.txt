@@ -1,0 +1,46 @@
+- Purpose: A youtube-dl extractor for CWTV (cw.tv, cw.seed, and cw.tvpr domains) that fetches video metadata using a GUID from the page URL and delegates to ThePlatform for actual video retrieval.
+
+- URL matching and ID extraction:
+  - Class CWTVIE(InfoExtractor)
+  - _VALID_URL matches CWTV/CWSeed URLs containing a query parameter play or watch with a GUID-like id (8-4-4-4-12 hex segments).
+  - video_id is extracted via self._match_id(url).
+
+- Data source and validation:
+  - Fetches JSON from http://images.cwtv.com/feed/mobileapp/video-meta/apiversion_8/guid_<video_id>.
+  - If data['result'] != 'ok', raises ExtractorError with the provided message.
+
+- Metadata extraction and URL construction:
+  - video_data = data['video']
+  - title = video_data['title']
+  - mpx_url = video_data.get('mpx_url') or a fallback ThePlatform URL containing the video_id
+  - The final video URL is wrapped with smuggle_url(mpx_url, {'force_smil_url': True}) to guide ThePlatform handling.
+
+- Episode/season handling:
+  - season = str_or_none(video_data.get('season'))
+  - episode = str_or_none(video_data.get('episode'))
+  - If both exist, episode is truncated by removing the season prefix: episode = episode[len(season):]
+
+- Returned information (to be consumed by ThePlatform extractor):
+  - _type: 'url_transparent' (delegate to another extractor)
+  - id: video_id
+  - title: title
+  - url: the smuggled mpx_url
+  - description: video_data.get('description_long')
+  - duration: int_or_none(video_data.get('duration_secs'))
+  - series: video_data.get('series_name')
+  - season_number: int_or_none(season)
+  - episode_number: int_or_none(episode)
+  - timestamp: parse_iso8601(video_data.get('start_time'))
+  - age_limit: parse_age_limit(video_data.get('rating'))
+  - ie_key: 'ThePlatform' (delegate to ThePlatform extractor)
+
+- Implementation details:
+  - Uses helper utilities: int_or_none, parse_iso8601, parse_age_limit, str_or_none, smuggle_url, and _match_id.
+  - The platform metadata (upload_date, timestamp, age_limit, etc.) is typically provided by ThePlatform after delegation.
+  - _TESTS include sample CWTV and CWSeed URLs with expected metadata, including a redirect case and a test for only_matching URLs. Tests specify skip_download for m3u8-based downloads.
+
+- Overall flow:
+  1) Extract GUID from URL.
+  2) Retrieve video metadata JSON from CWTV’s mobile app API.
+  3) Build a ThePlatform-compatible URL (with fallback if mpx_url is absent) and wrap it with URL smuggling options.
+  4) Return a url_transparent entry pointing to ThePlatform, enriched with available metadata (title, description, duration, series, season/episode, timestamp, age_limit).

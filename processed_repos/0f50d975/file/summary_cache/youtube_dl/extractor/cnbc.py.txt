@@ -1,0 +1,46 @@
+This file defines two extractors for CNBC videos in youtube-dl:
+
+1) CNBCIE
+- Purpose: Handle CNBC videos hosted on video.cnbc.com gallery pages with a numeric video ID.
+- URL pattern: https?://video.cnbc.com/gallery/?video=(?P<id>[0-9]+)
+- Core logic:
+  - Extracts the numeric video_id using _match_id.
+  - Returns a url_transparent result pointing to ThePlatform, using a specific manifest URL:
+    http://link.theplatform.com/s/gZWlPC/media/guid/2408950221/{video_id}?mbr=true&manifest=m3u
+  - The URL is wrapped with smuggle_url to force the SMIL URL path (force_smil_url: True).
+  - The final video extraction is delegated to ThePlatform (ie_key set to 'ThePlatform').
+- return payload: {'_type': 'url_transparent', 'ie_key': 'ThePlatform', 'url': smuggled_theplatform_url, 'id': video_id}
+- _TEST data:
+  - Confirms id, extension (mp4), and metadata like title, description (md5-hash), timestamp/upload_date, and uploader.
+  - Uses skip_download to indicate the test should not fetch the actual video.
+- Key details:
+  - Uses downstream ThePlatform extractor to obtain the actual media.
+  - The manifest URL is constructed directly from the numeric id.
+
+2) CNBCVideoIE
+- Purpose: Handle CNBC video pages that are more user-friendly (slug-based) and route to the appropriate CNBC video via GraphQL.
+- URL pattern: https?://(?:www\.)?cnbc\.com(?P<path>/video/(?:[^/]+/)+(?P<id>[^./?#&]+)\.html)
+  - Captures path (used to query GraphQL) and id (display_id for tests).
+- Core logic:
+  - On _real_extract, matches the URL to obtain path and display_id.
+  - Queries CNBC’s GraphQL endpoint to fetch the internal video id (vcpsId) for that page:
+    URL: https://webql-redesign.cnbcfm.com/graphql
+    GraphQL query: { page(path: "<path>") { vcpsId } }
+  - The vcpsId returned is the actual video id (e.g., 7000031301).
+  - Returns a url_result pointing to CNBCIE (the_platform-based extractor) with the URL:
+    http://video.cnbc.com/gallery/?video={vcpsId}
+  - Uses CNBCIE.ie_key() to route the result to the CNBCIE extractor (i.e., the platform-based extraction path).
+- _TEST data:
+  - Confirms expected id (e.g., 7000031301), ext mp4, plus metadata like title, description (md5-hash), timestamp/upload_date, uploader.
+  - Uses skip_download to avoid fetching the video in tests.
+- Key details:
+  - Two-stage extraction: first resolve the internal vcpsId via GraphQL, then delegate to CNBCIE for the actual media retrieval.
+  - Leverages the GraphQL endpoint to map a user-facing slug page to the underlying video resource.
+
+Implementation notes and patterns:
+- Both extractors inherit from InfoExtractor.
+- CNBCIE uses a transparent URL approach with ThePlatform as the actual video source.
+- ThePlatform integration uses a smuggled URL with force_smil_url to ensure the correct manifest path is used.
+- CNBCVideoIE demonstrates a cross-extractor workflow: it first resolves a backend video id via GraphQL and then delegates to CNBCIE for downloading the media.
+- Testing metadata in _TEST includes typical fields like id, ext, title, description (with md5), timestamp/upload_date, and uploader.
+- The code adheres to youtube-dl conventions: _VALID_URL, _TEST, _real_extract, and url_result/url_transparent to compose multi-step extraction paths.

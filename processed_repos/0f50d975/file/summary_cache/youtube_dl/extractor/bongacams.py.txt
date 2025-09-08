@@ -1,0 +1,59 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/bongacams.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (BongaCamsIE) to fetch live stream data from BongaCams pages and construct usable video formats (HLS) and metadata.
+
+- Class and inheritance
+  - BongaCamsIE(InfoExtractor): extensions of youtube-dl’s standard InfoExtractor.
+
+- URL matching and tests
+  - _VALID_URL: regex matches BongaCams host (with optional subdomain and domain variants com/net) and captures the channel id from the path.
+  - _TESTS: includes multiple URLs to test host matching and a full metadata extraction scenario:
+    - Some URLs are marked only_matching to verify URL pattern recognition.
+    - One test targets a .net domain and expects a full info_dict (id, ext, title with a specific pattern, age_limit, uploader_id, uploader, like_count, is_live) and uses skip_download.
+
+- Core functionality (_real_extract)
+  - Extracts host and channel_id from the URL using the regex.
+  - Performs a POST request to https://<host>/tools/amf.php with:
+    - method = getRoomData
+    - args[] = channel_id
+    - args[] = 'false'
+  - Request includes header X-Requested-With: XMLHttpRequest to mimic an AJAX call.
+  - Parses the response (amf) to obtain:
+    - server_url = amf['localData']['videoServerUrl']
+    - uploader_id: try performerData.username; fall back to channel_id
+    - uploader: try performerData.displayName
+    - like_count: int from performerData.loversCount
+  - Constructs video formats using the HLS stream:
+    - URL: <server_url>/hls/stream_<uploader_id>/playlist.m3u8
+    - Uses _extract_m3u8_formats with m3u8_id='hls' and live=True
+    - Calls _sort_formats on the formats
+  - Returns a dict with:
+    - id: channel_id
+    - title: uses _live_title(uploader or uploader_id)
+    - uploader: uploader
+    - uploader_id: uploader_id
+    - like_count: like_count
+    - age_limit: 18
+    - is_live: True
+    - formats: the parsed HLS formats
+
+- Important implementation details
+  - Uses helper utilities:
+    - urlencode_postdata to build POST payload
+    - int_or_none and try_get to safely extract nested fields
+    - compat_str for string compatibility
+  - Live stream handling:
+    - Treats streams as live (live=True) and uses HLS playlist for formats.
+  - Robustness:
+    - Tries multiple possible locations for uploader_id and uploader; falls back gracefully if data is missing.
+  - Edge cases:
+    - The code expects the server to return localData.videoServerUrl which is used to build the final m3u8 URL.
+    - Title generation relies on _live_title and the availability of uploader/uploader_id.
+
+Summary of main flow
+- Parse URL -> determine host and channel_id
+- POST to tools/amf.php with getRoomData and channel_id
+- Read response to get server_url, uploader info, and like count
+- Build HLS format URL and extract formats
+- Return metadata dict including id, title, uploader details, like_count, age_limit, is_live, and formats

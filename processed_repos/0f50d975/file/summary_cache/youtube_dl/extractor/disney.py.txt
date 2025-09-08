@@ -1,0 +1,78 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/disney.py
+
+Overview
+- Implements a DisneyIE extractor for youtube-dl to retrieve video metadata, formats (including HLS/m3u8), and subtitles from Disney-owned video pages.
+- Handles multiple Disney domains and both embedded and non-embedded video URLs.
+- Supports VEVO redirection, multiple flavor formats, and expiration handling.
+
+Key components
+- Class: DisneyIE(InfoExtractor)
+  - _VALID_URL: Complex regex to match a wide range of Disney domains and URL structures, including embed paths and various country/brand subdomains.
+  - _TESTS: Several test cases covering:
+    - Direct embed URLs with expected id, title, description, upload_date, and mp4 formats via m3u8 download.
+    - Examples of only_matching URLs (to ensure non-embed or non-supported pages are not falsely processed).
+    - Checks for correct handling of different Disney domains and embed structures.
+- _real_extract(self, url):
+  - Core extraction logic:
+    - Parse URL with _VALID_URL to obtain domain, video_id, display_id.
+    - If there is no video_id:
+      - Download the page and extract Grill.burger JSON data, clean it, and locate a stack item with type 'video'.
+      - Use that data as video_data.
+    - If there is a video_id:
+      - Download the embed page at http://<domain>/embed/<video_id>.
+      - Extract Disney.EmbedVideo JSON data and use its 'video' entry as video_data.
+    - External sources handling:
+      - If video_data contains externals with source 'vevo', delegate to Vevo extractor using url_result('vevo:' + data_id, 'Vevo').
+    - Basic metadata:
+      - video_id = video_data['id']; title = video_data['title'].
+    - Formats extraction:
+      - Iterate video_data.get('flavors', []) to build formats.
+      - Skip entries without a valid URL, non-HTTP(S) URLs, or flavor_format == 'mp4_access'.
+      - tbr (bitrate) via int_or_none(flavor['bitrate']).
+      - Special handling for tbr == 99999:
+        - This indicates KS (Kaltura Signature) problems. Remove the ks parameter from flavor_url and fetch m3u8 formats via _extract_m3u8_formats.
+        - Filter out Apple FairPlay URLs containing '/fpshls/'.
+        - Append these to formats and continue.
+      - For other flavors:
+        - Build a format_id from flavor_format and bitrate (if present).
+        - ext = determine_ext(flavor_url); map to mp4 if flavor_format == 'applehttp' or ext == 'm3u8'.
+        - width/height from flavor data.
+        - Append a dict with: format_id, url, width, height, tbr, ext, vcodec (set to 'none' if width and height are 0, else None).
+      - If no formats found and video_data.get('expired') is true, raise ExtractorError with an appropriate message (video expired).
+    - Sort formats with _sort_formats(formats).
+    - Subtitles extraction:
+      - Iterate video_data.get('captions', []) and collect valid captions.
+      - Skip captions with missing URL or unknown formats.
+      - Language key defaults to 'en' if not provided.
+      - Map caption formats: 'webvtt' extension for 'webvtt' caption_format; otherwise use the caption_format as ext.
+    - Return metadata dictionary:
+      - id: video_id
+      - title: title
+      - description: video_data.get('description') or video_data.get('short_desc')
+      - thumbnail: video_data.get('thumb') or video_data.get('thumb_secure')
+      - duration: int_or_none(video_data.get('duration_sec'))
+      - upload_date: unified_strdate(video_data.get('publish_date'))
+      - formats: list of collected formats
+      - subtitles: constructed subtitles dictionary
+
+Important implementation details
+- Dual data source handling:
+  - If the URL is an embed or a page without direct video_id, extracts video data from Grill.burger JSON embedded in the page.
+  - If the URL contains a video_id, fetches Disney.EmbedVideo data from the embed page.
+- VEVO delegation:
+  - If any external source is VEVO, the extractor delegates to Vevo by returning a VEVO URL result.
+- Robust format handling:
+  - Skips invalid or non-HTTP(S) flavor URLs and mp4_access flavors.
+  - Special handling for Ks-related issues (ks parameter) where m3u8 formats are fetched directly.
+  - Correctly infers file extension and special cases for Apple HTTP or m3u8 formats, normalizing to mp4 when needed.
+  - Sets vcodec to 'none' when no video resolution is present (width/height both 0), otherwise leaves it as None.
+- Expiration handling:
+  - If no formats were found and the video is marked expired, raises a user-visible ExtractorError with a translation-enabled message.
+- Metadata fidelity:
+  - title, description, thumbnail, duration, and upload_date are derived from video_data with fallbacks to ensure reasonable values.
+- Subtitles:
+  - Supports multiple languages, mapping webvtt to vtt extension when appropriate.
+  - Skips unknown or invalid caption formats.
+
+Overall purpose
+- Enables youtube-dl to extract Disney-hosted video content across many Disney-affiliate domains by parsing embedded video data, supporting multiple streaming formats, captions, and proper metadata, with fallbacks and compatibility handling for VEVO and common KS-related issues.

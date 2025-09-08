@@ -1,0 +1,100 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/ign.py
+
+Purpose
+- Implements IGN-related extractors for youtube-dl/yt-dlp to fetch video and article content from IGN sites (ign.com and partners) and to produce standardized info dictionaries including formats, metadata, and thumbnails. Handles videos, playlists, and article-driven collections with multiple embedded videos.
+
+Key classes
+- IGNBaseIE (InfoExtractor)
+  - Core shared functionality for IGN endpoints and video data.
+  - _call_api(slug): Calls IGN API for a given slug using the page type (video/article) to build the URL.
+  - _checked_call_api(slug): Wraps _call_api with 404 handling to raise a user-friendly “Content not found” error if the content expired.
+  - _extract_video_info(video, fatal=True): Converts raw IGN video data into a standardized info dict:
+    - Extracts formats from various sources:
+      - m3u8 (HLS) via _extract_m3u8_formats on refs.m3uUrl
+      - f4m (HDS) via _extract_f4m_formats on refs.f4mUrl
+      - Additional assets listed in video.assets (bitrate, frame_rate, height, width)
+      - mezzanine_url (special format entry with ext determined from URL)
+    - Sorts formats if any were found.
+    - Gathers thumbnails, tags, and metadata (title, description, publish date, duration).
+    - Returns dict with id, title, description, timestamp, duration, thumbnails, formats, tags.
+  - _extract_from_webpage(url, webpage): yt-dlp shim that yields embed URLs found on IGN pages for potential handling by other extractors.
+
+- IGNIE (IGN’s main video extractor)
+  - Handles video pages on IGN and partner sites (e.g., www.ign.com, es.ign.com, de.ign.com; also supports some videos under www.pcman.com domain patterns).
+  - URL pattern supports video and playlist paths.
+  - _VIDEO_PATH_RE, _PLAYLIST_PATH_RE help parse IDs and filters.
+  - _VALID_URL defines video/playlist pages to extract.
+  - _PAGE_TYPE = 'video' (used by IGNBaseIE for API endpoint).
+  - _TESTS: Includes examples for video, playlist, and some only-matching cases.
+  - _extract_embed_urls(url, webpage): Finds embedded IGN video links inside IGN pages by locating a content-feed-grid section and extracting /videos/... links; returns absolute URLs.
+  - _real_extract(url): Decides between video vs. playlist based on the matched groups; delegates to _extract_video or _extract_playlist.
+  - _extract_playlist(url, display_id): Downloads page and yields a playlist of embed URLs (from _extract_embed_urls).
+  - _extract_video(url, display_id): Calls IGN API via _checked_call_api(display_id), processes with _extract_video_info, and returns merged dict with display_id.
+
+- IGNVideoIE (IGN-specific direct video/trailer extractor)
+  - Handles direct IGN video pages that may embed content or redirect to embedded players.
+  - _VALID_URL matches ign.com paths for /video or /trailer pages with a numeric ID.
+  - _TESTS include a sample with a real video and several only-matching cases (embeds from YouTube, Twitter, Vimeo, etc.).
+  - _real_extract(url):
+    - Derives video_id from URL and constructs an embed URL by replacing last path segment with /embed.
+    - Downloads the embed page via _download_webpage_handle; uses the final URL (urlh.geturl()) and looks for a query parameter 'url' to redirect to the real IGN video if present.
+    - If embed page contains a data-video-id attribute, parses and converts it to a dict via extract_attributes, then reads its data-settings JSON to get a video object, then uses _extract_video_info on that data and returns the result with display_id.
+    - If no video found, and the redirected URL is different, returns the redirected URL as a URL result (to let other extractors handle it). If redirect loops, raises an ExtractorError.
+
+- IGNArticleIE (IGN article extractor)
+  - Handles article pages that can contain multiple videos (or embedded players) related to the article.
+  - _VALID_URL matches article URLs; _PAGE_TYPE = 'article'.
+  - _TESTS: Includes article with a two-video playlist, an article that yields a single video, and several only-matching cases (for embedded players etc.).
+  - _checked_call_api(slug): Enhanced API errors
+    - 404 leads to a friendly “Content not found: expired?” error (same as _checked_call_api in base, but applied here with nuance).
+    - 503 triggers a warning and returns None (graceful degradation).
+  - _search_nextjs_data(webpage, video_id, ...): Extracts Next.js data from the page by parsing the __NEXT_DATA__ script tag and JSON-decoding it.
+  - _real_extract(url):
+    - Obtains display_id via _match_id and calls the API with _checked_call_api(display_id).
+    - If API returns article data:
+      - Defines entries() to yield video URLs from article content:
+        - mediaRelations[0].media.metadata.url if present
+        - For content blocks, extract inline video URLs from embedded IGN video/youtube clips
+      - Returns a playlist_result built from entries() with articleId as playlist_id and the article headline as title.
+    - If API data is not returned:
+      - Downloads the article page.
+      - Checks for a dable:item_id meta tag; if present, parses embedded FlashVars to yield video URLs from flashvars.
+      - If no playlist_id found, tries to extract Next.js Apollo State videoPlayerProps entries in Next.js data:
+        - Iterates over videoPlayerProps keys, skips promo-like entries, reads video data, calls _extract_video_info(video, fatal=False) and yields merged results with display_id.
+      - Returns a playlist_result built from the collected entries, using playlist_id or display_id as the playlist_id, and a title derived from og:title when available.
+
+Important implementation details
+- API usage and slug resolution:
+  - IGNBaseIE uses a slug-based API endpoint http://apis.ign.com/{PAGE_TYPE}/v3/{PAGE_TYPE}s/slug/{slug}, where PAGE_TYPE is defined per extractor (video for IGNIE, article for IGNArticleIE).
+  - _checked_call_api provides robust error handling for 404 (content not found) and, in IGNArticleIE, 503 (graceful warning with no data).
+- Formats extraction:
+  - Supports multiple format sources:
+    - HLS (m3u8) via m3u8_url = refs['m3uUrl'] and _extract_m3u8_formats with m3u8_native and id 'hls'
+    - HDS (f4m) via f4mUrl and _extract_f4m_formats with id 'hds'
+    - Direct assets in video['assets'] with bitrate (tbr), frame_rate (fps), height, width
+    - Mezzanine URL (special format with ext determined from URL, format_id 'mezzanine', increased preference)
+  - Formats are sorted with _sort_formats when present.
+- Metadata extraction:
+  - Title: metadata.longTitle or metadata.title or metadata.name, stripped
+  - Description: metadata.description
+  - Timestamp: parsed from metadata.publishDate (ISO8601)
+  - Duration: metadata.duration
+  - Thumbnails: from video['thumbnails']
+  - Tags: from video['tags'][].displayName
+- Embeds and web page handling:
+  - _extract_from_webpage is provided for yt-dlp compatibility and yields embed URLs for IGN pages found in content-feed-grid blocks.
+  - IGNVideoIE handles redirection to embed or to other sites (YouTube/Twitter/Vimeo) depending on the embed type.
+- Article handling:
+  - Articles can contain multiple videos, flash-based players, or Next.js-powered videoPlayerProps data. The code accounts for:
+    - Legacy flash-based entries (via dable:item_id and flashvars)
+    - Next.js/APOLLO data in the article page (videoPlayerProps entries)
+  - Playlist creation uses articleId as playlist_id or falls back to display_id; title derived from article metadata or og:title.
+- Tests:
+  - Each extractor class includes _TESTS with representative URLs, expected info_dict layouts, and some warnings or skips (e.g., 404s, 503s, or 404-like cases).
+
+In short
+- This file provides a cohesive set of IGN extractors:
+  - IGNIE for individual video pages and their embeds
+  - IGNVideoIE for direct ign.com video/trailer pages
+  - IGNArticleIE for article pages that aggregate multiple videos
+- All rely on a shared API-backed video data path via IGNBaseIE, with careful handling of formats, metadata, thumbnails, and edge cases (404/503, redirects, and various embed types).

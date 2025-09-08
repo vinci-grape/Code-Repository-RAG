@@ -1,0 +1,30 @@
+- Purpose: A youtube-dl extractor for M6 site videos that delegates the actual extraction to the SixPlay extractor.
+
+- Class and inheritance:
+  - M6IE(InfoExtractor): Defines an extractor for m6.fr content.
+
+- Core attributes:
+  - IE_NAME = 'm6'
+  - _VALID_URL: Regex that matches M6 video pages and captures the numeric video ID.
+    - Pattern: https?://(www.)?m6.fr/<anything>/videos/<id>-<slug>.html
+    - Captures id as (?P<id>\d+)
+
+- Test data:
+  - _TEST provides a sample URL and expected extraction results, including:
+    - id: '11323908'
+    - ext: 'mp4'
+    - title, description (with md5 for verification), and duration: 100 seconds
+
+- Main functionality (_real_extract):
+  - Extracts the numeric video_id from the URL using self._match_id(url).
+  - Returns a URL result that delegates to the SixPlay extractor:
+    - self.url_result('6play:%s' % video_id, 'SixPlay', video_id)
+  - This means M6 content is not parsed directly here; instead, it is resolved via the SixPlay pipeline using the same video_id.
+
+- Implementation details:
+  - Uses _match_id to obtain the ID based on the _VALID_URL regex.
+  - The actual video metadata and download information are provided by the SixPlay extractor, invoked through the url_result with the 'SixPlay' extractor name.
+  - Minimal wrapper: no additional HTTP requests or parsing performed within this module; acts as a bridge to SixPlay.
+
+- Overall summary:
+  - A lightweight adapter that lets M6.fr video pages be handled by the existing SixPlay extractor by converting the M6 URL into a SixPlay-based reference using the captured video ID.

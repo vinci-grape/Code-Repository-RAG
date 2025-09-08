@@ -1,0 +1,43 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/myvi.py
+
+Overview
+- Provides two extractors for the Myvi video service:
+  - MyviIE: extracts videos from myvi.ru and myvi.tv pages that use Spruto-based data.
+  - MyviEmbedIE: handles embed pages on myvi.tv and delegates extraction to MyviIE when appropriate.
+- Both rely on Spruto-based metadata (SprutoData) and a shared extraction flow from SprutoBaseIE.
+
+Main classes and responsibilities
+- MyviIE(SprutoBaseIE)
+  - _VALID_URL: Matches Myvi-based URLs on myvi.ru or myvi.tv, including various internal paths (player/embed/html, flash, api/Video/Get, content/preloader.swf, ru/watch, and direct myvi: style URLs).
+  - _extract_url(cls, webpage): Classmethod that scans a webpage for an iframe whose src points to a Myvi player (embed/html or flash) and returns that URL. Uses a verbose regex to capture the inner URL.
+  - _real_extract(self, url):
+    - Extracts video_id from the URL via _match_id.
+    - Downloads JSON from http://myvi.ru/player/api/Video/Get/{video_id}?sig and pulls sprutoData from the response.
+    - Delegates to self._extract_spruto(spruto, video_id) (SprutoBaseIE helper) to produce the final info dict (title, duration, thumbnails, formats, etc.).
+
+- MyviEmbedIE(InfoExtractor)
+  - _VALID_URL: Matches embed pages on www.myvi.tv, including embed URLs or pages with a v parameter, capturing an internal id.
+  - _TESTS: Includes example embed URL with expected metadata and a test that is only for URL matching.
+  - suitable(cls, url): Classmethod that disables this extractor if MyviIE already handles the URL; otherwise uses the base class suitability check. This ensures embed pages that can be handled by MyviIE are routed there first.
+  - _real_extract(self, url):
+    - Extracts video_id from the URL via _match_id.
+    - Downloads the embed webpage from https://www.myvi.tv/embed/{video_id}.
+    - Searches the page for a CreatePlayer(...) call and extracts the internal video id (video id used by Myvi’s Spruto data) via regex: r'CreatePlayer\s*\(\s*["\'].*?\bv=([\da-zA-Z_]+)'.
+    - Returns a url_result pointing to myvi:%s with the extracted Spruto video id, delegating extraction to MyviIE (ie=MyviIE.ie_key()). This effectively routes embedded content through the primary Myvi extractor.
+
+Key implementation details
+- Spruto-based extraction:
+  - MyviIE uses the SprutoData payload obtained from the API endpoint http://myvi.ru/player/api/Video/Get/{video_id}?sig and then relies on SprutoBaseIE’s _extract_spruto to build the final media info (streams, duration, title, thumbnail, etc.).
+- URL handling and routing:
+  - MyviIE._extract_url is designed to locate an inner Myvi player iframe URL inside a page, enabling extraction from pages that embed the player rather than direct video pages.
+  - MyviEmbedIE is a specialized wrapper for embed pages. It avoids duplicating logic by delegating to MyviIE after resolving an internal Spruto video id.
+- Tests:
+  - The _TESTS arrays for both extractors cover typical direct Myvi URLs, iframe/embed variants, and an embed-to-spruto delegation flow.
+- Regex and URL patterns:
+  - _VALID_URL for MyviIE is broad, supporting both ru domains and direct myvi: URLs used by youtube-dl’s internal URL scheme.
+  - _VALID_URL for MyviEmbedIE is narrower, focusing on myvi.tv embed and id pages.
+  - The code uses _download_json, _download_webpage, _match_id, and _search_regex utilities common to youtube-dl extractors.
+
+Summary of main flow
+- For standard Myvi pages: extract video_id, fetch Spruto data via the Video/Get API, and extract media info through Spruto.
+- For embeds: parse the embed page to obtain the internal Spruto video id and then delegate extraction to MyviIE, returning the standard YouTube-dl info dict via delegation.

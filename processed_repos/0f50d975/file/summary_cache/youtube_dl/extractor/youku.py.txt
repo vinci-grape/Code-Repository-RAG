@@ -1,0 +1,73 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/youku.py
+
+Overview
+- Provides two information extractors for Youku:
+  - YoukuIE: extracts a single Youku video (or Tudou video) and returns standard info including formats derived from m3u8 streams.
+  - YoukuShowIE: extracts a Youku show/playlist, gathering all episodes as separate entries and returning a playlist result.
+
+Key classes and primary responsibilities
+- YoukuIE (InfoExtractor)
+  - _VALID_URL and _TESTS define how Youku video URLs are recognized and tested.
+  - get_ysuid(): static helper that generates a pseudo-random user/session ID used as a cookie value.
+  - get_format_name(fm): maps Youku stream types to internal format IDs (e.g., mp4 -> h3, hd2 -> h2, etc.).
+  - _real_extract(url):
+    - Extracts video_id from the URL.
+    - Sets cookies on youku.com: __ysuid (via get_ysuid) and xreferrer to help server-side checks.
+    - Fetches etag-based CNA token from log.mmstat.com/eg.js by downloading a page (.download_webpage_handle) and reading the etag header (strip quotes).
+    - Builds basic_data_params with vid, ccode, client_ip, utid (cna), and client_ts. If a videopassword was provided by the user, includes it.
+    - Requests JSON metadata from https://ups.youku.com/ups/get.json with the above parameters and a Referer header plus geo-verification headers.
+    - Error handling: interprets data['error'] messages to present user-friendly ExtractorError messages (e.g., China-only access or private video); otherwise raises a generic server error.
+    - title = data['video']['title'].
+    - Formats: builds a list from data['stream'] excluding streams with channel_type 'tail'. Each format uses:
+      - url: stream['m3u8_url']
+      - format_id: derived from stream_type via get_format_name()
+      - ext: 'mp4'
+      - protocol: 'm3u8_native'
+      - filesize, width, height from stream data
+    - Sorts formats with _sort_formats.
+    - Returns a dict with:
+      - id, title, formats
+      - duration: data['video']['seconds']
+      - thumbnail: data['video']['logo']
+      - uploader, uploader_id, uploader_url (from data)
+      - tags (from video data)
+
+- YoukuShowIE (InfoExtractor)
+  - _VALID_URL and _TESTS define how Youku show/playlist URLs are recognized and tested.
+  - _extract_entries(playlist_data_url, show_id, note, query):
+    - Prepares query by adding callback=cb and downloads JSON data with a JSONP strip/convert to JSON (strip_jsonp + js_to_json).
+    - Expects an 'html' field containing the playlist HTML; if absent returns [None, None].
+    - Parses the HTML for the episode grid (p-drama-grid or p-drama-half-row) via get_element_by_class.
+    - If no episodes found, raises an ExtractorError.
+    - Extracts episode video URLs from anchor tags and builds a list of results using YoukuIE.ie_key() for nested extraction.
+  - _real_extract(url):
+    - Extracts show_id from URL and downloads the show page.
+    - Reads PageConfig JavaScript object from the page (var PageConfig = {...}) and converts it to JSON.
+    - Fetches the first page data via _extract_entries with the module endpoint, supplying id/page_config['showid'] and tab=showInfo.
+    - Determines the first page’s reload id and all subsequent reload_ids to paginate episodes:
+      - For each reload_id not equal to the first, fetches subsequent pages via the episode endpoint with stage=reload_id and aggregates any found entries.
+    - Extracts playlist metadata:
+      - playlist_title from the description meta tag (first sentence before a comma if present).
+      - playlist_description from the intro block on the page.
+    - Returns a playlist_result containing all collected entries, with id, title, and description.
+
+Important implementation details
+- Networking and headers:
+  - YoukuIE uses cookies (__ysuid and xreferrer) and geo_verification_headers to mimic expected client behavior and to pass geo restrictions.
+  - It obtains a CNA token from the etag header of a request to a stats/js endpoint, parsing the header value exactly (strip surrounding quotes).
+  - All JSON metadata requests include a Referer header and may supply a password parameter if provided by the user.
+- Error handling:
+  - YoukuIE interprets specific error messages from the ups API to deliver user-friendly errors (China-only, private video). Otherwise, a generic server error is raised with an error code and optional note.
+- Format extraction:
+  - Only streams whose channel_type is not 'tail' are turned into formats.
+  - Formats are built from m3u8 URLs with protocol 'm3u8_native', including size/width/height when available.
+  - The code uses a dedicated mapping for format_id via get_format_name, which translates Youku’s stream_type to internal labels (h1, h2, h3, etc.).
+- Show/playlist extraction:
+  - The YoukuShowIE viewer navigates dynamic JSON-like HTML payloads returned by a module endpoint and successive episode endpoints, parsing the HTML with get_element_by_class to locate episode grids.
+  - It constructs nested video URLs as YoukuIE extractions, enabling the parent playlist to contain individual video entries.
+  - It supports multi-page playlists by following reload IDs extracted from the first page, aggregating all episodes found across pages.
+- Helpers and utilities:
+  - Uses get_element_by_class, js_to_json, strip_jsonp, str_or_none to process HTML/JSON payloads and safely extract fields.
+  - _TESTS section provides example URLs and expected fields for both extractors, including cases for password-protected videos and various video/show formats.
+
+In short, this file implements the Youku video and show extractors for youtube-dl, handling authentication-like cookies, CNA token retrieval, error interpretation, and multi-format/multi-page playlist extraction to produce standard video metadata and format lists.

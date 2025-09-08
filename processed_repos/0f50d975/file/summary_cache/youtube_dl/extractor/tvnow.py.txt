@@ -1,0 +1,113 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/tvnow.py
+
+Overview
+- This module provides TVNow extractors for youtube-dl, supporting both the legacy TVNow API (tvnow.de/v3) and the newer API gateway (apigw.tvnow.de/module).
+- It handles both single videos and lists/navigation (shows, seasons, annual/month navigation), including geo-restriction and DRM checks.
+- It builds a unified video info dictionary with metadata and a list of playback formats (dash, hls, ism), plus thumbnails and series/season/episode info.
+
+Main classes and responsibilities
+- TVNowBaseIE
+  - Base helper for extracting a single video.
+  - _VIDEO_FIELDS defines which video properties to request from the API.
+  - _call_api(path, video_id, query) fetches JSON from https://api.tvnow.de/v3/{path}.
+  - _extract_video(info, display_id) parses the API result for a single video and builds:
+    - video id, display_id, title, description
+    - thumbnails (base thumbnail plus optional format thumbnail)
+    - timestamp, duration
+    - series, season_number, episode_number, episode
+    - formats by inspecting manifest entries and extracting dash/ism/hls formats
+  - Handles DRM, geo-block, free/paid status with proper errors.
+  - The format extraction uses a generically constructed set of URLs derived from manifest entries:
+    - Iterates through manifest values, normalizes URLs, deduplicates by path.
+    - Uses url_repl() to translate manifest URLs to specific playback URLs for dash, hls, ism formats.
+    - Creates format lists via _extract_mpd_formats, _extract_ism_formats, _extract_m3u8_formats (with fatal=False).
+    - Also tries to locate a high-definition variant (ngvod) alongside the manifest URL.
+  - Finalizes formats with _sort_formats().
+
+- TVNowIE (legacy single-video extractor)
+  - _VALID_URL matches legacy TVNow URLs: https://www.tvnow.<domain>/<station>/<show_id>/<id> with some paths excluded (list, jahr).
+  - suitable() ensures this extractor is not chosen when newer/season/annual/show extractors apply.
+  - _real_extract(url) builds display_id from the URL, fetches video info via the legacy API path movies/{display_id} requesting the _VIDEO_FIELDS, and delegates to TVNowBaseIE._extract_video for the heavy lifting.
+
+- TVNowNewIE (new API-based single-video extractor)
+  - _VALID_URL matches new TVNow URLs under shows/serien structure.
+  - suitable() excludes legacy/new list extractors; relies on new API paths.
+  - _real_extract(url) derives display_id and video_id from the URL, calls the new API at player/{video_id} via _call_api, then uses _extract_video(info, url, display_id) to build the final info dictionary.
+  - _extract_video(info, url, display_id) (in this class) expects the new API response structure
+    - config.source.title, manifest entries, and rights/geo info
+    - Builds formats similarly to TVNowBaseIE, but based on the new API response
+    - Handles differences in the data shape (e.g., rights/isDrm, geoBlocking, free access)
+    - Extracts metadata: description, poster/thumbnail, previewStart as timestamp, length as duration
+    - Derives series, season/episode numbers from the source fields or URL
+    - Returns the standard info dict with id, display_id, title, description, thumbnails, timestamp, duration, series, season_number, episode_number, episode, formats
+
+- TVNowListBaseIE
+  - Base class for list navigation pages (shows/serien lists).
+  - _SHOW_VALID_URL defines the general pattern for a show listing (show ID embedded there).
+  - suitable() blocks this path if newer extractors are suitable.
+  - _extract_items(url, show_id, list_id, query)
+    - Calls the new API teaserrow/format/episode/{show_id} to fetch items
+    - Each item yields a URL to the appropriate video page and a video_id (or videoId)
+    - Builds a list of entries as TVNowNewIE video results
+    - Returns a playlist_result with the combined entries for the list
+
+- TVNowSeasonIE
+  - Inherits TVNowListBaseIE
+  - _VALID_URL matches staffel-(\d+) under a show URL
+  - _real_extract calls _extract_items for the given season, returning a playlist containing all season episodes
+
+- TVNowAnnualIE
+  - Inherits TVNowListBaseIE
+  - _VALID_URL matches year-month pages under a show
+  - _real_extract calls _extract_items for the given year-month, returning a playlist with items for that period
+
+- TVNowShowIE
+  - Inherits TVNowListBaseIE
+  - _VALID_URL matches a show page (annual, season, or general show page) using _SHOW_VALID_URL
+  - suitable() excludes new/season/annual extractors, so it handles legacy show pages
+  - _real_extract(url)
+    - Calls the new API teaserrow/format/navigation/{show_id} to fetch navigation items
+    - Depending on navigationType (annual or season), constructs a list of entries:
+      - annual: for each year, create entries for each month (YYYY-MM) pointing to TVNowAnnualIE
+      - season: for each season, create an entry pointing to TVNowSeasonIE
+    - If navigationType is unknown, raises ExtractorError
+  - Returns a playlist_result with all derived entries for the show
+
+Notes on implementation details
+- Two parallel extraction paths
+  - Legacy path uses tvnow.de/v3 API (TVNowIE) and _extract_video handles manifest-based formats
+  - New path uses apigw.tvnow.de/module API (TVNowNewIE, TVNowListBaseIE family) with different response shapes
+- Format extraction
+  - For each manifest URL, the code attempts to derive multiple playback formats:
+    - Dash (mpd) via _extract_mpd_formats
+    - ISM/HSS (MSS) via _extract_ism_formats
+    - HLS (m3u8) via _extract_m3u8_formats
+  - A careful URL rewriting scheme is used (url_repl) to convert manifest entries into playable URLs by replacing protocol hints and path suffixes
+  - It also attempts to fetch a higher-definition variant by substituting manifest path to ngvod where available
+  - The code deduplicates manifest paths to avoid processing the same path multiple times
+  - Formats are sorted with _sort_formats
+- Metadata and thumbnails
+  - Description comes from articleLong/articleShort in legacy API or description in new API
+  - Timestamps parsed via parse_iso8601 or unified_timestamp depending on source
+  - Duration parsed via parse_duration
+  - Thumbnails: a base TVNow thumbnail URL is constructed from video_id, plus optional thumbnail/image data from the 'format' dict in legacy flow
+- DRM and restrictions
+  - If DRM is detected, the extractor raises an ExtractorError (expected)
+  - Geo-blocking is detected and handled with raise_geo_restricted()
+  - If the video is not free, an expected error is raised
+- URL patterns and suitability
+  - TVNowIE targets legacy URLs and ensures it’s not chosen when newer/newer navigation URLs apply
+  - TVNowNewIE targets new URL schemes and is used primarily for new API responses
+  - TVNowShowIE, TVNowSeasonIE, TVNowAnnualIE implement list-based navigation, building playlist entries pointing to the appropriate concrete extractors (TVNowNewIE, TVNowSeasonIE, TVNowAnnualIE)
+- Commented-out portion
+  - There is a large block of code in a triple-quoted string describing a potential replacement TVNowIE based on the new API, and a sample (inactive) implementation. It serves as documentation/hint of transition rather than active code.
+
+In short
+- This file provides a full TVNow extraction flow, supporting both legacy and new API paths, including:
+  - Single video extraction (TVNowIE for legacy, TVNowNewIE for new API)
+  - List navigation (shows, seasons, annual months) via TVNowShowIE, TVNowSeasonIE, TVNowAnnualIE
+  - Robust handling of DRM, geo restrictions, and free/unfree content
+  - Comprehensive format extraction from multiple manifest types (dash, hls, ism) with URL rewriting to locate playable streams
+  - Metadata extraction (title, description, timestamps, duration, series, season/episode numbers) and thumbnail handling
+
+This combination enables complete navigation and playback of TVNow content across both legacy and newer site structures within youtube-dl.

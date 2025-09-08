@@ -1,0 +1,75 @@
+Concise yet comprehensive summary of ./youtube-dl/youtube_dl/extractor/anvato.py
+
+Purpose
+- Implement an InfoExtractor for Anvato-hosted videos used by many networks.
+- Fetch, authenticate, and parse video metadata and formats from Anvato MCP/video endpoints, then expose formats, subtitles, and metadata to youtube-dl.
+
+Main class
+- AnvatoIE(InfoExtractor)
+
+Key data
+- _VALID_URL: anvato:(access_key_or_mcp):(video_id)
+- _ANVP_RE: regex to locate the Anvato JSON blob in the page (data-anvp attribute on a script tag).
+- _ANVACK_TABLE: large mapping of access keys to secret values copied from anvplayer.min.js; used to compute anvstk.
+- _MCP_TO_ACCESS_KEY_TABLE: mapping from MCP identifiers to corresponding access keys.
+- _API_KEY: fallback API key used when access_key not found in _ANVACK_TABLE.
+- _AUTH_KEY: AES key used to generate X-Anvato-Adst-Auth header.
+- _TESTS: sample tests for extractor behavior.
+
+Core functionality
+
+1) Server time management
+- _server_time(access_key, video_id): memoized retrieval of server_time from server_time?anvack=access_key endpoint. Uses _api_prefix to choose prod vs stage.
+
+2) API URL construction and authentication
+- _api_prefix(access_key): returns prod or stage API host based on whether 'prod' is in the access_key.
+- _get_video_json(access_key, video_id):
+  - Builds video_data_url: https://.../rest/v2/mcp/video/{video_id}?anvack={access_key}
+  - Computes server_time and input_data = "server_time~md5(video_data_url)~md5(server_time)".
+  - Encrypts first 64 chars of input_data with AES using _AUTH_KEY; encodes as X-Anvato-Adst-Auth header.
+  - Generates anvstk using md5 on a string with access_key, a random anvrid, server_time, and a value from _ANVACK_TABLE (fallback to _API_KEY).
+  - Fetches JSON via _download_json with transform_source=strip_jsonp and a POST body containing api: {anvrid, anvts, anvstk}.
+
+3) Video data parsing and formats
+- _get_anvato_videos(access_key, video_id):
+  - Retrieves video_data via _get_video_json.
+  - Iterates over video_data['published_urls'] to build format entries:
+    - video_url = embed_url; ext = determine_ext(video_url); media_format = published_url.get('format'); tbr = int_or_none(published_url.get('kbps')).
+    - If SMIL: use _extract_smil_formats(video_url, video_id).
+    - Base format dict (a_format): url, format_id (constructed from http and cdn_name), tbr (None if 0).
+    - Special cases:
+      - media_format == 'm3u8' and tbr available: set format_id to 'hls-<tbr>' and ext to mp4.
+      - media_format == 'm3u8-variant' or ext == 'm3u8': extend formats with _extract_m3u8_formats(video_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False) and continue.
+      - ext == 'mp3' or media_format == 'mp3': vcodec = 'none'.
+      - Otherwise: attach width and height from published_url.
+    - Append a_format to formats.
+  - _sort_formats(formats).
+  - Subtitles: Build from video_data['captions']; map language to list of captions with url and ext (SMPTE-TT becomes tt).
+  - Return a dict with id, formats, title, description, tags, categories, thumbnail, timestamp (ts_published or ts_added), uploader, duration, subtitles.
+
+4) Anvato page extraction helpers
+- _extract_urls(ie, webpage, video_id): static method
+  - Scans the page for script tags with data-anvp using _ANVP_RE.
+  - Parses anvp JSON blob; validates video id and accessKey; if mcp present, map to access key via _MCP_TO_ACCESS_KEY_TABLE.
+  - Returns list of url_result entries for each valid video: 'anvato:{access_key}:{video_id}'.
+
+- _extract_anvato_videos(self, webpage, video_id):
+  - Reads the Anvato player data from the page (via _ANVP_RE) and calls _get_anvato_videos with anvplayer_data['accessKey'] and anvplayer_data['video'].
+
+5) Real extraction flow
+- _real_extract(self, url):
+  - Handle potential smuggling with unsmuggle_url and geo-countries via _initialize_geo_bypass.
+  - Match URL against _VALID_URL to obtain access_key_or_mcp and id (video_id).
+  - If access_key not in _ANVACK_TABLE, map via _MCP_TO_ACCESS_KEY_TABLE if possible; otherwise use as-is.
+  - Return result of _get_anvato_videos(access_key, video_id).
+
+Implementation details and behavior
+- AES-based authentication: uses _AUTH_KEY and AES to generate X-Anvato-Adst-Auth token for each video API request.
+- Dynamic access key resolution: supports direct access keys and MCP aliases; includes mappings to translate MCP identifiers to actual access keys.
+- Handling of multiple formats: supports SMIL, M3U8 (native and variant), MP3, and standard HTTP/HD formats; derives format_id, width/height, and bitrate as available.
+- Subtitles support: reads caption data from video JSON and converts to per-language tracks; SMPTE-TT becomes an extensions 'tt'.
+- Geo and smuggling support: respects geographic restrictions via _initialize_geo_bypass and can read smuggled data from the URL.
+- Robust URL extraction: _extract_urls enables scanning a page for embedded Anvato player data to queue videos.
+
+Overall
+- This file provides a complete Anvato video extractor for youtube-dl that authenticates with Anvato’s API using AES-derived headers, fetches video metadata, constructs a rich set of video formats and subtitles, and integrates with the usual youtube-dl framework for extraction and output.

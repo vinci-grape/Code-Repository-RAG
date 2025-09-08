@@ -1,0 +1,67 @@
+concise summary of ./youtube-dl/youtube_dl/extractor/kinja.py
+
+- Purpose
+  - Implement a YouTube-DL InfoExtractor for Kinja embedded video players across the Kinja network (kinja.com and partner sites like avclub, gizmodo, kotaku, lifehacker, deadspin, jalopnik, Jezebel, etc.).
+  - Handle multiple embed types inside iframes and route to the appropriate provider or fetch and parse video data directly to build formats.
+
+- Key class
+  - KinjaEmbedIE(InfoExtractor)
+    - IENAME: 'kinja:embed'
+    - _DOMAIN_REGEX: matches a range of Kinja-hosted domains (e.g., avclub.com, gizmodo.com, kotaku.com, etc.).
+    - _COMMON_REGEX: matches iframe embed paths (ajax/inset/iframe or embed/video/iframe with an id parameter).
+    - _VALID_URL: main URL pattern that captures:
+      - type: video provider type (fb, imgur, instagram, jwp-video, kinjavideo, mcp, megaphone, ooyala, soundcloud, tumblr-post, twitch-stream, twitter, ustream-channel, vimeo, vine, youtube-list, youtube-video)
+      - id: the provider-specific identifier following the hyphen
+    - _TESTS: several test URLs to ensure matching for a variety of embed types (fb, kinjavideo, megaphone, ooyala, soundcloud, tumblr-post, twitch, twitter, ustream, vimeo, vine, youtube-list, youtube-video)
+    - _JWPLATFORM_PROVIDER: helper for JWPlayer-based URLs
+    - _PROVIDER_MAP: mapping of known provider types to a (URL prefix, provider name) pair, or a special object for JWPlatform
+      - Examples: 
+        - 'fb' -> ('facebook.com/video.php?v=', 'Facebook')
+        - 'imgur' -> ('imgur.com/', 'Imgur')
+        - 'tumblr-post' -> ('%s.tumblr.com/post/%s', 'Tumblr')
+        - 'youtube-list' -> ('youtube.com/embed/%s?list=%s', 'YoutubePlaylist')
+        - 'youtube-video' -> ('youtube.com/embed/', 'Youtube')
+        - 'jwplayer-video' / 'jwp-video' -> JWPlatform provider
+        - 'ooyala' -> ('player.ooyala.com/player.js?embedCode=', 'Ooyala')
+    - Special handling for certain types (tumblr-post, youtube-list) to format final URLs correctly.
+
+- Core functionality
+  - _extract_urls(webpage, url)
+    - Static method that scans a webpage for iframe elements whose src matches a Kinja embed URL pattern (using _DOMAIN_REGEX and _COMMON_REGEX).
+    - Returns a list of absolute URLs to embedded resources.
+
+  - _real_extract(self, url)
+    - Parses video_type and video_id from the provided embed URL using _VALID_URL.
+    - If video_type is in _PROVIDER_MAP:
+      - Unquote video_id.
+      - Special cases:
+        - tumblr-post: video_id encodes blog and post id (split by '-') to produce a Tumblr URL; return as a URL result with Tumblr as the provider.
+        - youtube-list: video_id contains video and playlist IDs separated by '/', formatted to a YouTube playlist URL; return as a URL result with YoutubePlaylist as the provider.
+        - ooyala: video_id may contain a path; take only the first segment before '/'.
+      - Return self.url_result('http://' + result_url, provider_name) to delegate to the appropriate extractor.
+    - If video_type == 'kinjavideo':
+      - Fetch video metadata from https://kinja.com/api/core/video/views/videoById?videoId=VIDEO_ID.
+      - Extract title and gather formats from available HLS streams:
+        - Check keys 'signedPlaylistUrl' and 'streamingUrl' (k + 'Url') and extend formats via _extract_m3u8_formats with m3u8_native, m3u8_id='hls', fatal=False.
+      - Build thumbnail from poster data if available.
+      - Return a dict with:
+        - id, title, description, formats, tags, timestamp (publishTimeMillis converted), thumbnail, uploader (network).
+    - Otherwise (fallback path for non-listed providers, e.g., Univision content):
+      - Retrieve video metadata from Univision API: https://api.vmh.univision.com/metadata/v1/content/VIDEO_ID
+      - Extract IPTC data for title and optional cloudinary thumbnail
+      - Determine tvss_domain (or default to https://auth.univision.com) and fetch token data from tvss_domain/api/v3/video-auth/url-signature-tokens with mcpids=VIDEO_ID
+      - Build formats from renditionUrl via _extract_m3u8_formats (m3u8_native)
+      - If a fallbackRenditionUrl exists, append a separate format entry with format_id 'fallback' and bitrate parsed from the URL
+      - Sort formats with _sort_formats
+      - Return a dict with id, title, thumbnail, uploader, duration, formats, description, timestamp (parsed via parse_iso8601)
+
+- Important implementation details
+  - Uses compat helpers for URL decoding and string handling (compat_urllib_parse_unquote, compat_str).
+  - Handles both provider-based redirection (via url_result) and direct extraction of formats for kinjavideo and Univision paths.
+  - Uses _extract_m3u8_formats to build HLS-based formats for kinjavideo and Univision paths.
+  - Special bit in timestamp extraction for kinjavideo: converts publishTimeMillis (ms) to seconds via int_or_none with a divisor of 1000.
+  - Robust handling of thumbnails and uploader fields from available metadata.
+  - The code is designed to work with multiple embed formats (iframe-based embeds with various providers) and redirects to the provider extractors where appropriate.
+  - The _TESTS section ensures the extractor matches a broad set of kinja embed URLs for different providers.
+
+In short, KinjaEmbedIE identifies embeds from the Kinja network, delegates to the appropriate provider when possible (via url_result), or fetches and parses direct video metadata (KinJa kinjavideo via API and Univision content) to construct a full video info object with formats, thumbnails, and timing data.

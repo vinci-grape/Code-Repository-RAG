@@ -1,0 +1,63 @@
+Summary of ./youtube-dl/youtube_dl/extractor/medaltv.py
+
+- Purpose
+  - Implement a MedalTV video extractor (MedalTVIE) for youtube-dl to fetch Medal.TV clip videos, including multiple quality formats and metadata.
+
+- Key class
+  - MedalTVIE (subclass of InfoExtractor)
+    - _VALID_URL: RegExp matching Medal.tv clips URLs: https://(www.)?medal.tv/clips/<clip-id>
+    - _TESTS: Includes sample URLs with expected metadata (id, ext, title, description, uploader, timestamps) and two URLs marked only_matching (no test data extraction).
+
+- Core extraction flow (_real_extract)
+  1. Extract video_id from URL and download the page.
+  2. Locate hydrationData JSON inside a script tag using a regex, then parse JSON.
+     - hydrationData is expected to contain a mapping of clip data keyed by clip_id.
+  3. Retrieve the clip data for the current video_id from hydration_data['clips'][video_id]. If not found, raise ExtractorError.
+  4. Derive basic fields:
+     - title from clip['contentTitle']
+     - source_width and source_height from clip, used to compute aspect_ratio (width/height) with a fallback of 16:9 if missing.
+  5. Helper: add_item(container, item_url, height, id_key='format_id', item_id=None)
+     - Computes width using aspect_ratio * height.
+     - Creates an entry dict with keys: 'url', width, height, and an id key (default 'format_id' or overridden).
+     - If given height results in no item_id in the URL, it skips adding that item.
+     - If height is not supplied, uses clip's sourceHeight as the height and marks id as 'source'.
+     - Special handling to only add items when the URL contains the corresponding id.
+  6. Build formats and thumbnails lists by scanning clip keys:
+     - Keys matching (contentUrl|thumbnail)(?:(\d+)p)?$ are considered.
+     - For contentUrl keys:
+       - Use the corresponding height if present; otherwise fall back to sourceHeight.
+       - If height is present, add to formats with an id like "<height>p" or 'source' if using source.
+     - For thumbnail keys:
+       - Add to thumbnails with corresponding height and id (using 'id').
+  7. Error handling for clip-related errors:
+     - If no formats and clip contains an error field:
+       - error 404 -> raise ExtractorError('That clip does not exist.', expected=True)
+       - otherwise -> raise ExtractorError('An unknown error occurred (<error>).')
+  8. Sort formats (self._sort_formats).
+  9. Author/profile extraction:
+     - Try to fetch the first profile dict from hydration_data['profiles'] values.
+     - Extract author_id and build author_url as https://medal.tv/users/{author_id} if present.
+  10. Return metadata dictionary:
+      - id, title, formats, thumbnails
+      - description (clip['contentDescription'])
+      - uploader (author['displayName'] if available)
+      - timestamp (float from clip['created'] with 1000 scale)
+      - uploader_id, uploader_url
+      - duration (clip['videoLengthSeconds'])
+      - view_count (clip['views']), like_count (clip['likes']), comment_count (clip['comments'])
+      - All numeric fields use helper conversions (float_or_none, int_or_none, str_or_none) as appropriate.
+
+- Important implementation details
+  - hydrationData is embedded in the page inside a script tag; extraction uses _search_regex and _parse_json to obtain a usable Python dict.
+  - The clip’s available media are encoded as fields like contentUrl{N}p and thumbnail{N}p, representing different resolutions. The code dynamically builds formats and thumbnails from these fields.
+  - Aspect ratio is derived from sourceWidth/sourceHeight if available; otherwise defaults to 16:9.
+  - The add_item helper enforces a consistency check: only add entries when the URL includes the corresponding height indicator, preventing malformed URLs from slipping in.
+  - The code gracefully handles missing clip data and different error codes, including a user-friendly 404 clip-not-exist message.
+  - Output fields align with youtube-dl’s standard InfoExtractor dictionary: id, title, formats, thumbnails, description, uploader, timestamp, uploader_id, uploader_url, duration, view_count, like_count, comment_count.
+
+- Data mapping choices
+  - uploader and uploader_id come from the author/profile data extracted from hydrationData.
+  - upload_date is derived via timestamp (epoch) when present; other date fields are not explicitly computed beyond the timestamp.
+  - The code converts numeric fields robustly using int_or_none and float_or_none, ensuring resilience to missing or malformed data.
+
+Overall, MedalTVIE fetches a Medal.tv clip page, reads embedded hydration data to locate the clip, constructs multiple video formats and thumbnails from contentUrl/thumbnail fields, computes media metadata (dimension, duration, counts, author), and returns a structured info dictionary suitable for download via youtube-dl.

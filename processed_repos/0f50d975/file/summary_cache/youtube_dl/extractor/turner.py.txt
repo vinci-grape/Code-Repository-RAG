@@ -1,0 +1,91 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/turner.py
+
+Overview
+- This module implements Turner-specific extractors for Turner’s video content, built on top of AdobePass (authentication) support.
+- It provides two main entry points into video data:
+  - _extract_cvp_info: extracts CVP (Convergent Video Platform) content, handling multiple formats, codecs, protections, subtitles, thumbnails, and metadata.
+  - _extract_ngtv_info: extracts NGTV-based content, primarily via m3u8 formats and optional SPE (Secure Playback Extraction) tokens.
+
+Key classes and functions
+- TurnerBaseIE (inherits from AdobePassIE)
+  - _AKAMAI_SPE_TOKEN_CACHE: a class-level simple cache for Akamai SPE tokens keyed by a secure path.
+  - _extract_timestamp(video_data): reads a dateCreated/uts timestamp from the video XML.
+  - _add_akamai_spe_token(tokenizer_src, video_url, content_id, ap_data, custom_tokenizer_query=None):
+    - Retrieves Akamai SPE token for protected media.
+    - Caches tokens by a derived secure_path, builds a query with path, videoId, and possibly accessToken from Adobe Pass data.
+    - Downloads token XML from tokenizer_src, handles errors, and constructs video_url with hdnea token (e.g., video_url + '?hdnea=' + token).
+  - _extract_cvp_info(data_src, video_id, path_data={}, ap_data={}, fatal=False):
+    - Core CVP extraction logic: downloads video XML, parses title, contentId, and collects formats, subtitles, thumbnails, and metadata.
+    - Handles various URL forms and protection schemes:
+      - /secure/ paths trigger Akamai SPE token addition.
+      - Relative URLs get base media_src from path_data.
+      - Direct https URLs, AKAMAI formats, SMIL, HDS/F4M, M3U8, and generic file URLs are supported and converted into closed-formats entries.
+    - Builds formats with proper handling of:
+      - bitrate, width, height from filename regex or format_id heuristics.
+      - iOS audio fallback (ios_audio) to m4a with vcodec=none if necessary.
+    - Collects subtitles (scc, srt, vtt) and image thumbnails.
+    - Handles live content title adjustment via _live_title.
+    - Returns a dict with id, title, formats, subtitles, thumbnails, description, duration, timestamp, upload_date, series, season/episode numbers, and is_live flag.
+  - _extract_ngtv_info(media_id, tokenizer_query, ap_data=None):
+    - NGTV-specific extractor: fetches media data via HTTP JSON, iterates through unprotected and bulkaes streams.
+    - For each stream, obtains m3u8 URLs, applying SPE tokens if needed (via _add_akamai_spe_token).
+    - Collects HLS formats via _extract_m3u8_formats, and gathers duration and chapters from contentSegments.
+    - Returns dict with formats, chapters, and duration.
+
+Main workflow and implementation details
+- Token handling and caching
+  - Akamai SPE tokens are retrieved on-demand for secure URLs (e.g., /secure/ paths) through _add_akamai_spe_token.
+  - Results are cached in _AKAMAI_SPE_TOKEN_CACHE to avoid repeated token fetches for the same secure path.
+  - When AP (Adobe Pass) data indicates auth_required, an accessToken is included in the token query.
+
+- CVP info extraction (_extract_cvp_info)
+  - Data source is an XML document (after fix_xml_ampersands), parsed for:
+    - video_id (from video_data.attrib['id'])
+    - title (headline)
+    - content_id (fallback to video_id)
+  - Path data and media sources
+    - Uses a path_data dict to map file extensions and keys (e.g., 'default', 'mp4', 'm3u8', 'f4m', etc.) to their corresponding media_src bases.
+  - URL handling logic per file entry
+    - /mp4:protected/: currently skipped (TODO)
+    - /secure/: requires Akamai SPE token via _add_akamai_spe_token
+    - Non-URL: uses base_path_data and media_src to build a full URL
+    - Dedupe by URL
+  - Formats handling
+    - scc/srt/vtt -> subtitles
+    - png -> thumbnails
+    - smil -> split into formats via _extract_smil_formats
+    - akamaihd.net -> Akamai formats via _extract_akamai_formats
+    - m3u8 -> via _extract_m3u8_formats; mark non-seekable for secured URLs with hdnea
+    - f4m -> via _extract_f4m_formats
+    - else: generic format dict with format_id, url, ext
+      - width/height/tbr parsed from URL via regex; or inferred from format_id (digits or ios_ variants)
+      - ios_ formats get special handling (audio -> vcodec=none, ext=m4a)
+  - Subtitles and thumbnails
+    - closedCaptions/source/track entries mapped to subtitles with language and format ext mapping
+    - images/image entries mapped to thumbnails with width/height
+  - Live content handling
+    - is_live flag influences title via _live_title
+  - Output dict
+    - id, title, formats, subtitles, thumbnails, thumbnail, description, duration, timestamp, upload_date, series, season_number, episode_number, is_live
+
+- NGTV info extraction (_extract_ngtv_info)
+  - Fetches media data from NGTV endpoint and processes both unprotected and bulkaes streams
+  - If a stream is SPE-protected, applies Akamai token via _add_akamai_spe_token
+  - Formats collected via _extract_m3u8_formats (HLS)
+  - Duration from totalRuntime, chapters from contentSegments
+  - Returns formats, chapters, duration
+
+Notable implementation details
+- Robust handling of multiple content-source formats (SMIL, HDS/F4M, HLS, custom Akamai formats, etc.).
+- Careful URL normalization: relative URLs are joined with media_src, missing media_srcs skip that entry, and duplicates are avoided.
+- Metadata extraction includes support for:
+  - isLive, poster, description, showTitle, seasonNumber, episodeNumber
+  - upload_date parsed from version attribute
+- Subtitle handling supports multiple formats (SCC, VTT, TT) and languages, with per-source format tagging.
+- Live titles are normalized using _live_title when is_live is true.
+- Fixes and compatibility wrangling:
+  - fix_xml_ampersands applied to CVP data
+  - compat_str, int_or_none, float_or_none, parse_duration helpers used for robust type handling
+
+In short
+- This file provides Turner-specific extraction logic for CVP and NGTV sources, with comprehensive support for protected content via Akamai SPE tokens, multiple video formats and containers, optional subtitles, thumbnails, and rich metadata. It emphasizes safe token caching, flexible URL/path resolution, and correct handling of live content and various protection schemes.

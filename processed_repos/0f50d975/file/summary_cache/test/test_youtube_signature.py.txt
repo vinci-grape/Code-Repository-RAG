@@ -1,0 +1,52 @@
+This file is a unit test module for youtube-dl that validates YouTube signature deciphering logic. It covers two main areas: extracting the proper player id from YouTube player URLs, and verifying the signature (sig/nsig) generation by parsing and executing the JavaScript used by YouTube players.
+
+Key components
+
+- _SIG_TESTS and _NSIG_TESTS
+  - Lists of test vectors.
+  - Each entry for _SIG_TESTS contains (url, sig_input, expected_signature). The tests exercise the signature function produced from the JS code found at the given URL, using either a numeric input (which maps to the first N printable characters) or a direct string input, and verify the resulting signature matches expected_signature.
+  - Each entry for _NSIG_TESTS contains (url, sig_input, expected_nsig). These test the non-sig path by extracting and applying the “nsig” function logic to the given input.
+
+- TestPlayerInfo class
+  - test_youtube_extract_player_info verifies that YoutubeIE._extract_player_info correctly parses various YouTube player URLs and returns the expected player_id (e.g., 64dddad9, e7567ecf, etc.).
+  - Uses a FakeYDL environment to instantiate YoutubeIE.
+
+- TestSignature class
+  - setUp creates a testdata/sigs directory to cache downloaded JS files used for signature tests.
+  - tearDown cleans up the directory contents after tests.
+
+Dynamic test generation
+
+- t_factory(name, sig_func, url_pattern)
+  - Returns a function maker that creates a test function for a given test vector.
+  - For each test vector, it downloads the corresponding JS file (if not present) into testdata/sigs, reads the file, and asserts sig_func(jscode, sig_input) == expected_sig.
+  - Tests are attached to TestSignature with names like test_signature_js_<id>, built from a URL-derived id.
+
+- make_sig_test and make_nsig_test
+  - Build and attach tests for signature and nsig using:
+    - make_sig_test on SIG test vectors with a regex that recognizes both html5player and other player JS URLs.
+    - make_nsig_test on NSIG test vectors with a simple pattern for player JS URLs.
+
+Core functions under test
+
+- signature(jscode, sig_input)
+  - Parses the signing function from the JS code using YoutubeIE._parse_sig_js(jscode).
+  - Builds src_sig as either a substring of printable characters (if sig_input is int) or uses sig_input directly.
+  - Applies the parsed signing function to src_sig and returns the result.
+
+- n_sig(jscode, sig_input)
+  - Uses a JSInterpreter on the provided JS code.
+  - Calls YoutubeIE._extract_n_function_code_jsi and _extract_n_function_from_code to obtain the function, then executes it with sig_input to obtain the nsig.
+
+Implementation details
+
+- Uses YoutubeIE with a FakeYDL environment (cachedir: False) to isolate tests from external dependencies.
+- JS files are loaded from the internet on-demand and cached locally in testdata/sigs.
+- The test URL matching uses two patterns:
+  - A regex for signature tests that covers html5player variations and base.js cases.
+  - A simple pattern for nsig tests that targets /player/<id>.js URLs.
+- After test execution, the tearDown method removes any downloaded JS files to keep the test environment clean.
+
+Overall purpose
+
+- Ensure that both the extraction of the correct YouTube player ID and the complex JavaScript-based signature deciphering logic used by YouTube (and by extension youtube-dl) behave as expected across a wide set of real-world player JS variations. The tests dynamically fetch and validate actual JS code against known correct outputs, providing coverage for evolving YouTube signing schemes.

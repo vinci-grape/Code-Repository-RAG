@@ -1,0 +1,33 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/spike.py
+
+- Purpose: Defines two extractors for Spike-related content (Bellator and Paramount Network) by extending MTVServicesInfoExtractor. These extractors fetch and parse MRSS feeds to list videos.
+
+- Base class: Both BellatorIE and ParamountNetworkIE inherit from MTVServicesInfoExtractor, leveraging shared MTV/MTV Services info extraction logic.
+
+- BellatorIE
+  - _VALID_URL: Matches Bellator pages with a slug and a 6-character alphanumeric ID, e.g. bellator.com/.../abcdef.
+  - _FEED_URL: http://www.bellator.com/feeds/mrss/ (MRSS feed used to populate playlists).
+  - _GEO_COUNTRIES: US (geo-restricted).
+  - _TESTS: Two tests
+    - Test 1: A fight page. Expects an info_dict with title and a description MD5 hash, and a playlist_count of 3 (indicating 3 items in the feed).
+    - Test 2: A video clips page with only_matching enabled (tests URL matching without full extraction).
+  - Behavior: Relies on default MTVServicesInfoExtractor logic to fetch and parse the MRSS feed for Bellator content.
+
+- ParamountNetworkIE
+  - _VALID_URL: Matches Paramount Network pages with a slug and a 6-character alphanumeric ID, e.g. paramountnetwork.com/.../abcdef.
+  - _FEED_URL: http://feeds.mtvnservices.com/od/feed/intl-mrss-player-feed (MRSS feed for Paramount Network).
+  - _GEO_COUNTRIES: US (geo-restricted).
+  - _TESTS: One test
+    - Test: A Lip Sync Battle episode page. Expects an info_dict with id, ext (mp4), a descriptive title containing multiple pipe-separated fields, and a description MD5 hash. The test sets skip_download to True in params (no actual video download during tests).
+  - _get_feed_query(self, uri): Overrides the feed query construction to supply:
+    - arcEp: 'paramountnetwork.com'
+    - imageEp: 'paramountnetwork.com'
+    - mgid: the provided URI
+    This customization ensures the MRSS feed is queried with the correct mgid and domain context for Paramount Network content.
+
+- Implementation notes
+  - Both extractors use a consistent pattern: a specific _VALID_URL for page matching, a MRSS _FEED_URL to source items, and a US geo restriction.
+  - ParamountNetworkIE adds a tailored _get_feed_query method to align with how Paramount’s MRSS feed expects parameters (arcEp, imageEp, mgid).
+  - The _TESTS sections indicate expected parsed fields (title, description) and metadata (id, ext) for verifying extractor behavior.
+
+Overall, the file provides two MTV-based extractors for Bellator and Paramount Network, configured to pull video lists from MRSS feeds with appropriate URL patterns, geographic restrictions, and a small customization for the Paramount feed query.

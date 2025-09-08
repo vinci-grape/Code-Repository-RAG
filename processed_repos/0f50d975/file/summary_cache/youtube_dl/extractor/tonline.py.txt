@@ -1,0 +1,48 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/tonline.py
+
+- Purpose
+  - A youtube-dl extractor for video pages on t-online.de (TV section).
+
+- Core class
+  - TOnlineIE(InfoExtractor)
+    - IE_NAME: 't-online.de'
+    - _VALID_URL: Matches URLs like http(s)://www.t-online.de/tv/.../id_<digits> and captures the numeric id.
+    - _TEST: Includes a sample URL, expected md5, and an info_dict with id, ext, title, and description for testing.
+
+- Main functionality
+  - _real_extract(self, url)
+    - Extracts video_id from the URL using _match_id.
+    - Downloads JSON metadata from:
+      http://www.t-online.de/tv/id_<video_id>/tid_json_video
+      via _download_json.
+    - Retrieves:
+      - title from video_data['subtitle']
+      - description from video_data.get('description')
+      - duration from video_data.get('duration') converted with int_or_none
+    - Formats extraction:
+      - Iterates over video_data.get('assets', [])
+      - For each asset:
+        - Uses asset.get('source') or asset.get('source2') as the video URL
+        - Skips if no source available
+        - Builds a format_id by collecting asset.get('type') and asset.get('profile') (if present) and joining with a dash
+        - Appends a format dict: {'format_id': joined_values, 'url': asset_source}
+    - Thumbnails extraction:
+      - Iterates over video_data.get('images', [])
+      - For each image, uses image.get('source') as the thumbnail URL
+      - Skips if no source; appends {'url': image_source}
+    - Returns a result dict with:
+      - id: video_id
+      - title
+      - description
+      - duration (as integer or None)
+      - thumbnails: list of {'url': ...}
+      - formats: list of {'format_id': ..., 'url': ...}
+
+- Important implementation details
+  - Uses _download_json to fetch JSON metadata from the tid_json_video endpoint based on the extracted id.
+  - The format_id is derived from up to two asset fields: type and profile (if present), joined with a hyphen.
+  - Gracefully handles missing fields: skips assets without a source and images without a source; duration is optional.
+  - Duration is processed with int_or_none to tolerate non-integer or missing values.
+  - The extractor relies on the subtitle field for the video title and the description field for description.
+
+In short, this extractor fetches video metadata from a t-online.de JSON endpoint, builds a list of available video formats and thumbnails from assets/images, and returns a standard youtube-dl info dictionary with id, title, description, duration, thumbnails, and formats.

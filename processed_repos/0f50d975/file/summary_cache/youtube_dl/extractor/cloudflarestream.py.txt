@@ -1,0 +1,37 @@
+- Purpose
+  - A YouTube-DL extractor for Cloudflare Stream, handling domains like cloudflarestream.com, videodelivery.net, and bytehighway.net. It collects available video formats from HLS (m3u8) and DASH (mpd) manifests and returns a standard info dictionary.
+
+- Key components
+  - CloudflareStreamIE class (inherits from InfoExtractor)
+  - _DOMAIN_RE: matches cloudflarestream.com, videodelivery.net, or bytehighway.net
+  - _EMBED_RE: pattern for embed script URLs used by Cloudflare Stream embeds
+  - _ID_RE: ID formats allowed (32 hex characters or slug-like with dots)
+  - _VALID_URL: regex to match typical URLs (watch.cloudflarestream.com, cloudflarestream.com, embed.videodelivery.net, etc.) and capture the video id
+  - _TESTS: predefined test cases verifying extraction (including a real embed URL and several only-matching cases)
+  - _extract_urls(webpage): static method that scans a page for script tags referencing Cloudflare embed URLs and extracts the full URLs to embed
+  - _real_extract(url): core extraction logic
+
+- How IDs are handled
+  - video_id is obtained from the URL via _match_id.
+  - If the id contains a dot, it is treated as an encoded payload: the part after the dot is base64url-decoded, parsed as JSON, and the value of the "sub" field is used as the real video_id.
+
+- Manifest retrieval and format extraction
+  - base_url = https://<domain>/<video_id>/
+  - If encoded, real video_id is obtained as above; then:
+  - manifest_base_url = base_url + 'manifest/video.'
+  - Formats are collected from:
+    - HLS: manifest_base_url + 'm3u8' via _extract_m3u8_formats, with id 'hls' and fatal=False
+    - DASH: manifest_base_url + 'mpd' via _extract_mpd_formats, with id 'dash' and fatal=False
+  - Formats are sorted with _sort_formats
+
+- Returned info
+  - id: canonical video_id
+  - title: same as id
+  - thumbnail: base_url + 'thumbnails/thumbnail.jpg'
+  - formats: list of available formats (HLS/DASH), possibly empty if manifests are unavailable
+
+- Notable implementation details
+  - The extractor supports both direct Cloudflare Stream URLs and embedded script URLs, using _EMBED_RE and _ID_RE to recognize and extract IDs.
+  - It includes a mechanism to handle obfuscated/encoded IDs by decoding a base64-encoded payload and using its "sub" field as the actual ID.
+  - It uses both HLS and DASH manifests when available, and does not fail hard if one format type is unavailable (fatal is set to False for both format extractors).
+  - The thumbnail URL follows a predictable pattern based on the base video URL.

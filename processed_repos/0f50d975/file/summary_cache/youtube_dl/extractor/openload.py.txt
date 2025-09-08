@@ -1,0 +1,83 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/openload.py
+
+Purpose
+- Provides utilities and a PhantomJS-based wrapper to execute JavaScript on web pages (specifically for OpenLoad pages that require JS rendering) and return the final HTML plus any console output from the JS execution.
+- Integrates with youtube-dl’s downloader/extractor framework, including cookie handling and page downloading.
+
+Key components
+
+1) Cookie helpers
+- cookie_to_dict(cookie): Converts a cookie object to a JSON-serializable dict, including optional fields (port, domain, path, expires, secure, discard). Attempts to detect httpOnly via cookie.has_nonstandard_attr and sets httponly if found.
+- cookie_jar_to_list(cookie_jar): Converts a cookie jar to a list of cookie dicts using cookie_to_dict.
+
+2) PhantomJSwrapper class
+- Purpose: Wraps PhantomJS to render a page, execute custom JavaScript, and save the resulting HTML and cookies for further processing by the extractor.
+
+- Class-level/get-version:
+  - _version(): Fetches PhantomJS version via get_exe_version('phantomjs', version_re=r'([0-9.]+)').
+
+- Initialization (__init__)
+  - Ensures PhantomJS is present (check_executable('phantomjs', ['-v'])); raises ExtractorError if not found.
+  - Stores a reference to the extractor (the parent object) for callbacks and downloading.
+  - Optional required_version: if provided, warns via extractor._downloader.report_warning if PhantomJS is outdated compared to required_version.
+  - Sets default timeout (ms) for page loading.
+  - Creates three temporary files (script, html, cookies) for Script, HTML output, Cookies, respectively (non-delete-on-close; managed by the class).
+
+- Cleanup (__del__)
+  - Attempts to delete the temporary files on object deletion.
+
+- _save_cookies(url)
+  - Serializes the downloader’s cookiejar to JSON and writes it to the cookies temp file.
+  - Ensures each cookie has a default path (‘/’) and domain (URL netloc) if missing.
+
+- _load_cookies()
+  - Reads cookies from the cookies temp file and applies them back to the extractor’s cookie jar via extractor._set_cookie.
+  - Handles httpOnly (maps to rest using httpOnly flag) and expiry to expire_time for compatibility.
+
+- get(url, html=None, video_id=None, note=None, note2='Executing JS on webpage', headers={}, jscode='saveAndExit();')
+  - Core method: downloads page HTML (if not provided), injects cookies, runs PhantomJS with a generated script to execute provided JavaScript, and returns the final HTML along with PhantomJS stdout.
+  - Preconditions:
+    - jscode must contain saveAndExit();; otherwise raises ExtractorError.
+  - Steps:
+    - If html not supplied, downloads webpage via extractor._download_webpage(url, video_id, note, headers).
+    - Writes HTML to the html temp file.
+    - Saves cookies to the cookies temp file.
+    - Prepares replacement values for the PhantomJS script template:
+      - url, ua (User-Agent from headers or default), jscode, timeout
+      - Absolute paths to the three temp files (script, html, cookies) escaped for JSON/JS use.
+    - Fills the _TEMPLATE with the replacements and writes to the script temp file.
+    - Outputs a status line via extractor.to_screen (includes video_id if provided).
+    - Executes PhantomJS with the generated script:
+      - Command: phantomjs --ssl-protocol=any <script>
+      - Captures stdout/stderr; on non-zero return code, raises ExtractorError with the error output.
+    - Reads final HTML from the html temp file.
+    - Calls _load_cookies() to refresh cookies after JS execution.
+    - Returns a tuple: (html, stdout-encoded-output).
+
+- _TEMPLATE (class attribute)
+  - A large PhantomJS script template (formatted with .format) that:
+    - Sets up error handling in PhantomJS.
+    - Creates a WebPage, sets resource timeout and user agent.
+    - Loads cookies from a JSON file into PhantomJS cookies.
+    - Defines saveAndExit() to write current page content and cookies back to disk and exit.
+    - On load finished: if page URL is empty, injects saved HTML; otherwise executes injected JavaScript (jscode).
+  - Uses double braces {{ ... }} in the template to escape Python’s format placeholders, so actual JS objects stay intact; braces are restored after .format.
+
+3) Important implementation details
+- File handling:
+  - Uses NamedTemporaryFile(delete=False) for script, html, cookies; these are managed manually and cleaned up on object deletion.
+- Interactions with youtube-dl internals:
+  - Reads/writes cookies via downloader’s cookiejar (cookiejar is converted to JSON for PhantomJS, and cookies from PhantomJS are re-applied to the extractor’s cookie jar).
+  - Uses extractor._download_webpage to fetch initial HTML when needed, and extractor.to_screen for status messages.
+- Error handling:
+  - If PhantomJS is not found, raises ExtractorError with guidance to download PhantomJS.
+  - If PhantomJS returns a non-zero exit code, raises ExtractorError including PhantomJS error output for debugging.
+  - Validates presence of saveAndExit() in the provided JavaScript snippet to ensure proper termination and data saving.
+- Compatibility:
+  - cookie handling includes httpOnly compatibility and expiry fields, mapping to expected keys for the rest of the extractor.
+  - Uses compat helpers (compat_open, compat_urlparse, compat_kwargs) to maintain compatibility across Python versions.
+- Timeout and user agent:
+  - Allows customizing timeout (default 10000 ms) and uses the request’s User-Agent header if provided, else a standard default.
+
+Overall
+- This module enables dynamic content extraction by rendering pages with PhantomJS, executing custom JavaScript to unlock or expose content, while preserving and restoring cookies, and returning the final HTML plus any console output. It is designed to be used by OpenLoad extractor logic that requires JS-rendered pages.

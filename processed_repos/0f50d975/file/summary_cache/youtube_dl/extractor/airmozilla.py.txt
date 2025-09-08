@@ -1,0 +1,42 @@
+- Purpose: This file implements an extractor for Air Mozilla videos in youtube-dl. It fetches video metadata and streaming information from Air Mozilla pages and the associated Vid.ly embedded player.
+
+- Key class:
+  - AirMozillaIE(InfoExtractor)
+    - _VALID_URL: Matches Air Mozilla video pages, capturing an id from the path.
+    - _TEST: Includes a sample URL and expected metadata such as id, title, description, timestamp, duration, categories, etc.
+
+- Main functionality (_real_extract):
+  1. Display id extraction: derives display_id from the URL using _match_id.
+  2. Page fetch: downloads the Air Mozilla page.
+  3. Video id extraction: finds the Vid.ly embed id from a pattern like //vid.ly/<id>/embed.
+  4. Embed data retrieval: downloads the Vid.ly embed page for that id.
+  5. JWPlayer config parsing:
+     - Locates a JavaScript snippet containing initCallback(...);
+     - Parses the JSON inside and retrieves the 'config' object as jwconfig.
+     - Builds an initial info dictionary with _parse_jwplayer_data(jwconfig, video_id).
+  6. Optional page metadata:
+     - view_count: extracts numeric views from the page text "Views since archived: <n>" (optional).
+     - timestamp: extracts an ISO8601 timestamp from a <time datetime="..."> element (optional).
+     - duration: tries to parse a duration string like "Duration: X hours Y minutes" (optional).
+  7. Enrichment of info_dict:
+     - id: set to video_id
+     - title: from OpenGraph title
+     - url: from OpenGraph URL
+     - display_id: original display_id
+     - description: from OpenGraph description
+     - timestamp: as parsed (may be None)
+     - location: extracted from a "Location: ..." line (optional)
+     - duration: as parsed (optional)
+     - view_count: as parsed (optional)
+     - categories: collected from anchor tags matching <a ... class="channel">...</a> (list)
+  8. Return: the augmented info_dict containing metadata and formats for the video.
+
+- Important implementation details:
+  - The extractor uses Vid.ly as the source of the actual video data; the Air Mozilla page is used mainly to locate the Vid.ly embed and supplementary metadata.
+  - JWPlayer configuration is obtained from the embed page by parsing the JSON inside the initCallback(...) call.
+  - Base video data comes from _parse_jwplayer_data, while additional page metadata is retrieved via targeted HTML parsing and OpenGraph data utilities (_og_search_title, _og_search_description, _og_search_url).
+  - Optional fields are parsed with fatal=False to avoid extraction failures if they’re missing.
+  - Categories are extracted with a regex that pulls text from <a> tags with class "channel".
+
+- Outputs:
+  - A dictionary (info_dict) containing video id, display_id, title, description, url, timestamp, duration, view_count, location, and categories, along with any formats parsed from the JWPlayer config.

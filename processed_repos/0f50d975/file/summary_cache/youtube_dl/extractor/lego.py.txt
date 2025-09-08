@@ -1,0 +1,63 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/lego.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for LEGO video content from lego.com, handling geo-restrictions, multiple video formats, and optional subtitles.
+
+- Key class
+  - LEGOIE(InfoExtractor): main extractor class.
+
+- URL pattern and tests
+  - _VALID_URL matches LEGO video pages with a locale (e.g., en-us) and a 32-hex video id.
+  - _TESTS include three scenarios:
+    - Normal MP4 with known md5 and metadata (title, id, description).
+    - Geo-restricted content where the content URL is valid but access is restricted.
+    - Video with subtitles (nl language), including a skip_download test flag.
+
+- Quality/sources handling
+  - _QUALITIES defines five quality tiers: Lowest, Low, Medium, High, Highest, each mapping to a tuple of (abr, height, width).
+  - _real_extract(url) fetches video data from Lego's mediaplayer API:
+    - Uses the locale to determine the allowed country for geo-bypass and initializes geo restrictions via _initialize_geo_bypass.
+    - Calls the API at https://services.slingshot.lego.com/mediaplayer/v2 with videoId parameter composed as "<uuid(video_id)>_<locale>" and geo verification headers.
+    - If the API returns HTTP 451, raises a geo-restricted error.
+
+- Data extraction workflow
+  - From the API response, extracts:
+    - Video Id, Title (used as id and title), Description, Duration, Thumbnail (GeneratedCoverImage or GeneratedThumbnail),
+      AgeFrom, Season/SeasonTitle, Episode/Season/Episode numbers, and any subtitle data.
+  - Formats extraction:
+    - Iterates over item['VideoFormats'].
+    - For each format:
+      - If Format is F4M: uses _extract_f4m_formats to retrieve progressive/adaptive streaming formats.
+      - If Format is M3U8: uses _extract_m3u8_formats with m3u8_native.
+      - Otherwise: builds a direct format with:
+        - format_id: combination of Format and Quality
+        - quality: weight from _QUALITIES via Quality value
+        - url: direct media URL
+        - If a known quality mapping exists, adds abr (audio bitrate), height, and width.
+  - After accumulation, sorts formats with _sort_formats.
+
+- Subtitles
+  - If SubFileId exists and is not the all-zero value, constructs a subtitle URL using NetstoragePath, InvariantId, VideoFileId, locale, and VideoVersion, adding an SRT subtitle entry under the language code derived from the first two letters of the locale (e.g., 'nl').
+
+- Output structure
+  - Returns a dict containing:
+    - id: video_id (from Video.Id)
+    - title: video Title
+    - description: Video Description
+    - thumbnail: GeneratedCoverImage or GeneratedThumbnail
+    - duration: in seconds (from Length)
+    - formats: list of available formats
+    - subtitles: dict of subtitles by language
+    - age_limit: derived from AgeFrom
+    - season: SeasonTitle
+    - season_number: Season (as int if present)
+    - episode_number: Episode (as int if present)
+
+- Important implementation details
+  - The API request uses a pseudo-UUID for video_id: videoId = "<uuid(video_id)>_<locale>" to locate the item.
+  - Geo-restriction handling uses self.raise_geo_restricted with the country derived from the locale (e.g., en-US -> US).
+  - Supports multiple streaming formats (F4M, M3U8) as well as direct HTTP(s) URLs with quality-based metadata.
+  - Subtitles URL construction relies on several fields being present (NetstoragePath, InvariantId, VideoFileId, VideoVersion).
+
+- Overall functionality
+  - The extractor enables retrieving LEGO video metadata, multiple download formats, and optional subtitles while properly handling geo restrictions and locale-specific content delivery.

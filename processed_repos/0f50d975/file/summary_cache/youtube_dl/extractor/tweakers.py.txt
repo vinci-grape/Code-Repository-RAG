@@ -1,0 +1,56 @@
+- Purpose: Implement a YouTube-dl extractor (TweakersIE) for Tweakers video pages. It fetches video metadata and available video formats from Tweakers’ playlist JSON and returns a standard info dictionary.
+
+- Key class:
+  - TweakersIE (subclass of InfoExtractor)
+
+- URL matching:
+  - _VALID_URL = r'https?://tweakers\.net/video/(?P<id>\d+)'
+  - Extracts a numeric video_id from the URL via _match_id
+
+- Data source and processing:
+  - Downloads JSON metadata from:
+    https://tweakers.net/video/s1playlist/{video_id}/1920/1080/playlist.json
+  - Uses the first item in the 'items' array: video_data = ...['items'][0]
+
+- Main data extracted:
+  - title: video_data['title']
+  - description: video_data.get('description')
+  - thumbnail: video_data.get('poster')
+  - duration: int_or_none(video_data.get('duration'))
+  - uploader_id: video_data.get('account')
+  - id: video_id
+
+- Formats extraction:
+  - Iterates over video_data.get('locations', {}).get('progressive', []) to gather progressive streams
+  - For each location:
+    - format_id = location.get('label')
+    - width = int_or_none(location.get('width'))
+    - height = int_or_none(location.get('height'))
+  - For each source in location.get('sources', []):
+    - source_url = source.get('src')
+    - ext: determine via mimetype2ext(source.get('type')) or fallback to determine_ext(source_url)
+    - Appends a format dict with:
+      - 'format_id': format_id
+      - 'url': source_url
+      - 'width': width
+      - 'height': height
+      - 'ext': ext
+  - After collection, self._sort_formats(formats) is called to order formats sensibly
+
+- Helpers and robustness:
+  - int_or_none, determine_ext, mimetype2ext are used to robustly handle numeric fields and extensions
+  - Skips sources without a URL
+  - Handles missing width/height gracefully (None values)
+
+- Output:
+  - Returns a dict with:
+    - 'id': video_id
+    - 'title': title
+    - 'description': description
+    - 'thumbnail': poster URL
+    - 'duration': duration in seconds (if available)
+    - 'uploader_id': account id
+    - 'formats': list of collected formats
+
+- Test example:
+  - _TEST includes a sample Tweakers video URL, expected mp4 extension, and metadata fields such as id, title, description hash, thumbnail pattern, duration, and uploader_id.

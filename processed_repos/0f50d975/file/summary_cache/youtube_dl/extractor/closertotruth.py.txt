@@ -1,0 +1,43 @@
+concise summary of the code
+
+- Purpose:
+  - Implement a YouTube-DL extractor for closertotruth.com pages, handling both individual videos and interview playlists by leveraging Kaltura.
+
+- Main class:
+  - CloserToTruthIE(InfoExtractor)
+
+- URL matching:
+  - _VALID_URL matches closertotruth.com URLs (with or without www) and captures the trailing slug as id. It supports various sections like series, episodes, interviews.
+
+- Tests:
+  - _TESTS contains three scenarios:
+    1) A video page returning a single Kaltura entry with metadata (id, display_id, ext mov, title, upload_date, timestamp, uploader_id).
+    2) Another video page with similar metadata.
+    3) An interview page expected to yield a playlist with at least 2 items (playlist_mincount: 2).
+
+- Core extraction flow (_real_extract):
+  - display_id = _match_id(url): obtains the slug part from the URL using _VALID_URL.
+  - Downloads page HTML via _download_webpage(url, display_id).
+  - partner_id extraction: searches for a script src containing partner_id or p, capturing the numeric ID. This is used to build Kaltura URLs.
+  - title extraction: parses the page title tag with a regex to obtain the video title.
+  - Multi-version handling:
+    - Looks for a select element with id="select-version" to detect multiple versions/entries.
+    - If found, iterates over all option tags to collect unique entry_ids and their titles.
+    - Builds a list of URL_TRANSPARENT entries pointing to Kaltura: url 'kaltura:PARTNER_ID:ENTRY_ID', with ie_key 'Kaltura' and the corresponding title.
+    - If any entries exist, returns a playlist_result(entries, display_id, title), effectively creating a Kaltura-based playlist.
+  - Single entry handling:
+    - If no multi-version select exists, searches for a single Kaltura entry via an anchor with id="embed-kaltura" and data-kaltura="ENTRY_ID".
+    - Returns a single URL_TRANSPARENT to Kaltura with partner_id and entry_id, including the previously extracted title.
+
+- Media integration details:
+  - Uses Kaltura as the underlying media source:
+    - Entry URLs are formatted as 'kaltura:PARTNER_ID:ENTRY_ID'.
+    - Uses ie_key 'Kaltura' for downstream processing.
+
+- Important implementation details:
+  - Regular expressions extensively parse the HTML to locate partner_id, title, multiple entries, and a single Kaltura entry.
+  - The code handles both multi-entry pages (with a version select) and single-entry pages (embed-kaltura).
+  - The approach defers actual video extraction to the Kaltura extractor via url_transparent entries.
+  - Test settings include skip_download to avoid fetching media during tests.
+
+In short, this file defines an extractor for closertotruth.com that identifies either a playlist of Kaltura entries or a single Kaltura entry on a given page, builds the appropriate Kaltura URLs, and returns them for further processing.

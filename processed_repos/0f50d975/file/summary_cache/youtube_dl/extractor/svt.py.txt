@@ -1,0 +1,99 @@
+Here is a concise yet comprehensive overview of the code in ./youtube-dl/youtube_dl/extractor/svt.py.
+
+Overview
+- This module implements several Youtube-dl extractors for SVT (Swedish Television) content, including SVT’s main site, SVT Play, Öppet arkiv, and SVT article pages.
+- Core functionality is centered around extracting video formats, subtitles, and metadata (title, duration, timestamp, age restrictions, series/season/episode info) and handling geo-restrictions for Sweden.
+
+Key classes and their roles
+- SVTBaseIE (InfoExtractor)
+  - Shared extraction logic for SVT video data.
+  - _extract_video(video_info, video_id): Builds a list of formats from video_info['videoReferences'].
+    - Determines protocol and format type based on file extension (m3u8, f4m, mpd, or direct URLs).
+    - Handles live vs non-live m3u8 formats (entry_protocol varies).
+    - Supports mpd for dashhbbtv when available.
+    - Supports fallback for non-standard formats (direct URL with format_id).
+    - Geo restriction handling: if no formats and rights.geoBlockedSweden is true, raises a Sweden geo-restriction error.
+    - Subtitles: collects subtitleReferences, but skips m3u8-based subtitles (TODO for WebVTT in m3u8).
+    - Extracts metadata: title, series, season/episode details, duration, timestamp, age_limit (18 if children are blocked, else 0 or None), is_live.
+    - Returns a dict with id, title, formats, subtitles, duration, timestamp, age_limit, series, season_number, episode, episode_number, is_live.
+
+- SVTIE (SVT embedded widget extractor)
+  - _VALID_URL matches SVT widget embed URLs.
+  - _extract_url(webpage): Searches for an embedded SVT widget URL inside iframe or link tags.
+  - _real_extract(url): Fetches video data from SVT’s widget endpoint and delegates to SVTBaseIE._extract_video, then sets title from the page context.
+
+- SVTPlayBaseIE
+  - Base class for SVT Play related extractors with a shared SVT Play specific parsing regex:
+  - _SVTPLAY_RE is a regex that finds embedded JSON data in SVT Play pages (root["_svtplay"] style).
+
+- SVTPlayIE (SVT Play / Öppet arkiv)
+  - _VALID_URL matches multiple SVT Play / Öppet arkiv URL shapes (svtplay.se video pages, barnkanalen, opent arkiv, etc.).
+  - _TESTS cover common SVT Play URLs including an example with a live-like page and a downloaded video.
+  - _adjust_title(info): if the video is live, updates the title with a live-title format helper.
+  - _extract_by_video_id(video_id, webpage=None): 
+    - Fetches video metadata from https://api.svt.se/videoplayer-api/video/{video_id} with geo verification headers.
+    - Uses SVTBaseIE to extract core video data.
+    - Ensures a title exists: tries episode/series, then webpage title, else uses video_id.
+    - Applies _adjust_title and returns the info dict.
+  - _real_extract(url):
+    - Extracts video_id and svt_id (or modal_id) from the URL.
+    - If svt_id is present, uses _extract_by_video_id(svt_id, webpage) directly.
+    - Otherwise, downloads the page and parses embedded JSON (via _SVTPLAY_RE).
+    - If embedded data includes a VideoTitlePageStore video object, uses that for extraction; sets title and thumbnail from the page data.
+    - If not, tries to find svt_id via various regexes and then delegates to _extract_by_video_id.
+    - Returns a fully formed info dict via _extract_by_video_id.
+
+- SVTSeriesIE (SVT Play series)
+  - _VALID_URL matches SVT Play series pages, with optional season tab slug.
+  - _TESTS include a full series page and a seasonal subset page.
+  - suitable(url): only considered suitable if not SVTIE or SVTPlayIE (prevent overlaps); otherwise defers to parent behavior.
+  - _real_extract(url):
+    - Extract series_slug and optional season_id from the URL.
+    - Queries SVT’s GraphQL API (https://api.svt.se/contento/graphql) with a query to fetch listablesBySlug and associated content (productionPeriod, season).
+    - Constructs a list of video entries by iterating seasons and items, collecting videoSvtId values.
+    - Creates SVTPlayIE URL results for each video (svt:<videoSvtId>).
+    - Builds a playlist title from the series name and season name when available.
+    - Returns a playlist_result containing the list of entries, playlist id, title, and description.
+
+- SVTPageIE (SVT article/page collector)
+  - _VALID_URL matches SVT article-like pages.
+  - _TESTS include article URLs and expected id/title, plus playlist counts when multiple video items exist on the page.
+  - suitable(url): similar to other SVT extractors, excludes overlap with SVTIE and SVTPlayIE.
+  - _real_extract(url):
+    - Splits path and display_id from the URL.
+    - Fetches article metadata via https://api.svt.se/nss-api/page/{path} and picks the first content item.
+    - Scans article['media'] and article['structuredBody'] for VIDEOCLIP or VIDEOEPISODE entries; for each, constructs an SVT video id from content['image']['svtId'] and creates an SVTPlayIE result (svt:<svtId>).
+    - Returns a playlist_result with collected video entries, article id, and title.
+
+Important implementation details
+- Consistent use of helper utilities:
+  - dict_get, try_get for robust nested dict access.
+  - int_or_none, str_or_none, strip_or_none, unified_timestamp for normalizing metadata.
+  - determine_ext to branch logic on file extensions (m3u8, f4m, mpd, mp4/other).
+  - _download_json, _download_webpage, _parse_json, _og_search_title, _og_search_thumbnail for data acquisition and enrichment.
+- Geo restrictions:
+  - SVTBaseIE enforces Sweden geo-block when necessary and uses _GEO_COUNTRIES = ['SE'].
+  - Several extractors fetch geo-verification headers when calling SVT APIs.
+- Subtitle handling:
+  - Subtitles are collected from video_info['subtitles']['subtitleReferences'], with default language sv if not provided.
+  - WebVTT in m3u8 is currently skipped (not yet implemented).
+- Live content handling:
+  - is_live is detected from video_info['live']['simulcast'] (via dict_get).
+  - When live, the m3u8 protocol is adjusted (entry_protocol = 'm3u8').
+  - Live titles may be adjusted via _live_title, invoked in SVTPlayIE._adjust_title.
+- Class relationships:
+  - SVTBaseIE provides core video extraction.
+  - SVTIE handles embedded SVT widgets.
+  - SVTPlayIE handles SVT Play and Öppet arkiv integration, including fallbacks to embedded JSON data stores.
+  - SVTPlayBaseIE provides shared SVT Play data parsing support.
+  - SVTSeriesIE builds playlists from a series by querying SVT’s GraphQL API.
+  - SVTPageIE aggregates video entries from SVT article pages using nss-api endpoint.
+- URL matching and suitability:
+  - Each extractor defines a specific _VALID_URL; care is taken to avoid overlap via suitable() implementations (e.g., SVTSeriesIE.suitable excludes SVTIE and SVTPlayIE).
+
+Main data structure produced
+- A typical video info dict includes:
+  - id, title, formats (list of dictionaries with url, format_id, protocol/quality, etc.), subtitles, duration, timestamp, age_limit, series, season_number, episode, episode_number, is_live, thumbnail (where applicable).
+
+Overall purpose
+- This file enables youtube-dl (and derivatives) to fetch SVT content across various SVT platforms (SVT site, SVT Play, Öppet arkiv, and SVT article pages), extract robust media formats and metadata, enforce regional restrictions, and present consistent, pluggable info dictionaries for downloading.

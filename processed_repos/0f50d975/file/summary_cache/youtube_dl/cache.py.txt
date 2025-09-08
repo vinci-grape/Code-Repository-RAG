@@ -1,0 +1,85 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/cache.py
+
+Purpose
+- Provides a lightweight file-based cache mechanism for youtube-dl results.
+- Stores data in JSON files under a cache directory (default location derived from XDG_CACHE_HOME or a configured cachedir).
+
+Key concepts
+- Cache is organized by sections and keys, with a per-file layout: <root>/<section>/<escaped_key>.<dtype>
+- Each cache file stores a JSON object with:
+  - a version field named youtube-dl_version (constant _VERSION_KEY)
+  - a data field containing the cached value
+
+Main class
+- Cache: central class implementing caching behavior
+  - __init__(self, ydl): stores a reference to the youtube-dl object (used for logging and parameter access)
+
+Internal helpers and attributes
+- _YTDL_DIR = 'youtube-dl'
+- _VERSION_KEY = 'youtube-dl_version'
+- _DEFAULT_VERSION = '2021.12.17'
+- _get_param(k, default=None): convenience to read ydl.params
+- _get_root_dir(self): determines the root cache directory
+  - Uses the cachedir param if provided
+  - Otherwise falls back to XDG_CACHE_HOME or '~/.cache', then appends 'youtube-dl'
+  - Returns a normalized, expanded path
+- _get_cache_fn(self, section, key, dtype): builds the per-cache-file path
+  - Validates section with regex /^[\w.-]+$/
+  - Encodes key with RFC3986 escaping, then replaces '%' with ','
+  - Resulting path: <root>/<section>/<key>.<dtype>
+- enabled property: returns False only if cachedir param is explicitly False
+- _write_debug, _report_warning, _to_screen: delegate to corresponding ydl methods for logging and user messages
+
+Core operations
+- store(self, section, key, data, dtype='json')
+  - Supported dtype: 'json'
+  - If caching is disabled, no-op
+  - Creates necessary directories and writes a JSON file containing { 'youtube-dl_version': __version__, 'data': data }
+  - Logs debug messages and handles errors by emitting a warning (including traceback)
+- load(self, section, key, dtype='json', default=None, **kw_min_ver)
+  - Supports min_ver via keyword arg (min_ver)
+  - If caching is disabled, returns default
+  - Attempts to read and parse the cache file, then validates version via _validate
+  - _validate handles backward compatibility when version is missing and enforces min_ver
+  - If cache is missing or invalid, returns default and emits warnings
+- clear(self, section, key, dtype='json')
+  - If caching is disabled, no-op
+  - Deletes the cache file if present
+  - Ignores ENOENT (file not found); otherwise emits a warning with a traceback
+- _validate(self, data, min_ver)
+  - Reads version from the cached data (data[ _VERSION_KEY ])
+  - Backward compatibility: if version is absent, wraps raw data into {'data': data} and assigns a default version
+  - Uses is_outdated_version(version, min_ver or '0', assume_new=False) to decide freshness
+  - If fresh, returns the inner data (data['data']); otherwise logs a debug message about discarding old cache
+
+- remove(self)
+  - If caching is disabled, prints a message explaining the situation and returns
+  - Performs a safety check on the cache root to ensure it resembles a cache directory (must contain 'cache' or 'tmp')
+  - Communicates progress to the user via to_screen
+  - If the directory exists, removes it with shutil.rmtree
+
+Important implementation details
+- Path and encoding handling
+  - Keys are RFC3986-escaped and non-ascii characters are encoded by replacing '%' with ',' after escaping
+  - Section names must be alphanumeric with dots or dashes
+- Versioning and cache invalidation
+  - Each cache file stores the youtube-dl version at write time
+  - When loading, the code checks if the cached version is outdated compared to a provided min_ver
+  - If no version is present (older caches), it treats as compatible with a DEFAULT_VERSION for backward compatibility
+- Data format
+  - Cache file contents are JSON: { "youtube-dl_version": "<version>", "data": <cached_value> }
+  - load() returns the raw data portion after passing through _validate
+- Error handling
+  - Writing and loading errors are logged via warning messages, with tracebacks included for debugging
+  - When a file is missing during load, it simply returns default (no crash)
+- Removal safety
+  - remove() includes a safety check to avoid accidentally deleting non-cache directories
+  - Provides user feedback during the removal process
+
+Usage integration notes
+- enabled depends on the cachedir parameter; if set to False, all cache operations are effectively disabled
+- Caching is targeted per section/key with a specific dtype (currently only 'json' is supported)
+- The class relies on the host’s ydl object for logging, user messaging, and parameter access, ensuring consistent UX with the rest of youtube-dl
+
+Overall
+- This module provides a robust, version-aware cache mechanism for storing and retrieving small structured results, with thoughtful handling of backward compatibility, path handling, and user feedback. It emphasizes safety (in remove), clear logging, and graceful degradation when caches are unavailable or invalid.

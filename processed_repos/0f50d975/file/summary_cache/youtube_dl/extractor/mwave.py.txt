@@ -1,0 +1,74 @@
+Here is a concise, high-level summary of the code in youtube-dl/youtube_dl/extractor/mwave.py:
+
+Main purpose
+- Implement two extractors for the Mwave site (Interest.me):
+  - MwaveIE: extracts video details from standard Mwave video detail pages and builds available formats from CDN-provided F4M manifests.
+  - MwaveMeetGreetIE: extracts meet-and-greet video pages by locating an embedded clip and delegating extraction to MwaveIE.
+
+Key classes and functionality
+
+1) MwaveIE (main video extractor)
+- URL pattern (_VALID_URL):
+  - Matches URLs like http(s)://mwave.interest.me/(optional path)/mnettv/videodetail.m?searchVideoDetailVO.clip_id=<digits>.
+- URL template (_URL_TEMPLATE):
+  - http://mwave.interest.me/mnettv/videodetail.m?searchVideoDetailVO.clip_id=%s
+  - Used to construct a downstream clip URL when needed (e.g., via Meet&Greet flow).
+- _real_extract flow:
+  - Extracts video_id from the URL.
+  - Downloads vod_info JSON from:
+    - http://mwave.interest.me/onair/vod_info.m?vodtype=CL&sectorid=&endinfo=Y&id=<video_id>
+  - Iterates over vod_info['cdn'] entries:
+    - For each CDN item, obtain stream_url (CDN JSON endpoint).
+    - Download the CDN’s F4M stream JSON from stream_url.
+    - Get f4m_url from the JSON's 'fileurl'.
+    - If present, fetch formats using _extract_f4m_formats(f4m_url + '&hdcore=3.0.3', video_id, f4m_id=stream_name).
+      - stream_name is taken from CDN 'name' or fallbacks to the numeric index.
+  - Sorts the collected formats with _sort_formats.
+- Output metadata:
+  - id: video_id
+  - title: vod_info['title']
+  - thumbnail: vod_info.get('cover')
+  - uploader: vod_info.get('program_title')
+  - duration: parse_duration(vod_info.get('time'))
+  - view_count: int_or_none(vod_info.get('hit'))
+  - formats: list of extracted formats
+- Implementation notes:
+  - Uses int_or_none to safely parse numeric fields.
+  - Uses parse_duration to convert time strings to seconds.
+  - Fetches and processes multiple F4M manifests (one per CDN entry) to accumulate all available formats.
+  - Appends hdcore=3.0.3 to F4M URL for compatibility.
+
+2) MwaveMeetGreetIE (meet-and-greet pages)
+- URL pattern (_VALID_URL):
+  - Matches URLs like http(s)://mwave.interest.me/(optional path)/meetgreet/view/<id>
+- _real_extract flow:
+  - Extracts video_id from the URL (the numeric path segment after meetgreet/view/).
+  - Downloads the page HTML.
+  - Searches for an iframe with src containing /mnettv/ifr_clip.m?searchVideoDetailVO.clip_id=<digits>, capturing clip_id.
+  - Builds a direct Mwave video detail URL using MwaveIE._URL_TEMPLATE and the captured clip_id.
+  - Returns a URL result pointing to that constructed URL with IE named 'Mwave' and the clip_id as the video ID.
+- Output behavior:
+  - Delegates actual extraction to MwaveIE by returning the URL result of the constructed clip URL, effectively reusing the main extractor’s logic.
+- Tests illustrate the mapping from a meet-greet page to the underlying Mwave video detail.
+
+Test coverage notes
+- MwaveIE _TESTS include an example URL with clip_id and expected information such as id, ext, title, thumbnail pattern, uploader, duration, and view_count as an int-like value.
+- MwaveMeetGreetIE _TESTS include a meetgreet page and an “only_matching” variant for a non-default language path.
+
+Important implementation details
+- Uses youtube-dl’s standard helpers:
+  - _download_json for JSON endpoints
+  - _download_webpage for HTML pages
+  - _html_search_regex for extracting embedded IDs
+  - _extract_f4m_formats to parse F4M manifests
+  - _sort_formats to order the formats
+  - url_result to delegate extraction to another extractor
+- Data handling:
+  - duration parsed via parse_duration from vod_info['time']
+  - view_count parsed via int_or_none from vod_info['hit']
+- Robustness considerations:
+  - Skips entries without a stream URL or without a valid f4m file URL.
+  - Handles multiple CDN entries to accumulate all formats.
+  - The two-test setup demonstrates both direct video pages and media accessed through an iframe/meet-greet flow.
+
+In short, MwaveIE fetches and parses Mwave video data by querying a vod_info endpoint, collecting per-CDN F4M manifests to build a complete format list, and returning standard metadata. MwaveMeetGreetIE simply locates the underlying clip on a meet-and-greet page and reuses MwaveIE to perform the actual extraction.

@@ -1,0 +1,58 @@
+Here’s a concise, structured summary of the code in ./youtube-dl/youtube_dl/extractor/presstv.py.
+
+Overview
+- Implements a YouTube-DL extractor for PressTV video pages.
+- Subclasses InfoExtractor and provides logic to locate video formats and metadata from a PressTV detail page.
+
+Key components
+- Class: PressTVIE(InfoExtractor)
+- URL pattern (_VALID_URL): 
+  - Matches URLs like http(s)://www.presstv.ir/Detail/YYYY/MM/DD/{id}/[optional-display-id]
+  - Captures:
+    - y: year
+    - m: month
+    - d: day
+    - id: video id
+    - display_id: optional slug after id
+- Test data (_TEST): Demonstrates extraction for a sample PressTV URL, including expected id, display_id, extension, title, upload_date, thumbnail, and description.
+
+Main extraction flow (_real_extract)
+- URL parsing:
+  - Uses the _VALID_URL regex to extract video_id (from id) and display_id (or falls back to video_id).
+- Webpage retrieval:
+  - Downloads the page with _download_webpage(url, display_id).
+- Video URL extraction:
+  - Retrieves the real video URL from a hidden input named inpPlayback via _hidden_inputs(webpage)['inpPlayback'].
+- Formats construction:
+  - Base playback URL: http://192.99.219.222:82/presstv
+  - Source patterns are defined as _formats with pairs of (height, extension):
+    - (180, '_low200.mp4')
+    - (360, '_low400.mp4')
+    - (720, '_low800.mp4')
+    - (1080, '.mp4')
+  - Each format URL is built as base_url + video_url_without_last_4_chars + extension (video_url[:-4] removes the trailing .mp4 before appending the new suffix).
+  - Resulting formats have:
+    - url: composed URL
+    - format_id: e.g., "180p", "360p", "720p", "1080p"
+    - height: numeric height (180, 360, 720, 1080)
+- Metadata extraction:
+  - Title: from HTML meta tag using _html_search_meta('title', ...) and stripping a leading 'PressTV-' with remove_start.
+  - Thumbnail: via _og_search_thumbnail(webpage)
+  - Description: via _og_search_description(webpage)
+  - Upload date: constructed from URL components y,m,d into YYYYMMDD
+- Return dictionary:
+  - id: video_id
+  - display_id: display_id (or video_id if missing)
+  - title: extracted and cleaned title
+  - formats: list of constructed formats
+  - thumbnail: extracted thumbnail URL
+  - upload_date: formatted upload date
+  - description: extracted OpenGraph description
+
+Important implementation details
+- Uses remove_start to clean the title prefix 'PressTV-'.
+- Relies on a specific playback mechanism described in playback.js on PressTV (hence the hard-coded base URL and format suffixes).
+- The display_id is optional in the URL; if absent, video_id is used as display_id.
+- The code does not perform any MD5-based validation itself; the _TEST includes an md5 for the result (as per the test framework).
+
+In short, PressTVIE parses a PressTV detail page, fetches a hidden playback URL, builds multiple video formats from a base server by adjusting the file suffix, and extracts title, thumbnail, description, and upload date to return a structured video entry.

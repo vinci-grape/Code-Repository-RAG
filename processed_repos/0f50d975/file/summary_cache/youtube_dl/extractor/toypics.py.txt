@@ -1,0 +1,48 @@
+- Purpose: This file defines two extractors for the Toypics site used by youtube-dl:
+  - ToypicsIE: extracts information and formats for a single Toypics video.
+  - ToypicsUserIE: builds a playlist of videos from a Toypics user profile.
+
+- ToypicsIE (single video extractor)
+  - Class: ToypicsIE, inherits from InfoExtractor.
+  - URL pattern: _VALID_URL = https?://videos.toypics.net/view/(?P<id>[0-9]+)
+  - Test data: includes a sample video id, expected mp4 format, title, uploader, and age limit (18).
+  - _real_extract workflow:
+    - Extract video_id from URL using _match_id.
+    - Download the video page HTML with _download_webpage.
+    - Extract HTML5 video formats via _parse_html5_media_entries and take the first entry's 'formats'.
+    - Determine title using two regex options:
+      - <h1 class="view-video-title"...>...</h1>
+      - <title>... - Toypics</title>
+    - Optional uploader extraction via regex "More videos from <strong>Uploader</strong>" (fatal=False).
+    - Return a dict with:
+      - id, formats, title, uploader (may be None), age_limit = 18.
+
+- ToypicsUserIE (user profile/playlist extractor)
+  - Class: ToypicsUserIE, inherits from InfoExtractor.
+  - URL pattern: _VALID_URL = https?://videos.toypics.net/(?!view)(?P<id>[^/?#&]+)
+  - Test data: a user 'Mikey' with at least 19 videos expected (playlist_mincount).
+  - _real_extract workflow:
+    - Extract username from URL via _match_id.
+    - Download the profile page HTML.
+    - Parse total public video count with regex 'Public Videos ([0-9]+)'.
+    - Page handling: PAGE_SIZE = 8. Compute page_count as (video_count + PAGE_SIZE + 1) // PAGE_SIZE (note: this formula can over-count by 1 in some cases).
+    - For each page number from 1 to page_count:
+      - Build per-page URL: url + '/public/%d' % n
+      - Download that page and collect all video page URLs by regex matching anchors to view pages:
+        <div class... class="preview"...> <a href="https://videos.toypics.net/view/....">
+      - Accumulate all found video URLs.
+    - Return a playlist dictionary:
+      - _type: 'playlist'
+      - id: username
+      - entries: a list of dicts, each with:
+        - _type: 'url'
+        - url: the video page URL
+        - ie_key: 'Toypics' (so the ToypicsIE will handle extraction)
+
+- Key implementation details
+  - Uses _parse_html5_media_entries to derive available video formats from the page.
+  - Title extraction robust to two common title formats on Toypics pages.
+  - Uploader is optionally captured for the video page.
+  - ToypicsUserIE aggregates per-page links by scanning for preview blocks and collecting view URLs, constructing a playlist of video pages to be processed by ToypicsIE.
+  - Age restriction is set to 18 for videos.
+  - Potential minor issue: page_count calculation in ToypicsUserIE may over-count pages in some cases due to the chosen formula.

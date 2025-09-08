@@ -1,0 +1,85 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/gamespot.py
+
+Overview
+- Implements a YouTube-DL extractor for GameSpot video/content pages.
+- Class GameSpotIE inherits from OnceIE and parses the data-video JSON embedded in the page to obtain streaming formats (HLS and DASH) and metadata.
+
+Key components
+- _VALID_URL
+  - Regular expression matching GameSpot URLs for videos, articles, and reviews, including embedded URLs.
+  - Pattern captures an id segment used as the page/display id.
+
+- _TESTS
+  - Contains test cases for typical video pages, including:
+    - mp4 results with id, title, and description.
+    - an embed URL (only_matching).
+    - article/review pages (only_matching).
+  - Includes a skip note for a 404 manifest case in one test.
+
+- _real_extract(self, url)
+  Main extraction workflow:
+  1. page_id = self._match_id(url)
+     - Derives a display id from the URL using the _VALID_URL pattern.
+
+  2. webpage = self._download_webpage(url, page_id)
+
+  3. data_video = self._parse_json(self._html_search_regex(r'data-video=(["\'])({.*?})\1', webpage, 'video data', group=2), page_id)
+     - Locates a data-video attribute containing JSON, and parses it into a dict.
+     - Uses the captured group 2 (the JSON object).
+
+  4. title = compat_urllib_parse_unquote(data_video['title'])
+     - Decodes URL-encoded title.
+
+  5. streams = data_video['videoStreams']
+     - Retrieves streaming information.
+
+  6. formats = []
+     - Collects all available video formats.
+
+  7. HLS/adaptive streaming
+     - m3u8_url = streams.get('adaptive_stream')
+     - If present, extract HLS formats via self._extract_m3u8_formats(m3u8_url, page_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+     - For each HLS format:
+       - Append the original format to formats.
+       - Create an HTTP fallback variant (http_f) by:
+         - Copying the format, removing 'manifest_url'
+         - Replacing 'hls-' with 'http-' in format_id
+         - Setting protocol to 'http'
+         - Replacing '.m3u8' with '.mp4' in the URL
+       - Append http_f to formats
+     - This provides both native HLS and corresponding HTTP MP4 URLs if available.
+
+  8. DASH/adaptive streaming
+     - mpd_url = streams.get('adaptive_dash')
+     - If present, extend formats with self._extract_mpd_formats(mpd_url, page_id, mpd_id='dash', fatal=False)
+
+  9. self._sort_formats(formats)
+     - Normalizes and sorts the formats by preference.
+
+  10. Return metadata dictionary:
+      - id: data_video.get('guid') or page_id
+      - display_id: page_id
+      - title: title
+      - formats: formats
+      - description: self._html_search_meta('description', webpage)
+      - thumbnail: self._og_search_thumbnail(webpage)
+
+Important implementation details
+- Data source: Relies on a JSON object inside the page’s data-video attribute. This JSON provides the video title and a videoStreams dictionary with URLs for adaptive technologies.
+- Formats handling:
+  - Supports both HLS (adaptive_stream) and DASH (adaptive_dash).
+  - For HLS, it creates both the native m3u8-based formats and HTTP MP4 fallbacks by transforming URLs and IDs. This improves compatibility across players and environments.
+  - For DASH, uses the standard MPD parsing via _extract_mpd_formats.
+- Robustness:
+  - fatal=False is used for both HLS and DASH extraction to avoid failing extraction if a particular manifest is missing.
+  - Title decoding handles URL-encoded characters.
+- Metadata extraction:
+  - Description is taken from the page’s meta description.
+  - Thumbnail is pulled via OpenGraph if available.
+
+What it does not do
+- It does not require any special login/auth.
+- It does not attempt to extract non-video data beyond what is provided in data-video (e.g., it is tailored to GameSpot video resources embedded in pages).
+
+In short
+GameSpotIE is a specialized YouTube-DL extractor that parses the data-video JSON on GameSpot pages to retrieve video metadata and streaming formats (HLS and DASH), generating both native and HTTP fallback formats, sorts them, and returns a structured result containing id, title, description, thumbnail, and available formats.

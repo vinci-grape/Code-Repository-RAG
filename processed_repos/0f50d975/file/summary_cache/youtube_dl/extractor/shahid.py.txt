@@ -1,0 +1,55 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/shahid.py
+
+- Purpose
+  - Implement YouTube-DL extractors for Shahid (MBC Shahid) content: individual videos (ShahidIE) and shows/series playlists (ShahidShowIE).
+
+- Base and shared utilities
+  - ShahidBaseIE inherits from AWSIE and provides common AWS proxy interaction.
+  - Uses _AWS_PROXY_HOST and _AWS_API_KEY with a private _call_api wrapper to fetch data via the Shahid proxy API (/proxy/v2/ path).
+  - _handle_error reads JSON error payload from HTTP errors and raises user-friendly ExtractorError messages from fault.userMessage.
+
+- Core API interaction
+  - _call_api(path, video_id, request=None): Calls AWS proxy API for given path, optionally sending a request payload as JSON under the "request" parameter. On HTTP errors, invokes _handle_error for clearer messages.
+  - The API call uses hard-coded AWS access/secret keys (as part of the implementation).
+
+- ShahidIE (single video extractor)
+  - URL pattern: matches /shows|series|movies ... (episode|clip|movie)-<id>.
+  - _real_initialize: Attempts login if credentials are provided (via _get_login_info). If login succeeds, stores user data and calls populateContext to initialize a user session. This enables access to subscriber-protected features.
+  - DRM handling: If playout indicates DRM, raises ExtractorError with expected=True.
+  - Playout retrieval: playout = _call_api('playout/new/url/' + video_id)['playout'].
+  - Formats: Extracts M3U8 formats from playout['url'], cleaning AWS manifestfilter parameters. Uses _extract_m3u8_formats, then _sort_formats.
+  - Metadata retrieval: Calls http://api.shahid.net/api/v1_1/<type>/<video_id> with apiKey and hash to fetch data for the video. Handles data['error'] if present.
+  - Returned information: id, title, description, thumbnail, duration, timestamp, categories (genres), series/show, season/season_number/season_id, episode_number, episode_id, and formats.
+
+- ShahidShowIE (show/series playlist extractor)
+  - URL pattern: matches /shows|series/…/(show|series)-<id>.
+  - _real_extract:
+    - Fetches productModel via _call_api('playableAsset', show_id, {'showId': show_id}).
+    - Extracts playlist metadata and playlist_id.
+    - Defines page_func(page_num) to fetch paged playlists via _call_api('product/playlist', show_id, {...}).
+      - Iterates over products in the playlist, yields individual video URLs with url_result as Shahid items (type 'Shahid').
+    - Uses InAdvancePagedList to paginate results: total pages = ceil(playlist['count'] / PAGE_SIZE).
+    - Returns a playlist result with show_id, title, and description.
+  - PAGE_SIZE constant = 30.
+
+- Important implementation details
+  - URL handling and matching:
+    - ShahidBaseIE._VALID_URL_BASE defines base domain and path, while ShahidIE and ShahidShowIE extend it with specific patterns for video and show content.
+  - Language and localization: Tests include AR and EN URLs; extractor can handle multilingual paths.
+  - DRM and access control: Videos can be DRM-protected; such videos are explicitly rejected.
+  - M3U8 format handling: Strips AWS manifestfilter query parameters from the playout URL before extracting formats.
+  - Metadata enrichment: Besides formats, metadata is assembled from Shahid API data (title, description, thumbnail, duration, timestamp, categories, series/season/episode data).
+  - Error handling: If API returns an error structure, an ExtractorError is raised with a combined error message.
+  - Login flow: If user credentials are provided, performs a login to Shahid, then populates user context for subsequent requests; handles login errors gracefully.
+  - Data structure choices:
+    - Categories extracted from video['genres'] names.
+    - Timestamps parsed with parse_iso8601; duration via int_or_none.
+    - Optional fields (series, season, episode info) are guarded with str_or_none/int_or_none.
+
+- Tests and usage hints
+  - ShahidIE test case includes a sample clip with expected id, title, timestamp, duration, categories, etc., with skip_download for m3u8 access.
+  - ShahidShowIE test case demonstrates playlist extraction and that the extractor can produce a list of video entries within a show.
+
+- Summary of main flow
+  - ShahidIE: optionally authenticate > fetch playout URL via AWS proxy > obtain and parse M3U8 formats > fetch detailed video metadata from Shahid API > assemble final info dict.
+  - ShahidShowIE: fetch show product model > iterate through paginated playlist items via API, yielding individual video URLs as Shahid items, aggregated into a playlist result.

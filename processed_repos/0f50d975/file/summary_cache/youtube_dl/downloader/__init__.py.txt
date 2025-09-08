@@ -1,0 +1,41 @@
+- Purpose: Determine and return the most suitable downloader class to fetch a video given an info_dict describing the media. It selects based on protocol, live status, and user preferences, with support for an external downloader.
+
+- Public API:
+  - get_suitable_downloader(info_dict, params={}) 
+    - Augments info_dict with protocol via determine_protocol(info_dict).
+    - Passes a copy of the dict to the internal selector _get_suitable_downloader and returns the chosen downloader.
+
+- Internal logic (_get_suitable_downloader):
+  - External downloader support:
+    - If params['external_downloader'] is provided, obtain it via get_external_downloader.
+    - If the external downloader can_download(info_dict), return it.
+    - If the external downloader is rejected and there are external_downloader_args, clear them to avoid passing unwanted args.
+  - Protocol-based selection:
+    - protocol = info_dict['protocol'].
+    - If protocol starts with 'm3u8' and info_dict['is_live'] is true, return FFmpegFD.
+    - If protocol == 'm3u8' and params.get('hls_prefer_native') is True, return HlsFD.
+    - If protocol == 'm3u8_native' and params.get('hls_prefer_native') is False, return FFmpegFD.
+    - Otherwise, fall back to PROTOCOL_MAP.get(protocol, HttpFD).
+
+- Protocol mapping (PROTOCOL_MAP):
+  - 'rtmp' -> RtmpFD
+  - 'm3u8_native' -> HlsFD
+  - 'm3u8' -> FFmpegFD
+  - 'mms' -> RtspFD
+  - 'rtsp' -> RtspFD
+  - 'f4m' -> F4mFD
+  - 'http_dash_segments' -> DashSegmentsFD
+  - 'ism' -> IsmFD
+  - 'niconico_dmc' -> NiconicoDmcFD
+
+- Key implementation details:
+  - The code assigns info_dict['protocol'] using determine_protocol(info_dict) before selection.
+  - The external downloader path takes precedence if it can handle the media.
+  - HLS/native handling allows user preference (hls_prefer_native) to override default behavior for m3u8-related protocols.
+  - If no specific handling matches, it uses the mapping table, defaulting to HttpFD when the protocol is unknown.
+
+- Exports:
+  - __all__ = ['get_suitable_downloader', 'FileDownloader']
+
+- Dependencies:
+  - Imports multiple downloader classes: FileDownloader, DashSegmentsFD, F4mFD, HlsFD, HttpFD, RtmpFD, RtspFD, IsmFD, NiconicoDmcFD, and FFmpegFD via get_external_downloader.

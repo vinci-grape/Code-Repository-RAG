@@ -1,0 +1,56 @@
+concisely summarizing the code in ./youtube-dl/youtube_dl/extractor/hellporno.py
+
+- Purpose
+  - Implements a YouTube-DL extractor (HellPornoIE) for video pages on hellporno.com and hellporno.net.
+
+- Class and inheritance
+  - HellPornoIE extends InfoExtractor, following the standard extractor pattern used by youtube-dl.
+
+- URL matching (_VALID_URL)
+  - Matches URLs of the form:
+    - http(s)://www.hellporno.com/videos/<id> or
+    - http(s)://www.hellporno.net/v/<id>
+  - Captures the page-specific id segment as the extractor id.
+
+- Tests (_TESTS)
+  - Test 1:
+    - URL: http://hellporno.com/videos/dixie-is-posing-with-naked-ass-very-erotic/
+    - Checks final info dict against expected values (including id, display_id, ext, title, description, categories, thumbnail, duration, timestamp, upload_date, view_count, age_limit) and an expected MD5 for the video.
+  - Test 2:
+    - URL: http://hellporno.net/v/186271/
+    - only_matching: True (ensures the URL is recognized, but not a full test here).
+
+- Core extraction flow (_real_extract)
+  - Determine display_id from the URL.
+  - Download the page HTML.
+  - Extract and clean the title from the page title tag, removing a trailing ' - Hell Porno'.
+  - Parse HTML5 video entries to obtain the initial video information (formats, etc.) via _parse_html5_media_entries and take the first entry.
+  - Normalize/sort the video formats with _sort_formats.
+  - Obtain the actual video id (video_id) by attempting:
+    - chs_object = "<digits>" or
+    - params["video_id"] = "<digits>"
+    - If not found, default to display_id.
+  - Optional description extracted from a specific desc_video_view_v2 block.
+  - Categories derived from the keywords meta tag (split by commas, stripped, and filtered).
+  - duration: from OpenGraph property video:duration if present.
+  - timestamp: from OpenGraph property video:release_date, converted to epoch with unified_timestamp.
+  - view_count: extracted via a regex looking for a “Views <number>” pattern.
+  - age_limit: hardcoded to 18.
+
+- Returned metadata
+  - Merges the parsed HTML5 info (which includes formats) with the additional fields:
+    - id, display_id, title, description, categories, duration, timestamp, view_count, age_limit
+  - Note: The final id overrides any id found in the HTML5 entry with the video_id derived earlier.
+
+- Important implementation details
+  - Uses common helper utilities:
+    - int_or_none for safe integer parsing
+    - merge_dicts to combine dicts
+    - remove_end to trim trailing strings from the title
+    - unified_timestamp to convert OpenGraph timestamps
+  - Embraces the standard approach for video-host extractors: parse HTML5 video entries for formats, then enrich with page-specific metadata.
+  - Robust video_id extraction with fallback to display_id if patterns aren’t found.
+  - Fatal flags on optional fields (description, duration, timestamp, view_count) are set to False where appropriate to avoid extractor crashes if data is missing.
+  - Categories come from the page’s keywords meta tag, ensuring flexible tagging even if on-page keywords change.
+
+Overall, HellPornoIE retrieves video formats via HTML5 video entries and augments them with metadata such as title, description, categories, duration, timestamp, view count, and age rating, using several fallback strategies to handle variations in page content.

@@ -1,0 +1,63 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/ivideon.py
+
+- Purpose
+  - Implement an InfoExtractor for Ivideon TV camera pages on ivideon.com, extracting live stream formats and metadata.
+
+- Main class
+  - IvideonIE(InfoExtractor)
+  - IE_NAME: 'ivideon'
+  - IE_DESC: 'Ivideon TV'
+  - _VALID_URL: Regex matching Ivideon TV camera pages and capturing:
+    - id: server/camera part like "100-916ca13b5c4ad9f564266424a026386d"
+    - camera_id: numeric camera identifier
+  - _TESTS: Several tests validating basic extraction, including a fully resolved test with title pattern, description, and is_live flag. Second/third tests ensure URL matching works for other variants.
+
+- Quality levels
+  - _QUALITIES = ('low', 'mid', 'hi')
+  - Used to generate multiple formats and order them via _sort_formats.
+
+- Core extraction (_real_extract)
+  - Parse URL with _VALID_URL to obtain server_id and camera_id.
+  - Build a camera page URL: /tv/camera/{server_id}/{camera_id}/
+  - Try to download the camera page with _download_webpage(..., fatal=False). If the page exists:
+    - Look for embedded JS config object via regex: var config = ({...});
+    - Parse the JSON config and try to read currentCameraInfo from ivTvAppOptions.
+    - If found, extract:
+      - camera_name from currentCameraInfo.camera_name
+      - description from currentCameraInfo.misc.description
+    - If camera_name is still missing, fall back to:
+      - HTML meta name content, or
+      - Text inside an h1 with class b-video-title
+  - Determine title as _live_title(camera_name or server_id). This provides a sensible default when the name isn’t available.
+  - Build streaming formats (three in total, one per quality level):
+    - URL: https://streaming.ivideon.com/flv/live?{server, camera, sessionId=demo, q=quality}
+      - server: server_id
+      - camera: camera_id
+      - sessionId: fixed "demo"
+      - q: mapped quality string (low/mid/hi) via quality(format_id)
+    - format_id: 'low', 'mid', 'hi'
+    - ext: 'flv'
+    - quality: numeric/ordinal value from quality(format_id)
+  - Sort formats with _sort_formats(formats)
+  - Return a dict with:
+    - 'id': server_id
+    - 'title': title (from camera name or server_id)
+    - 'description': description (may be None if not found)
+    - 'is_live': True
+    - 'formats': formats
+
+- Implementation details
+  - Uses compatibility helpers: compat_urllib_parse_urlencode for query string, compat_urlparse.urljoin for URL construction.
+  - Uses _search_regex and _parse_json to extract a JSON-like config embedded in page source.
+  - Robust fallbacks for missing metadata (meta tag or h1 title) to still provide a reasonable title.
+  - The live stream uses FLV format with a demo session; designed for Ivideon live streams.
+
+- Output format
+  - Returns a standard youtube-dl info dictionary for live streams:
+    - id (server_id)
+    - title
+    - description (optional)
+    - is_live (True)
+    - formats (list of dictionaries with url, format_id, ext, and quality)
+
+In short, this extractor discovers Ivideon live camera streams by parsing a camera page for configuration data, falls back to HTML metadata when needed, builds three FLV live stream formats (low/mid/hi), and returns the typical youtube-dl info dict for a live video.

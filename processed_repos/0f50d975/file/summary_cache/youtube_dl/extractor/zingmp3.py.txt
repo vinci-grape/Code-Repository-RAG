@@ -1,0 +1,77 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/zingmp3.py
+
+Overview
+- Implements a YouTube-DL extractor for Zing MP3 (mp3.zing.vn and zingmp3.vn).
+- Supports extracting single tracks, video clips, and albums/playlists.
+- Handles audio formats (mp3) and video formats (mp4, HLS) with proper metadata, subtitles, and geo-restrictions.
+
+Key classes
+- ZingMp3BaseIE (InfoExtractor)
+  - Core shared logic for parsing items returned by Zing MP3 endpoints.
+  - _VALID_URL_TMPL defines URL pattern used by derived IEs.
+  - _GEO_COUNTRIES = ['VN'] to enforce geo-restriction handling.
+  - _extract_item(item, fatal): builds a media entry (formats, metadata) from a single item.
+  - _real_extract(url): orchestrates fetching the page, locating data-xml path, loading JSON data, and delegating to _process_data.
+- ZingMp3IE (extends ZingMp3BaseIE)
+  - _VALID_URL targets track and video clip pages: 'bai-hat|video-clip'.
+  - _process_data(data): returns _extract_item(data, True).
+  - Provides typical track/video extraction test cases.
+- ZingMp3AlbumIE (extends ZingMp3BaseIE)
+  - _VALID_URL targets album/playlist pages: 'album|playlist'.
+  - _process_data(data): builds a playlist by iterating data['items'] and collecting entries via _extract_item; uses data['info'] for playlist id and title.
+  - Returns a playlist_result with id and title.
+
+Main functionality and data flow
+- _real_extract in ZingMp3BaseIE:
+  - Extracts page_id via _match_id.
+  - Downloads the page after rewriting the URL from zingmp3.vn to mp3.zing.vn and adding play_song=1 query parameter.
+  - Finds data-path from a data-xml attribute in the page.
+  - Fetches JSON from https://mp3.zing.vn/xhr + data_path and passes data['data'] to _process_data.
+- _process_data implemented in concrete IEs:
+  - ZingMp3IE: processes a single item with _extract_item(data, True).
+  - ZingMp3AlbumIE: processes a list of items into a playlist.
+- _extract_item(item, fatal):
+  - Determines id and title from item['id'] and item['name'] or item['title'].
+  - Builds formats:
+    - For source entries where key is 'mp4' or 'hls':
+      - 'hls': uses _extract_m3u8_formats to get m3u8-based formats (mp4 container). Uses m3u8_native, with m3u8_id set to k, fatal=False.
+      - 'mp4': iterates through resolution->video_url pairs, creating formats with:
+        - format_id: 'mp4-' + res
+        - url: video_url
+        - height: parsed from res (e.g., '720p') via regex.
+    - Other keys: treated as audio formats:
+      - ext: 'mp3'
+      - format_id: key
+      - tbr: bitrate parsed from key (int)
+      - url: proto-relative URL converted to absolute
+      - vcodec: 'none' (audio only)
+  - If no formats found:
+    - If not fatal, returns None (skip this item).
+    - If fatal, raises ExtractorError with the item's msg.
+    - If msg indicates geo restriction, raises geo-restriction for VN.
+  - Sorts formats with _sort_formats.
+  - Subtitles: if item['lyric'] exists, sets origin subtitles pointing to lyric URL.
+  - Album metadata: item.get('album') used for album title/artist fields.
+  - Returns a dict with fields:
+    - id, title, formats, thumbnail, subtitles, duration, track, artist, album, album_artist.
+- Geo-restriction handling:
+  - If an item reports not available in your country, raises geo-restriction for VN using _GEO_COUNTRIES.
+
+Important implementation details
+- URL handling:
+  - Base URL template supports both mp3.zing.vn and zingmp3.vn domains.
+  - Real extraction fetches the page from the mp3.zing.vn domain to obtain a data-xml path, then loads data from mp3.zing.vn/xhr.
+- Formats:
+  - Supports both audio (mp3) and video (mp4, HLS) formats.
+  - HLS formats are gathered via _extract_m3u8_formats with m3u8_native decoding.
+  - MP4 formats derive height from the resolution string (e.g., '720p').
+  - Audio formats use tbr from the key (bitrate) and vcodec 'none'.
+- Subtitles:
+  - If lyric URL present, provides subtitles under 'origin' with an 'lrc' extension.
+- Data source:
+  - The extractor relies on a data structure found in the loaded JSON: items have id, name/title, source dict for formats, lyric, album, duration, and artists information.
+- Tests:
+  - Includes examples for track, video clip, and an URL with only_matching to validate regex matching.
+
+In short
+- This file provides a robust extractor for Zing MP3 that handles tracks, videos, and albums by parsing a data payload from Zing MP3 endpoints, constructing both audio and video formats, supporting subtitles, and handling geo-restrictions for Vietnam. It uses a shared base class for common logic and two concrete IEs for items and albums/playlists.

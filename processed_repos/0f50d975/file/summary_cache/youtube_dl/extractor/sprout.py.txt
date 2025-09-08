@@ -1,0 +1,38 @@
+Concise summary:
+
+- Purpose: SproutIE is a YouTube-DL extractor for Sprout Online and Universal Kids video pages. It fetches metadata from Universal Kids and then delegates actual video retrieval to ThePlatform, handling possible MVPD authentication via Adobe Pass.
+
+- Class and inheritance:
+  - SproutIE(AdobePassIE): extends Adobe Pass authentication support and integrates with ThePlatform for video streams.
+
+- Key attributes:
+  - _VALID_URL: Regex that matches Sprout/Universal Kids video pages (watch or nested videos paths) and captures the video id.
+  - _GEO_COUNTRIES: ['US'] to restrict geo-access when retrieving the stream.
+  - _TESTS: Includes test cases verifying behavior and metadata extraction for a real video, plus two URL-matching tests.
+
+- Core logic in _real_extract(self, url):
+  - Determine display_id from the URL using the _VALID_URL pattern.
+  - Fetch MPX metadata via the API endpoint https://www.universalkids.com/_api/videos/{display_id} and extract the mpxMetadata block.
+  - Extract mediaPid from mpxMetadata; build a ThePlatform URL: https://link.theplatform.com/s/HNK2IC/{mediaPid}.
+  - Prepare query parameters: mbr=true and manifest=m3u. If entitlement == 'auth', add an auth parameter using self._extract_mvpd_auth(url, media_pid, 'sprout', 'sprout') to handle MVPD authentication.
+  - Merge query parameters into the platform URL, then wrap it with smuggle_url to force SMIL URL usage and to apply geo restrictions:
+    - force_smil_url: True
+    - geo_countries: ['US']
+  - Return a url_transparent entry pointing to ThePlatform with:
+    - _type: 'url_transparent'
+    - id: mediaPid
+    - url: the platform URL (with query/auth and geo controls)
+    - series: from mpxMetadata.get('seriesName')
+    - season_number: int_or_none(...) from mpxMetadata.get('seasonNumber')
+    - episode_number: int_or_none(...) from mpxMetadata.get('episodeNumber')
+    - ie_key: 'ThePlatform' (delegate actual download to ThePlatform extractor)
+
+- Important implementation details:
+  - Separation of concerns: metadata is retrieved from Universal Kids API, then ThePlatform handles streaming.
+  - Supports MVPD authentication via Adobe Pass when entitlement is 'auth'.
+  - Uses int_or_none to safely parse numeric season/episode values.
+  - Enforces US geo restrictions by attaching geo_countries to the ThePlatform URL.
+  - Uses update_url_query and smuggle_url to construct a robust, authenticated, geo-restricted ThePlatform URL for downstream extraction.
+  - The _TESTS include a sample with expected metadata (id, title, description hash, timestamp, uploader) to validate proper extraction.
+
+In short, SproutIE bridges Sprout/Universal Kids pages to ThePlatform streams, handling metadata retrieval, optional MVPD authentication, and geo restrictions, while returning a url_transparent reference to ThePlatform for actual video extraction.

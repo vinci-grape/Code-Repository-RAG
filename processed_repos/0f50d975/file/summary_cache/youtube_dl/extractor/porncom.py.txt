@@ -1,0 +1,74 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/porncom.py
+
+- Purpose
+  - Implement a video extractor (PornComIE) for porn.com video pages within youtube-dl.
+
+- URL matching
+  - _VALID_URL matches URLs like http(s)://[subdomain.]porn.com/videos/{display_id-}id
+  - The display_id is optional and taken from the portion before the trailing hyphen; the numeric video_id is always captured.
+
+- Main workflow (_real_extract)
+  - Extract video_id and display_id from the URL.
+  - Download the page HTML (webpage).
+
+- Metadata/config extraction
+  - Attempts to locate a JSON-like config object embedded in the page using two patterns:
+    - = ({...}) ; v1ar
+    - = ({...}) , <someidentifier> =
+  - Parses the found object with json-like transformation (js_to_json). If found, config contains:
+    - title: video title
+    - streams: list of streams with at least 'url' and optional 'id'
+    - thumbCDN and poster: used to build thumbnail URL
+    - length: duration (in seconds or similar)
+  - If config is found:
+    - title = config['title']
+    - formats = list of formats built from config['streams'] where stream['url'] exists
+      - Each format uses stream['url'] as the download URL
+      - format_id is stream.get('id')
+      - height is extracted by applying a regex to the format_id (e.g., "720p" -> 720)
+    - thumbnail is built from thumbCDN/poster if both exist (URL joined via compat_urlparse.urljoin)
+    - duration = int_or_none(config.get('length'))
+  - If config is not found (fallback path):
+    - title is extracted from the page via <title> or <h1> tag
+    - formats are discovered by parsing anchor tags with href="/download/..." and extracting:
+      - format_url (the href)
+      - height (digits before 'p', from the height indicator)
+      - filesize (displayed size text)
+      - Each format contains:
+        - url: base URL joined with the relative format_url
+        - format_id: something like "720p"
+        - height: integer height
+        - filesize_approx: parsed from the size text
+
+- Post-processing of formats
+  - self._sort_formats(formats) to order formats by quality/size
+
+- Additional metadata
+  - view_count: extracted from the page using two patterns (e.g., “Views: …” or a views container class); uses str_to_int and is optional (fatal=False)
+  - Categories and tags: extracted via a helper extract_list(kind)
+    - Looks for sections like "Categories: ..." or "Tags: ..." in the HTML
+    - Returns a list of text inside <a> tags found within those sections
+  - duration: from config length or None (in fallback path)
+
+- Data returned
+  - id: video_id
+  - display_id: display_id (or video_id if not present)
+  - title: extracted title
+  - thumbnail: built thumbnail URL (if available) or None
+  - duration: duration in seconds (if available)
+  - view_count: integer view count (if found)
+  - formats: list of format dictionaries
+  - age_limit: 18 (hardcoded)
+  - categories: list of category strings (if found)
+  - tags: list of tag strings (if found)
+
+- Key implementation details
+  - Uses _download_webpage, _search_regex, and _parse_json with transform_source=js_to_json for robust extraction of a JSON-like config embedded in the page.
+  - Accepts both a structured config path (preferred) and a HTML-parsing fallback path.
+  - Height extraction from format_id uses a regex on the id value (e.g., "720p" -> 720).
+  - Uses compat_urlparse for robust URL joining and resolution.
+  - Handles missing config gracefully by switching to an HTML-based extraction approach.
+  - Includes a helper extract_list to pull categories and tags in a reusable way.
+
+- Tests
+  - _TESTS includes a primary example with expected metadata (id, display_id, title, ext, thumbnail pattern, duration, view_count, categories, tags) and a secondary example marked as only_matching for a different domain variant.

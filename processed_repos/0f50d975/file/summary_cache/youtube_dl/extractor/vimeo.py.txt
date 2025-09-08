@@ -1,0 +1,75 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/vimeo.py
+
+- Purpose
+  - Implement Vimeo extractors for youtube-dl to download full metadata and video formats from various Vimeo URL schemes (standard Vimeo, channels, albums, groups, user pages, ondemand, watch later, likes, reviews, embedded players, and VHX embeds).
+
+- Core architecture
+  - Base class: VimeoBaseInfoExtractor (subclass of InfoExtractor)
+    - Handles login, password protection, token extraction, config parsing, format sorting, and common helpers.
+    - Key helpers:
+      - _login: logs into Vimeo when credentials are available, handling failure cases.
+      - _get_video_password / _verify_video_password: password-protected video flow including form submission and token handling.
+      - _extract_xsrft_and_vuid: extracts anti-CSRF token and vuid from login page.
+      - _extract_vimeo_config: extracts the Vimeo config object from the page (supports multiple patterns).
+      - _set_vimeo_cookie: helper for setting cookies.
+      - _vimeo_sort_formats: robust format sorting due to inconsistent bitrate units.
+      - _parse_config: core parsing of Vimeo config to build a list of formats, subtitles, thumbnails, uploader info, and live status.
+      - _extract_original_format: retrieves the original source file via load_download_config when available (e.g., unlisted content).
+      - _smuggle_referrer / _extract_urls / _extract_url: utilities to handle embedded video URLs and Referer headers.
+      - _verify_player_video_password: specific path for password-protected video pages via the player.
+      - _real_initialize: default to login flow.
+      - _extract_from_api: fetches video data from Vimeo API using a short-lived JWT token and parses via _parse_config.
+  - Main extractors (subclasses)
+    - VimeoIE: primary extractor for most Vimeo pages.
+      - _VALID_URL matches standard Vimeo video URLs and embeds.
+      - Handles direct video pages, embedded players, password protection, and fallbacks to API data when needed.
+      - Combines config-based formats with the original format, sorts formats, and enriches info with timestamps, description, license, thumbnails, and uploader data.
+      - Special handling for live vs on-demand, and for channel/user context.
+      - Supports unlisted or restricted videos via _extract_from_api when appropriate.
+    - VimeoOndemandIE: handles Vimeo On Demand pages; can fall back to skipping download for some pages.
+    - VimeoChannelIE: handles channel pages (collections of videos).
+      - Iterates through paginated lists, extracting video entries from the channel page (prefers embedded hrefs, with fallback to video URLs).
+      - Produces playlist results with proper title extraction.
+    - VimeoUserIE: alias/specialization of VimeoChannelIE for user pages; uses user-specific URL templates.
+    - VimeoAlbumIE: handles albums/showcases with API-backed paging.
+      - Supports password-protected albums via password flow.
+      - Uses OnDemandPagedList to fetch pages from the Vimeo API and yields video entries.
+      - Returns a playlist with title/description when available.
+    - VimeoGroupsIE: channel-like extractor for groups pages.
+    - VimeoReviewIE: handles review pages (video clips embedded in user reviews).
+      - Supports password flow for locked reviews and falls back to embed extraction if needed.
+    - VimeoWatchLaterIE: extractor for the “Watch Later” list (requires login).
+    - VimeoLikesIE: extractor for user likes (channel-like, paginated).
+    - VHXEmbedIE: extractor for VHX embedding (external video host).
+      - Extracts config URL from OTT data on the embed page and builds formats.
+  - Additional helpers and patterns
+    - _smuggle_referrer: adds Referer header when needed (for embedding contexts).
+    - _extract_urls / _extract_url: locate embedded Vimeo URLs within a page (iframe, swf embeds, non-standard embeds) and return usable URLs.
+    - _extract_vimeo_config: robustly finds vimeo.config in page scripts (supports multiple patterns).
+    - _parse_config: builds formats from:
+      - progressive (direct MP4) files
+      - HLS (m3u8) and DASH formats via CDNs
+      - live vs non-live handling, including special “sep” manifest URL handling for live archives
+    - Subtitles: collected from request text_tracks with VTT extensions.
+    - Thumbnails: pulled from video data; supports both per-id thumbs and a main thumbnail.
+    - Metadata: collects title, description, duration, timestamp/upload date, license, uploader info, channel info, and IDs.
+    - Formats: supports multiple format types with format_id conventions (e.g., http-%s for progressive, hls/dash with cdn names), and a careful fallback when certain metadata is missing.
+    - Live handling: distinguishes live streams and archives, adjusts format extraction accordingly.
+    - Error handling: recognizes common Vimeo errors (privacy, embeds, 403, 401) and raises informative ExtractorError messages.
+
+- Data flow overview
+  - URL is matched against a specific extractor (_VALID_URL) and routed to the appropriate path (normal video page, ondemand, channel, album, etc.).
+  - If an “unlisted_hash” is present, content is fetched via Vimeo API using the short-lived token, else page/config data is parsed from the HTML and/or JSON config endpoints.
+  - Config data is parsed by _parse_config to assemble a consolidated info dict with:
+    - id, title, uploader, duration, timestamps, thumbnails
+    - formats (progressive, HLS, DASH)
+    - subtitles, license, is_live
+  - For playlists (channels, albums, groups, likes, watch later, user pages), OnDemandPagedList and playlist_result helpers are used for pagination and aggregation.
+
+- Notable usage patterns and compatibility
+  - Uses modern youtube-dl utilities: _download_json, _download_webpage, _search_regex, _html_search_meta, urljoin, parse_iso8601, unified_timestamp, etc.
+  - Uses OnDemandPagedList for efficient pagination in list-based extractors.
+  - Uses smuggle_url/unsmuggle_url to pass headers (e.g., Referer) between requests, especially for embedded or redirected content.
+  - Includes a set of _TESTS that cover a wide range of Vimeo scenarios (password-protected, embed variants, ondemand, channels, groups, reviews, and edge cases).
+
+In short, this file provides a comprehensive suite of Vimeo extractors capable of parsing a wide array of Vimeo URL structures, handling authentication and password protection, retrieving and parsing video configuration data, assembling a robust list of formats (progressive, HLS, DASH), gathering metadata, and supporting various Vimeo content types (channels, albums, groups, user pages, on-demand, watch-later, likes, reviews, and VHX embeds).

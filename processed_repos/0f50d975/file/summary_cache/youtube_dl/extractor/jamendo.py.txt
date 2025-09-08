@@ -1,0 +1,84 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/jamendo.py
+
+Overview
+- Implements YouTube-DL extractors for Jamendo:
+  - JamendoIE: tracks on jamendo.com and licensing.jamendo.com
+  - JamendoAlbumIE: albums, producing a playlist of Jamendo track entries via transparent URLs to JamendoIE
+- Uses Jamendo API (with a small anti-bot header) to fetch track/album metadata and builds downloadable formats, thumbnails, tags, and stats.
+
+Key classes and primary functionality
+1. JamendoIE (InfoExtractor)
+   - _VALID_URL
+     - Matches track pages on licensing.jamendo.com or jamendo.com, capturing id and optional display_id from the URL.
+   - _call_api(self, resource, resource_id)
+     - Helper to call Jamendo API.
+     - Builds path as /api/%ss (e.g., /api/tracks or /api/albums).
+     - Sends id[] parameter with the track/album id.
+     - Adds a special header X-Jam-Call computed from a SHA1 hash of path+random value to mimic Jamendo’s anti-bot mechanism.
+     - Returns the first item of the JSON response.
+   - _real_extract(self, url)
+     - Extracts track_id and display_id from the URL via the regex groups.
+     - Fetches track metadata via _call_api('track', track_id).
+     - Builds a robust data dict including:
+       - id, display_id
+       - title (from track['name']), track name, and other metadata
+       - description, duration, timestamp, upload_date
+       - thumbnails from track['cover'] data (supports multiple resolutions)
+       - tags (from track['tags'] with 'name' field)
+       - formats: four possible formats constructed as direct URLs to Jamendo streaming endpoints:
+         - mp3l/mp31, mp3d/mp32, oggz/ogg1, flac
+         - Each format has format_id, ext, and a quality hint
+         - URL pattern: https://{sub_domain}.jamendo.com/?trackid={track_id}&format={format_id}&from=app-97dab294
+       - license information assembled from track['licenseCC']
+       - stats: view_count, like_count, average_rating derived from track['stats']
+     - Returns a dict with fields: id, display_id, thumbnails, title, description, duration, track, formats, license, timestamp, view_count, like_count, average_rating, tags
+   - Notes
+     - Contains commented-out scaffolding for richer title/artist/album assembly (not active).
+     - Focuses on API-driven extraction rather than page scraping.
+
+2. JamendoAlbumIE (inherits JamendoIE)
+   - _VALID_URL
+     - Matches Jamendo album pages: https://www.jamendo.com/album/{id}
+   - _TESTS
+     - Includes a sample album test with playlist entries and a description MD5.
+   - _real_extract(self, url)
+     - Extracts album_id from URL and fetches album data via _call_api('album', album_id).
+     - Retrieves album name.
+     - Iterates over album['tracks'] (if any), collecting track_id for each track.
+     - For each track with an id, creates a transparent URL entry:
+       - url: https://www.jamendo.com/track/{track_id}
+       - ie_key: JamendoIE (reuses track extractor)
+       - id: track_id
+       - album: album_name
+     - Returns a playlist_result with:
+       - entries: the list of transparent track entries
+       - id: album_id
+       - title: album_name
+       - description: cleaned English description if present (album['description']['en'])
+   - This makes JamendoAlbumIE a playlist builder that defers to JamendoIE for individual track extraction.
+
+Data modeling details
+- Formats: constructed as a list with:
+  - url: https://{sub_domain}.jamendo.com/?trackid={track_id}&format={format_id}&from=app-97dab294
+  - format_id: values like mp31, mp32, ogg1, flac
+  - ext: mp3, ogg, or flac
+  - quality: an integer from the enumeration order
+- Thumbnails: derived from track['cover'] data, supporting multiple sizes. Each thumbnail has id, url, width, height.
+- Tags: extracted from track['tags'], using the 'name' field.
+- License: join of licenseCC with '-' if present; otherwise None.
+- Stats: view_count (listenedAll), like_count (favorited), average_rating (averageNote).
+- Description: track['description']; album description is pulled from album['description']['en'] if present.
+
+API and implementation details
+- API endpoints built as /api/tracks or /api/albums.
+- Calls authenticated via X-Jam-Call header, derived from a hash of the path and a random value to mimic Jamendo’s anti-bot mechanism.
+- The code uses robust handling for missing fields (int_or_none, try_get) and avoids crashes if certain data is absent.
+
+Tests
+- _TESTS for JamendoIE include a sample track URL with expected fields (id, display_id, ext, title, track, duration, thumbnail pattern, timestamp, upload_date, license, view_count, like_count, average_rating, tags).
+- _TESTS for JamendoAlbumIE verify album extraction and resulting playlist structure, including per-track entry metadata like id, ext, title, artist, track, timestamp, upload_date.
+
+In short
+- JamendoIE fetches track data via Jamendo API, builds a set of downloadable formats, thumbnails, and metadata.
+- JamendoAlbumIE builds a playlist of track entries from an album by linking to the individual track pages through JamendoIE.
+- The module uses an API-backed approach with a special header, processes covers, tags, and stats, and provides tests for both track and album extraction.

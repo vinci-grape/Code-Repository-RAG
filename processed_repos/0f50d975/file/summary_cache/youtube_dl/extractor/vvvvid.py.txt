@@ -1,0 +1,79 @@
+ConciseSummary:
+
+- Purpose
+  - Implement two extractors for the vvvvid.it service in youtube-dl: VVVVIDIE (single video) and VVVVIDShowIE (season/show playlist).
+  - Supports multiple backends/formats (HLS/M3U8, Akamai, Wowza, YouTube, etc.) and a custom embed obfuscation (ds) used by VVVVID.
+
+- Key classes
+  - VVVVIDIE (InfoExtractor)
+  - VVVVIDShowIE (inherits VVVVIDIE) for show-level playlists
+
+- URL patterns
+  - VVVVIDIE: _VALID_URL_BASE matches vvvvid.itUs show/anime/film/series pages; _VALID_URL extracts show_id, season_id, and video_id from URLs like
+    /#!show/<show_id>/.../<season_id>/<video_id> or similar without #!.
+  - VVVVIDShowIE: _VALID_URL matches show listing URLs like /show/<id>/title (optional show title).
+
+- Login/connection flow
+  - _real_initialize logs in to https://www.vvvvid.it/user/login and stores conn_id from the response.
+  - _download_info uses this conn_id to fetch on-demand data from https://www.vvvvid.it/vvvvid/ondemand/<show_id>/<path> with optional query parameters (e.g., video_id).
+
+- Data extraction and flow (VVVVIDIE)
+  - _real_extract(url)
+    - Parses show_id, season_id, video_id from URL.
+    - Fetches season data via _download_info(show_id, 'season/<season_id>', video_id, query={'video_id': video_id}).
+    - Locates the specific video_data entry by matching video_id within the response.
+    - Builds a list of available formats by decoding embed codes (embed_info) using a custom decryption function ds() (reverse-engineered from vvvvid.js).
+    - ds(h) decodes the obfuscated embed strings to actual video URLs; includes a non-trivial alphabet mapping and bitwise reconstruction.
+    - For each quality variant ('' and '_sd'), it:
+      - Decodes embed_code with ds().
+      - video_type handling:
+        - video/kenc: transform embed URL, optionally fetch additional key via /kenc, append any ds-encoded message, decode formats via HLS (master.m3u8).
+        - video/rcs: Akamai formats.
+        - video/youtube: uses a transparent redirect to YouTube (ie_key = YoutubeIE); set _type to url_transparent and break (no local formats).
+        - video/dash: HLS-like m3u8 formats.
+        - else (default): Wowza-based formats.
+      - metadata_from_url(embed_code) to extract episode/season info from the embed URL when possible.
+    - If not using YouTube, sorts and assigns the collected formats to info['formats'].
+    - Collects metadata:
+      - id, title, duration, series, season_id, episode, description, thumbnail, view_count, like_count, repost_count
+      - episode_id (as string), episode_number/season_number from URL when available (via metadata_from_url).
+    - Returns a complete info dict for the video.
+
+  - _extract_common_video_info(video_data)
+    - Returns a small dict with thumbnail and episode_id (string).
+
+  - Helper: ds(h)
+    - Implements the deobfuscation algorithm for embed_info; the reverse-engineered function converts the obfuscated string into a usable URL.
+
+- Data sources and fields
+  - video_data fields used: title, length, show_title, season_id, video_id, video_type, embed_info, thumbnail, views, video_likes, video_shares, etc.
+  - Builds standard YouTube-dl info dict fields: id, title, duration, thumbnail, series, season_id, episode, episode_number, view_count, like_count, repost_count, description, uploader/uploader_id when pulling YouTube data.
+
+- Show extractor (VVVVIDShowIE)
+  - _VALID_URL: matches show pages and optional title slug.
+  - _real_extract(url)
+    - Extracts show_id and optional show_title from URL.
+    - Retrieves seasons data via _download_info(show_id, 'seasons/', show_title).
+    - Retrieves show info via _download_info(show_id, 'info/', show_title, fatal=False).
+    - If no show_title, adjusts base_url to include /title.
+    - Iterates over seasons and episodes; skips non-playable episodes.
+    - For each episode with season_id and video_id, builds an info dict with:
+      - _type = url_transparent, ie_key = VVVVIDIE, url = "<base_url>/<season_id>/<video_id>"
+      - title, description, season_id, playlist_title
+      - Also uses _extract_common_video_info(episode) for thumbnail/episode_id
+    - Returns a playlist_result with all episode entries, using show_id as playlist id and show title/description as metadata.
+
+- Tests and behavior
+  - _TESTS include examples of multiple video types (video/vvvvid, video/rcs, video/youtube, video/dash) and a mix of metadata expectations (title, id, duration, counts, etc.).
+  - Handles errors from the backend by raising ExtractorError with the server-supplied message.
+  - Uses geo_verification_headers() for location/geo checks on requests.
+  - Uses int_or_none and str_or_none for robust numeric/string typing.
+
+- Important implementation details
+  - The extractor logs in to obtain a conn_id and uses it for all subsequent ondemand data requests.
+  - Embeds are decoded with a bespoke ds() function, which is a key part of decrypting the embed_info values to real video URLs.
+  - Multiple video backends are supported, with a clear branching strategy per video_type.
+  - YouTube videos are handled by delegating to YoutubeIE via a url_transparent entry, preserving upstream extraction logic.
+  - Show extraction compiles a transparent list of episodes across seasons into a single playlist, each pointing back to VVVVIDIE for actual video extraction.
+
+In short, this file provides a robust VVVVID integration: authenticates to fetch data, decrypts and resolves multiple video formats (including YouTube), handles both single videos and show playlists, and surfaces rich metadata (titles, durations, counts, series/season/episode info).

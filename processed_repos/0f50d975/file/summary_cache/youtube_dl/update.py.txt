@@ -1,0 +1,92 @@
+Concise summary of ./youtube-dl/youtube_dl/update.py
+
+Purpose
+- Implements the self-update mechanism for youtube-dl. It fetches the latest version metadata from yt-dl.org, verifies the manifest with an RSA signature, and updates the executable/package accordingly.
+- Supports two packaging modes:
+  - Windows Py2EXE (updating the executable and using a helper batch script)
+  - Unix zip package (updating the binary inside a zip-imported install)
+
+Key components and main flow
+- rsa_verify(message, signature, key)
+  - Verifies a PKCS#1 v1.5 RSA signature with SHA-256.
+  - Input:
+    - message: bytes to verify (the JSON manifest dumped with sort_keys=True)
+    - signature: hex string of the signature to verify
+    - key: (modulus, exponent) tuple (the public key)
+  - Reconstructs the expected EMSA-PKCS1-v1_5 padded block using the SHA-256 digest and a fixed ASN.1/DigestInfo header, then compares it to the decrypted signature (s^e mod n).
+  - Returns True if valid, False otherwise.
+
+- update_self(to_screen, verbose, opener)
+  - Orchestrates the update process. Parameters:
+    - to_screen: callback function to print messages to the user
+    - verbose: if True, prints detailed tracebacks on errors
+    - opener: object with an open(url) interface (e.g., urllib-like opener)
+  - Steps:
+    1) Environment check
+       - Accepts updates only if youtube-dl is running from a zipimporter bundle or is a frozen executable. If not, prints a guidance message and exits.
+    2) Retrieve current version
+       - Fetches VERSION_URL to read the latest version string.
+       - If fetch fails, prints error and aborts.
+       - If already up-to-date, prints status and exits.
+    3) Download and verify versions manifest
+       - Downloads versions.json, parses JSON.
+       - Requires a top-level 'signature' field; removes it from the dict after extracting.
+       - Verifies the signature with rsa_verify using UPDATES_RSA_KEY.
+       - If invalid, aborts.
+    4) Compare versions
+       - Reads latest version_id from versions_info['latest'].
+       - Converts version strings to tuples for numeric comparison.
+       - If current version >= latest, prints up-to-date and exits.
+    5) Print release notes
+       - Calls print_notes(to_screen, versions) to display notes for new versions.
+    6) Determine executable path
+       - filename is the real path of the current executable (sys.executable if frozen, else sys.argv[0]).
+       - Checks write permissions on the target file.
+    7) Update logic for Py2EXE (Windows)
+       - If running as a frozen executable:
+         - Verifies write permission on the target directory.
+         - Downloads the new Windows executable from version['exe'][0], verifies sha256 against version['exe'][1].
+         - Writes content to filename + '.new'.
+         - Creates a batch updater script youtube-dl-updater.bat in the same directory that waits for the current process to release the file, moves the new file into place, and then deletes itself.
+         - Launches the batch script in a separate process and returns (so the user doesn’t see a premature success message).
+    8) Update logic for Unix zip package
+       - If running from a zip-importer bundle:
+         - Downloads the new Unix binary from version['bin'][0], verifies sha256 against version['bin'][1].
+         - Overwrites the current file (filename) with the new content.
+    9) Completion message
+       - Informs the user that youtube-dl has been updated and to restart the program to use the new version.
+
+- get_notes(versions, fromVersion)
+  - Returns a list of update notes for all versions newer than fromVersion.
+  - Iterates over versions in sorted order and collects 'notes' entries.
+
+- print_notes(to_screen, versions, fromVersion=__version__)
+  - Retrieves notes via get_notes and prints them under a “PLEASE NOTE:” header if any exist.
+  - Uses to_screen for output to preserve the same consumer behavior as update messaging.
+
+Important implementation details
+- Update manifest and security
+  - The update manifest (versions.json) is signed. The code uses a hardcoded public RSA key (UPDATES_RSA_KEY) to verify the signature with rsa_verify.
+  - The manifest structure is expected to include:
+    - latest: version string
+    - versions: mapping from version_id to data, where data contains:
+      - exe: [url, sha256] for Windows Py2EXE
+      - bin: [url, sha256] for Unix zip package
+      - notes: optional list of notes
+- Packaging detection
+  - Uses __loader__ to detect zipimporter packaging (Unix-like) vs frozen executable (Windows Py2EXE). If neither, it declines to update with a message suggesting updating via the package manager or installation method used.
+- Public key and signature verification
+  - UPDATES_RSA_KEY is a specific 2048-bit-like key (modulus, exponent) embedded in the code for signature verification.
+  - The verification process reconstructs the PKCS#1 v1.5 padded digest block and compares it to the decrypted signature, ensuring the integrity of the version manifest.
+- Update paths and safety
+  - Windows: moves to a .new file and uses a batch script to replace the executable after the current process ends, to avoid file locking issues.
+  - Unix: replaces the current file in-place after download and hash check.
+- Compatibility helpers
+  - Uses compat_open alias for file operations and compat_realpath to resolve the executable path in a cross-version manner.
+  - encode_compat_str is used to format tracebacks for user-visible output in verbose mode.
+- User-facing behavior
+  - The code prints status messages about whether it is up-to-date, provisioning updates, and success/failure states.
+  - If there are release notes, they are printed after a successful version check and before performing the update.
+
+Notes
+- The provided snippet ends with a “Summary:” line in the excerpt, which appears to be outside the functional code and might be an artifact of the snippet. The actual implementation ends with print_notes/to_screen calls for release notes.

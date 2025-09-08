@@ -1,0 +1,45 @@
+Summary of ./youtube-dl/youtube_dl/extractor/commonmistakes.py
+
+Purpose
+- Provides two lightweight extractors to help users when they misuse youtube-dl or run into common URL issues.
+
+Key classes
+1) CommonMistakesIE (InfoExtractor)
+- Purpose: Detects a common user mistake where the URL parameter is literally the strings "url" or "URL" (instead of a real URL) and raises a helpful error.
+- Key attributes:
+  - IE_DESC = False: This extractor is not listed in help/description.
+  - _VALID_URL = matches exactly "url" or "URL" at the end of the string.
+  - _TESTS: Two tests that only check matching for "url" and "URL" with only_matching=True.
+- Main behavior (_real_extract):
+  - Constructs a friendly message stating that downloading the literal URL is nonsensical.
+  - If youtube-dl is not run in verbose mode, appends a tip to run with -v to see arguments/config.
+  - Raises ExtractorError with the constructed message (marked as expected).
+- Implementation notes:
+  - Accesses self._downloader.params to check verbose mode.
+  - Uses the ExtractorError type from youtube_dl.utils.
+
+2) UnicodeBOMIE (InfoExtractor)
+- Purpose: Detects and handles URLs that start with a Byte Order Mark (BOM, U+FEFF).
+- Key attributes:
+  - IE_DESC = False: Not listed in help/descriptions.
+  - _VALID_URL = uses a named group bom to capture the BOM and a named group id for the remainder: (?P<bom>\ufeff)(?P<id>.*)$
+  - _TESTS: Enabled for most Python versions except 3.1–3.3 (due to BOM handling issues in that range); test uses a URL starting with the BOM.
+- Main behavior (_real_extract):
+  - real_url = self._match_id(url): extracts the part after the BOM (the real URL).
+  - Calls self.report_warning(...) to inform the user that the URL started with a BOM and that it’s removing it to look for the real URL.
+  - Returns self.url_result(real_url) to redirect/continue extraction with the cleaned URL.
+- Implementation notes:
+  - _match_id(url) relies on the pattern with the BOM group; real_url corresponds to the id group.
+  - url_result(...) delegates to the normal extraction flow for the cleaned URL.
+  - The BOM warning is informational, not an error.
+
+Important implementation details
+- Both extractors set IE_DESC = False to avoid listing them as standard extractors in help output.
+- Use of _TESTS with only_matching ensures URL matching tests for these special cases without requiring full extraction logic.
+- CommonMistakesIE raises an ExtractorError with a helpful message, signaling a user mistake rather than a real extraction failure.
+- UnicodeBOMIE gracefully handles BOM-prefixed URLs by warning the user and re-routing to the cleaned URL instead of failing.
+- Python version gating in UnicodeBOMIE tests accounts for known BOM-related issues in early Python 3.x releases (3.1–3.3).
+
+In short, the file provides two targeted extractors:
+- One to catch a misused literal "url"/"URL" input and guide the user to correct it.
+- One to detect and strip a leading UTF-8 BOM from URLs, warning the user, and continuing extraction with the cleaned URL.

@@ -1,0 +1,46 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/tfo.py
+
+Purpose
+- Implement a YouTube-DL extractor for TFO (Télévision française d’Amérique) videos. It fetches video metadata via TFO’s API and delegates streaming to the Limelight Media extractor.
+
+Key components
+- Class: TFOIE (inherits from InfoExtractor)
+- Constants:
+  - _GEO_COUNTRIES = ['CA'] (geo-restriction target)
+  - _VALID_URL = r'https?://(?:www\.)?tfo\.org/(?:en|fr)/(?:[^/]+/){2}(?P<id>\d+)' (URL pattern; captures numeric video id)
+  - _TEST: example URL with expected id, title, description, and md5 of the video file
+- Main method: _real_extract(self, url)
+  - Purpose: Retrieve video info from TFO API and return a URL-transparent entry that points to LimelightMedia
+  - Returns a dict with _type 'url_transparent' and ie_key 'LimelightMedia' to use LimelightMedia for actual streaming
+
+Main workflow
+- Extract video_id from URL using self._match_id(url).
+- Make a HEAD request to http://www.tfo.org/ to establish a session and cookies.
+- Call the API at http://www.tfo.org/api/web/video/get_infos with a POST payload containing {'product_id': video_id}, encoded as JSON.
+  - Include header 'X-tfo-session' sourced from the cookies obtained in the previous step (cookies['tfo-session'].value).
+- Validate API response:
+  - If infos.get('success') == 0:
+    - If infos.get('code') == 'ErrGeoBlocked', raise a geo restriction for CA.
+    - Otherwise raise ExtractorError with the message from infos['msg'].
+  - Else, extract video_data = infos['data'].
+- Build and return a URL-transparent entry:
+  - '_type': 'url_transparent'
+  - 'id': video_id
+  - 'url': 'limelight:media:' + video_data['llid'] (delegates to LimelightMedia)
+  - 'title': video_data['title']
+  - 'description': video_data.get('description')
+  - 'series': video_data.get('collection')
+  - 'season_number': int_or_none(video_data.get('season'))
+  - 'episode_number': int_or_none(video_data.get('episode'))
+  - 'duration': int_or_none(video_data.get('duration'))
+  - 'ie_key': 'LimelightMedia'
+
+Implementation details
+- Geo-restriction handling: _GEO_COUNTRIES = ['CA']; on ErrGeoBlocked, calls self.raise_geo_restricted(countries=self._GEO_COUNTRIES).
+- Session handling: Uses a HEAD request to initialize cookies, then sends X-tfo-session header with the tfo-session cookie value for API authentication.
+- Data extraction: Uses int_or_none to safely convert numeric fields (season, episode, duration) to integers when present.
+- Output type: The final entry is a LimelightMedia-backed stream (via 'limelight:media:<llid>'), enabling reuse of LimelightMedia’s extraction logic.
+
+What it does not do
+- It does not fetch or embed the actual video URL directly; it relies on LimelightMedia to resolve the media with the provided llid.
+- It does not support non-CA geo-restrictions beyond raising a geo error when encountered.

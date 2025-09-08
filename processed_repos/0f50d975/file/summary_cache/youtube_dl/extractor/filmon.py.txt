@@ -1,0 +1,68 @@
+This file implements two YouTube-DL extractors for Filmon:
+
+- FilmOnIE (handles Filmon VOD items and playlists)
+- FilmOnChannelIE (handles Filmon channels, including live streams)
+
+Key functionality and implementation details:
+
+1) FilmOnIE (class FilmOnIE)
+- Purpose: Extract information for Filmon VOD videos or channel-style playlists.
+- URL pattern: _VALID_URL matches Filmon VOD pages and filmon:<id> URLs.
+- _real_extract(url):
+  - Extracts video_id from URL.
+  - Fetches JSON data from https://www.filmon.com/api/vod/movie?id={video_id} and uses the 'response' key.
+  - Error handling: If an HTTP error occurs, tries to parse the JSON error to raise a user-friendly ExtractorError with the message from the API.
+  - Title/description: Reads title and description (description stripped of empty values).
+  - Playlist handling (type_id == 1):
+    - Builds a playlist from response['episodes'], creating sub-entries via self.url_result('filmon:' + episode_id) for each episode.
+    - Returns a playlist_result(entries, video_id, title, description).
+  - Formats (for non-playlists):
+    - Iterates over response.get('streams', {}): each stream has a 'url' and a 'quality'.
+    - Builds formats with:
+      - format_id: the stream key
+      - url: stream URL
+      - ext: 'mp4'
+      - protocol: 'm3u8_native'
+      - quality: mapped via QUALITY(stream['quality']) where QUALITY = qualities(('low', 'high'))
+    - Sorts formats with _sort_formats.
+  - Thumbnails:
+    - Reads poster information from response['poster'] and response['poster']['thumbs'].
+    - Also includes a 'poster' entry in the thumbs dict.
+    - Builds a list of thumbnail dicts with id, url, width, height (width/height parsed as ints if present).
+  - Returns a dict with id, title, formats, description, and thumbnails.
+
+2) FilmOnChannelIE (class FilmOnChannelIE)
+- Purpose: Extract information for Filmon channels, including live streams and VOD channels.
+- URL pattern: _VALID_URL matches Filmon channel or TV pages (http(s)://.../tv/<id> or /channel/<id>).
+- _real_extract(url):
+  - Extracts channel_id from URL and fetches channel metadata from http://www.filmon.com/api-v2/channel/{channel_id}, using channel_data = data['data'].
+  - Error handling: If HTTP error occurs, parse the API error message from JSON and raise an ExtractorError with that message.
+  - Normalization: channel_id = compat_str(channel_data['id']).
+  - Live status: is_live = not channel_data.get('is_vod') and not channel_data.get('is_vox').
+  - Title: channel_data['title']; display title uses _live_title(title) when live.
+  - Formats:
+    - QUALITY = qualities(('low', 'high'))
+    - For each stream in channel_data.get('streams', []):
+      - If not is_live (VOD/VOX): extend formats with Wowza formats via self._extract_wowza_formats(stream_url, channel_id, skip_protocols=['dash', 'rtmp', 'rtsp']).
+      - If live: append a simple mp4 format dict:
+        - format_id: quality
+        - url: stream_url
+        - ext: 'mp4'
+        - quality: QUALITY(quality)
+  - Thumbnails:
+    - Uses predefined _THUMBNAIL_RES = [('logo',56,28), ('big_logo',106,106), ('extra_big_logo',300,300)]
+    - Builds a list of thumbnail dicts with id, url (http://static.filmon.com/assets/channels/{channel_id}/{name}.png), width, height.
+  - Return dict containing:
+    - id: channel_id
+    - display_id: channel_data.get('alias')
+    - title: live-friendly title if is_live else original title
+    - description: channel_data.get('description')
+    - thumbnails
+    - formats
+    - is_live
+
+Additional notes:
+- Uses standard YouTube-DL extraction utilities: _download_json, _parse_json, _match_id, _sort_formats, _live_title, self.url_result, self.playlist_result, and _extract_wowza_formats for non-live streams.
+- Error handling is robust: on API errors (HTTP errors), it reads the JSON body to extract a human-friendly message and re-raises as ExtractorError with a flag (expected=True) to indicate a predictable error.
+- The code supports both direct MP4/M3U8 style streams and channel live streams, with appropriate format representation and quality sorting.
+- Tests (_TESTS) include sample URLs and expected info dicts, including a playlist mincount for a type_id=1 response and a channel VOD example.

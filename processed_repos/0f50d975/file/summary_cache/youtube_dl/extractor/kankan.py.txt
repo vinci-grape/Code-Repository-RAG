@@ -1,0 +1,43 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/kankan.py
+
+- Purpose
+  - A YouTube-DL extractor (KankanIE) for videos on kankan.com. It parses a video page, discovers a CDN resource, and builds a direct URL to the FLV video along with basic metadata.
+
+- Core components
+  - _VALID_URL: Regular expression that matches Kankan video pages and captures the numeric video id from the URL ending with .shtml. It supports optional subdomains.
+  - _TEST: A test case with an example URL, expected MD5, and info_dict (id, ext, title). Includes a skip message “Only available from China” indicating regional restriction.
+  - _md5 helper: A simple MD5 function implemented as a lambda to produce hex digests from strings (used to compute a key for the CDN URL).
+
+- Main functionality (_real_extract)
+  1. Extract video_id from the URL using _match_id.
+  2. Download the video page HTML.
+  3. Extract the video title using a regex that matches either G_TITLE or G_MOVIE_TITLE = patterns.
+  4. Find the CDN resource indicator string (surls or lurl) from the page.
+     - surls: looks for a JavaScript array or string containing the FLV URL(s).
+     - Extract gcids (gcid values) by parsing the surls string with a regex that captures a segment of the path; select the last one as gcid.
+  5. Query the CDN resource API using the gcid:
+     - info_url = http://p2s.cl.kankan.com/getCdnresource_flv?gcid=<gcid>
+     - Download the CDN info page.
+     - Parse ip, path, param1, param2 from the CDN info page.
+  6. Compute a decryption/key parameter:
+     - key = MD5("xl_mp43651" + param1 + param2)
+  7. Build the final video URL:
+     - video_url = http://<ip><path>?key=<key>&key1=<param2>
+  8. Return a dict with:
+     - id: video_id
+     - title: extracted title
+     - url: constructed video_url
+
+- Important implementation details
+  - The code relies on specific page structures and CDN API formats:
+    - Title extraction searches for G_TITLE or G_MOVIE_TITLE = patterns.
+    - CDN info requires ip, path, param1, param2 fields.
+  - The final URL is constructed by combining the CDN IP, path, and query parameters (key and key1).
+  - The MD5-based key generation uses a fixed string prefix ('xl_mp43651') concatenated with param1 and param2.
+  - The _TEST includes a skip reason, indicating regional access limitations (China-only).
+  - The final video extension in the test is FLV, and the extractor returns just id, title, and url (no explicit ext in the final dict; the test case suggests .flv is expected).
+
+- Potential caveats
+  - If the site changes page structure or CDN API responses, the regexes and parsing may fail.
+  - Regional restriction guarded by skip message; real runs may require being in allowed region.
+  - The approach assumes the presence and format of surls/lurl, gcid, and CDN response fields (ip, path, param1, param2).

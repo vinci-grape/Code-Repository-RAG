@@ -1,0 +1,60 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/regiotv.py
+
+Purpose
+- Implement a YouTube-DL extractor for Regio-TV video pages. It retrieves the actual video URL by first extracting a key from the page and then querying a SOAP/XML service to obtain video metadata including the direct video URL.
+
+Main class
+- RegioTVIE (subclass of InfoExtractor)
+
+Key components
+- _VALID_URL: Regular expression matching Regio-TV video pages, e.g. http(s)://www.regio-tv.de/video/<id> (digits)
+- _TESTS: Two tests
+  - Valid public test with a real page, asserting id, extension, title, and description.
+  - A second test asserting URL pattern matching with only_matching: True (no extraction).
+
+Core functionality (_real_extract)
+1. Extract video_id
+   - Uses _match_id(url) to pull the numeric ID from the URL.
+
+2. Download page HTML
+   - Calls _download_webpage(url, video_id) to fetch the page content.
+
+3. Extract key from page
+   - Uses a regex to find a JavaScript-like key assignment: key := '...'/ "..." (captures the value into 'key').
+   - Pattern: r'key\s*:\s*(["\'])(?P<key>.+?)\1'
+
+4. Get title
+   - Uses _og_search_title(webpage) to fetch the Open Graph title from the page.
+
+5. Prepare SOAP request to obtain video data
+   - SOAP_TEMPLATE builds a SOAP envelope with GetHTML5VideoData as the operation and the extracted key as the parameter.
+   - Constructs a sanitized HTTP request to http://v.telvi.de/ with the SOAP payload (encoded as utf-8).
+
+6. Download and parse XML response
+   - _download_xml(request, video_id, 'Downloading video XML') fetches the SOAP XML response.
+   - Defines XML namespaces (NS_MAP) for xsi and soap to parse the response.
+
+7. Extract video URL and remaining metadata
+   - video_url: extracted via xpath_text from the XML using a namespaced path to .//video, fatal=True (must exist).
+   - thumbnail: extracted via xpath_text from .//image (optional).
+   - description: fallback to Open Graph description from the page or HTML meta description if OG is not available.
+
+8. Return metadata dictionary
+   - Keys provided: id, url, title, description, thumbnail
+   - This dictionary is used by youtube-dl to download the video and present metadata.
+
+Implementation details
+- Uses:
+  - sanitized_Request to build SOAP HTTP request
+  - _download_webpage to fetch page HTML
+  - _og_search_title and _og_search_description for title/description extraction
+  - _html_search_meta as a fallback for description
+  - _download_xml to fetch the SOAP XML response
+  - xpath_text and xpath_with_ns to query XML with proper namespaces
+- Video URL retrieval is mandatory (fatal=True); thumbnail is optional.
+- SOAP envelope uses proper namespaces (soap, xsi, xsd) and the service namespace http://v.telvi.de/.
+
+Overall flow
+- From the page, extract a key.
+- Send the key to a SOAP service to retrieve an XML payload containing the actual video URL and thumbnail.
+- Assemble and return a metadata dict with id, url, title, description, and thumbnail.

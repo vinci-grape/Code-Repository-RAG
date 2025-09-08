@@ -1,0 +1,27 @@
+Concise summary:
+
+- Purpose: A YouTube-DL extractor for the nonktube.com site to fetch video metadata using the Nuevo framework.
+
+- Class and inheritance: NonkTubeIE(NuevoBaseIE) extends NuevoBaseIE, leveraging its HTML5 media parsing utilities.
+
+- URL matching: _VALID_URL recognizes video and embed pages on nonktube.com (including legacy embed with id param) and captures the numeric video id as id.
+
+- Tests: _TESTS includes:
+  - A typical video page returning id, ext (mp4), title, duration, and age_limit.
+  - An embed URL covered by the same pattern (only_matching test).
+
+- Core extraction (_real_extract):
+  - Extracts video_id via _match_id(url).
+  - Downloads the page with _download_webpage.
+  - Retrieves the OpenGraph title with _og_search_title.
+  - Parses HTML5 video entries with _parse_html5_media_entries(url, webpage, video_id) and takes the first entry as info.
+  - Updates info with:
+    - id: video_id
+    - title: og:title-derived title
+    - age_limit: 18
+  - Returns the info dictionary (which already includes fields like ext and duration from the HTML5 parsing).
+
+- Key behavior details:
+  - Relies on NuevoBaseIE’s HTML5 media parsing for core video metadata (e.g., mp4 extension, duration).
+  - Adds a fixed age_limit of 18 to comply with adult content rules.
+  - Title is sourced from og:title, ensuring a clean, human-readable title.

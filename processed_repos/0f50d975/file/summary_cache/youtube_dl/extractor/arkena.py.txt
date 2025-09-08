@@ -1,0 +1,60 @@
+- Purpose
+  - ArkenaIE is a YouTube-dl extractor for Arkena/Qbrick hosted videos. It fetches video metadata and all available formats, thumbnails, and subtitles from the Arkena/Qbrick API and exposes them in a standard YouTube-dl InfoExtractor format.
+
+- Key classes/functions
+  - ArkenaIE(InfoExtractor): Main extractor class.
+  - _VALID_URL: Regular expression that matches:
+    - video.qbrick.com/play2/embed/player? with accountId/mediaId
+    - play.arkena.com/config/embed/avp/vN/player/media/…/accountId
+  - _TESTS: Examples to validate URL matching and returned data (including a full metadata test for a sample video and several “only_matching” tests).
+  - _extract_url(webpage): Static method that extracts an Arkena embed URL from a page by looking for an iframe src that points to play.arkena.com/embed/avp/.
+  - _real_extract(self, url): Core extraction logic:
+    - Normalizes URL to extract video_id and account_id; special handling for http://video.arkena.com/play2/embed/player URLs to pull mediaId/accountId from query string if needed.
+    - Downloads metadata via API: https://video.qbrick.com/api/v1/public/accounts/{account_id}/medias/{video_id} with a fields query to fetch assets, renditions, and related metadata.
+    - Builds output:
+      - title from media.metadata.title
+      - description from metadata.description
+      - timestamp from media.created
+      - duration (from video data, if available)
+      - thumbnails from image renditions
+      - subtitles from subtitle renditions (grouped by language)
+      - formats from video renditions and various index formats
+      - tags from media.tags
+    - Handles different rendition types:
+      - image: adds to thumbnails (height/width/size/id/url)
+      - subtitle: adds to subtitles per language
+      - video: creates a format dict with url, format_id, size, height, width, bitrate (tbr), vcodec, acodec, and asr (sampling rate)
+        - Uses corresponding entry in video data (videos[i]) and its audio (audios[0])
+        - Sets duration from video data if not already set
+      - index: handles external formats by mime type
+        - application/smil+xml -> _extract_smil_formats
+        - application/x-mpegURL -> _extract_m3u8_formats (m3u8_native, hls)
+        - application/hds+xml or application/dash+xml -> _extract_f4m_formats
+        - application/vnd.ms-sstr+xml -> _extract_ism_formats
+    - Sorts formats via self._sort_formats(formats)
+    - Returns a dict with:
+      - id, title, description, timestamp, thumbnails, subtitles, duration, tags, formats
+
+- Important implementation details
+  - API usage: Fetches a detailed media object from Video/Qbrick with a specific fields query to include assets, renditions, and metadata, then parses through:
+    - resource renditions (image, subtitle, video, index)
+    - for video renditions, aligns each rendition with the corresponding videos[i] and its audio
+  - Robust handling of multiple data types:
+    - thumbnails from image renditions
+    - subtitles collected per language, defaulting to 'en'
+    - multiple video formats with detailed attributes (height, width, bitrate, codecs, duration, etc.)
+    - external streaming formats (HLS/DASH/HDS/MSS) via mime-type driven extraction
+  - URL normalization supports multiple Arkena/Qbrick embed URL formats and a dedicated helper to extract embedded Arkena URLs from pages
+  - Error handling: If crucial identifiers are missing when handling a non-standard URL form, raises ExtractorError('Invalid URL', expected=True)
+
+- Output data
+  - Returns a standard YouTube-dl info dictionary:
+    - id (video_id)
+    - title
+    - description
+    - timestamp (parsed from created)
+    - thumbnails
+    - subtitles
+    - duration
+    - tags
+    - formats (list of available video formats with details)

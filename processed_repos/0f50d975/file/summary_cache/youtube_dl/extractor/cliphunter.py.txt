@@ -1,0 +1,44 @@
+- Purpose: A YouTube-DL extractor for ClipHunter video pages (class CliphunterIE) that parses a ClipHunter video page and builds a list of available video formats along with metadata.
+
+- Key class and attributes:
+  - CliphunterIE(InfoExtractor)
+  - IE_NAME = 'cliphunter'
+  - _VALID_URL: Regex for URLs like http(s)://www.cliphunter.com/w/{id}/{seo}
+  - _TESTS: Two example tests verifying id, title, thumbnail, extension (ext), and age_limit; one test is skipped due to the video being gone.
+
+- Main functionality (_real_extract):
+  1. Extract video_id from URL using _match_id and download the page with _download_webpage.
+  2. Parse metadata:
+     - Title from the JavaScript variable: mediaTitle = "..."
+     - Thumbnail from mov_thumb = '...'
+     - Formats data from a JSON-like object assigned to gexoFiles in the page: var gexoFiles = ({...});
+       - The JSON is extracted with _search_regex and parsed with _parse_json.
+  3. Build formats:
+     - Iterate over items in gexoFiles. Each item f should contain at least a 'url'.
+     - Skip entries without a valid URL.
+     - Optionally construct a human-friendly format_id using fmt and h (height): if both exist, format_id = "{fmt}_{height}p".
+     - Create a format dict with:
+       - 'url': video URL
+       - 'format_id': derived previously
+       - 'width': int_or_none(f.get('w'))
+       - 'height': int_or_none(f.get('h'))
+       - 'tbr': int_or_none(f.get('br'))  (bitrate)
+  4. Sort formats with _sort_formats.
+  5. Assemble the return metadata:
+     - 'id': video_id
+     - 'title': video_title
+     - 'formats': list of built formats
+     - 'age_limit': obtained via _rta_search(webpage) (handles age-restriction gating)
+     - 'thumbnail': extracted mov_thumb value (or None if not found; non-fatal extraction)
+
+- Important implementation details:
+  - Uses a verbose _VALID_URL regex to precisely capture the numeric video ID from ClipHunter URLs.
+  - Video formats are sourced from a JSON-like object in the page (gexoFiles); each entry may specify URL, format code, height, width, and bitrate.
+  - Robust parsing helpers:
+    - int_or_none to safely convert numeric fields
+    - url_or_none to validate URLs before adding a format
+  - The code tolerates missing thumbnail (fatal=False in regex).
+  - The age_limit is derived from the page via _rta_search, which is common for sites gating mature content.
+
+- Output structure:
+  - A dictionary with id, title, formats, age_limit, and thumbnail, suitable for youtube-dl’s standard processing. Individual formats include URL and basic dimension/bitrate hints when available.

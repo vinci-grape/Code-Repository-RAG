@@ -1,0 +1,30 @@
+Concise, high-level summary of the code in ./youtube-dl/youtube_dl/extractor/nrl.py
+
+- Purpose
+  - Implement an InfoExtractor for NRl TV pages that delegates to the Ooyala extractor to fetch the actual video.
+
+- Key class
+  - NRLTVIE(InfoExtractor)
+
+- Important attributes
+  - _VALID_URL: Regex matching NRl TV pages under nrl.com/tv, extracting a slug path and a final id component.
+  - _TEST: Example test case with a NRl TV URL, expected Ooyala video id, and test parameters (skip_download and bestvideo format).
+
+- Main functionality (_real_extract)
+  - Determine display_id from the URL using _match_id.
+  - Download the page content with _download_webpage.
+  - Locate a JSON blob inside a q-data attribute using _html_search_regex with pattern (?s)q-data="({.+?})" and parse it via _parse_json.
+  - Extract the Ooyala video id from q_data['videoId'].
+  - Return a URL result pointing to the Ooyala extractor:
+    - URL: ooyala:<videoId>
+    - extractor: "Ooyala"
+    - id: videoId
+    - title: q_data.get('title') (if present)
+
+- Implementation details
+  - The extractor relies on the HTML containing a q-data attribute with a JSON object that includes videoId (and optionally a title).
+  - It delegates the actual download to the Ooyala extractor by constructing the ooyala: URL.
+  - The test hints that the final media may be an mp4, and the test requests skip_download with format bestvideo.
+
+- Summary of behavior
+  - Given an NRl TV page URL, the code fetches the page, extracts the embedded Ooyala videoId, and returns a reference to the corresponding Ooyala video (with optional title) for download/processing by youtube-dl.

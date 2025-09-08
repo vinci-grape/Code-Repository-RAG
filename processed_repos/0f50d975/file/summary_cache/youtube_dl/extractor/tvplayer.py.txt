@@ -1,0 +1,59 @@
+- Purpose: TVPlayerIE is an extractor for tvplayer.com watch pages. It fetches a live stream, parses channel/title metadata, obtains a streaming URL (M3U8), and returns a playable format list.
+
+- URL pattern (_VALID_URL):
+  - Matches: http(s)://www.tvplayer.com/watch/<id>
+  - Captures an id used as display_id and resource_id.
+
+- Test case (_TEST):
+  - Example URL: http://tvplayer.com/watch/bbcone
+  - Expects an mp4 format and a live title matching a BBC One broadcast timestamp.
+  - Uses skip_download to focus on format extraction via m3u8.
+
+- Main flow (_real_extract):
+  - Derives display_id from the URL and downloads the page HTML.
+
+  - Finds the current channel element (class contains "current-channel") and parses its data-* attributes using extract_attributes.
+    - title: current_channel['data-name']
+    - resource_id: current_channel['data-id']
+
+  - Extracts a token from the page using a regex on data-token attribute:
+    - Pattern: data-token=(["'])(?P<token>(?!\1).+)\1
+
+  - Requests a JSON context from https://tvplayer.com/watch/context with query parameters:
+    - resource: resource_id
+    - gen: token
+    - Stores validate and platform (fallback to 'firefox' if not found).
+
+  - Calls the streaming API to obtain the actual stream information:
+    - POST to http://api.tvplayer.com/api/v2/stream/live
+    - Headers: Content-Type: application/x-www-form-urlencoded; charset=UTF-8
+    - Data: id (resource_id), service=1, platform, validate
+  - If this API call raises an ExtractorError and the cause is an HTTPError, the code:
+    - Reads and parses the JSON error from the HTTP response.
+    - Raises an ExtractorError with a message like "<IE_NAME> said: <error>"
+    - Otherwise re-raises the original error.
+
+  - On success, takes response['tvplayer']['response'] and:
+    - Extracts video formats from response['stream'] using _extract_m3u8_formats with extension 'mp4'.
+    - Sorts formats via _sort_formats.
+
+  - Returns video information dictionary:
+    - id: resource_id
+    - display_id: display_id
+    - title: _live_title(title) (potentially normalized for live content)
+    - formats: list of extracted formats
+    - is_live: True
+
+- Important implementation details:
+  - Uses extract_attributes to parse data-name and data-id from the current channel HTML element.
+  - Robust error handling to surface API-provided errors when the streaming endpoint returns an error within a JSON payload.
+  - Token and context workflow mirrors TVPlayer’s protection/validation flow: a token from the page is used to fetch a context, which then informs the subsequent stream request.
+  - The final formats are derived from an m3u8 stream (typical for live TV), and the extractor marks the result as live.
+
+- Key helpers/utilities involved:
+  - InfoExtractor base class methods: _download_webpage, _search_regex, _download_json, _extract_m3u8_formats, _sort_formats, _live_title
+  - extract_attributes, try_get, urlencode_postdata
+  - ExtractorError and compat_HTTPError for cross-version HTTP error handling
+  - compat_str for safely handling platform string types
+
+Overall, the extractor navigates TVPlayer’s page, retrieves a live stream context and token, fetches the actual stream URL from the API, collects formats from the M3U8, and returns a live video entry with metadata.

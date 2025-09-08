@@ -1,0 +1,51 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/tvanouvelles.py
+
+Overview:
+- This module adds two extractors for TVA Nouvelles content:
+  - TVANouvellesIE: handles direct video pages that embed Brightcove videos.
+  - TVANouvellesArticleIE: handles article/listing pages that contain multiple video entries.
+
+Key classes and functionality:
+- TVANouvellesIE (InfoExtractor)
+  - Purpose: Resolve a direct TVA Nouvelles video page to the actual video via Brightcove.
+  - URL pattern: _VALID_URL = r'https?://(?:www\.)?tvanouvelles\.ca/videos/(?P<id>\d+)' captures the Brightcove video id.
+  - BRIGHTCOVE_URL_TEMPLATE: builds the Brightcove player URL using the captured id.
+  - _real_extract(url):
+    - Extracts brightcove_id from the URL using _match_id.
+    - Returns a url_result pointing to the BrightcoveNewIE with the properly formatted Brightcove URL and the video_id.
+  - Tests:
+    - _TEST includes an example with expected mp4 extension, metadata (title, description md5), uploader_id, timestamp, and upload_date.
+    - add_ie: ['BrightcoveNew'] indicates the inner extractor to use for the actual video.
+  - Key detail: This extractor delegates the actual video extraction to BrightcoveNewIE by constructing the Brightcove player URL.
+
+- TVANouvellesArticleIE (InfoExtractor)
+  - Purpose: Extract a playlist of videos from TVA Nouvelles article pages that list multiple videos.
+  - URL pattern: _VALID_URL = r'https?://(?:www\.)?tvanouvelles\.ca/(?:[^/]+/)+(?P<id>[^/?#&]+)' captures an article slug as id.
+  - _TEST: Example article page with expected playlist of at least 4 videos (playlist_mincount: 4).
+  - suitable(cls, url):
+    - Returns False if TVANouvellesIE.suitable(url) is True, ensuring direct video pages are handled by TVANouvellesIE.
+    - Otherwise uses the default suitability check.
+  - _real_extract(url):
+    - display_id = self._match_id(url)
+    - Downloads the article webpage.
+    - Scans the page for data-video-id="12345" (via regex data-video-id=(["\'])?(?P<id>\d+)) and builds a list of entries.
+    - Each entry is a url_result pointing to the TVA video page 'http://www.tvanouvelles.ca/videos/<video_id>' with:
+      - ie = TVANouvellesIE.ie_key()
+      - video_id = extracted id
+    - Extracts title and description from OpenGraph metadata (_og_search_title and _og_search_description).
+    - Returns a playlist_result(entries, display_id, title, description).
+  - Key detail: This extractor aggregates multiple video IDs found on an article page and delegates resolution of each to TVANouvellesIE, which in turn delegates to Brightcove via BrightcoveNewIE.
+
+Implementation details:
+- Heavy use of YouTube-DL infrastructure:
+  - Information extraction is driven by _VALID_URL, _TEST, _real_extract, and playlist handling (playlist_result) or single video resolution (url_result).
+  - Inter-extractor coordination: TVANouvellesArticleIE collects video IDs and delegates to TVANouvellesIE, which then delegates to BrightcoveNewIE via a constructed Brightcove URL.
+  - _og_search_title/_og_search_description used to populate playlist metadata when available.
+- Brightcove integration:
+  - BrightcoveNewIE is used to fetch actual video data, with a fixed Brightcove account id (1741764581) in the URL template.
+  - TVANouvellesIE explicitly returns a url_result pointing to the Brightcove player URL, signaling to use BrightcoveNewIE for extraction.
+- Data extraction specifics:
+  - Article extraction relies on data-video-id attributes embedded in the HTML to locate available video IDs.
+  - Direct video pages rely on the Brightcove videoId parameter to locate and fetch the video.
+
+In short, this file enables YouTube-DL to handle TVA Nouvelles videos (via Brightcove) and to assemble video playlists from TVA Nouvelles articles by parsing embedded video IDs and delegating to the Brightcove-backed extractor.

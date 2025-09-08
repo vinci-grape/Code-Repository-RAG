@@ -1,0 +1,22 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/gigya.py:
+
+- Purpose
+  - Provides a base helper for Gigya-based extractors to perform login via Gigya's accounts.login API.
+
+- Key components
+  - GigyaBaseIE class (subclass of InfoExtractor)
+  - _gigya_login(self, auth_data) method
+
+- _gigya_login behavior
+  - Sends a POST request to https://accounts.eu1.gigya.com/accounts.login with data encoded by urlencode_postdata(auth_data).
+  - Uses _download_json to fetch the JSON response, with note="Logging in" and errnote="Unable to log in".
+  - Extracts an error message from the response via auth_info.get('errorDetails') or auth_info.get('errorMessage').
+  - If an error message exists, raises ExtractorError("Unable to login: <message>", expected=True).
+  - If no error, returns the auth_info JSON object.
+
+- Implementation details
+  - Imports: unicode_literals, InfoExtractor, ExtractorError, urlencode_postdata.
+  - The method is designed to be used by other Gigya-based extractors that need to authenticate and then proceed with further extraction.
+
+- Overall function
+  - A concise login helper that handles Gigya authentication, error reporting, and returns the authentication response for downstream use.

@@ -1,0 +1,64 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/videopress.py
+
+What it does
+- VideoPressIE is a video extractor for VideoPress / WordPress Video embeds. It fetches video metadata from WordPress public APIs and builds a list of available video formats, returning standard information (title, description, thumbnail, duration, timestamp, age limit) along with the formats.
+
+Key components
+- Class VideoPressIE(InfoExtractor)
+  - _ID_REGEX: ID pattern for the video (8 alphanumeric chars).
+  - _PATH_REGEX: URL path pattern for VideoPress embeds (video.press or video.wordPress press variants).
+  - _VALID_URL: Regular expression to recognize valid embed URLs, capturing the 8-char id.
+  - _TESTS: Includes tests for a standard embed, and two “only_matching” tests for related URLs (ensures proper URL matching without full extraction).
+
+- _extract_urls(webpage) (static)
+  - Extracts possible VideoPress embed URLs from a page by finding iframes whose src matches the embed path and 8-char id pattern.
+
+- _real_extract(self, url)
+  - Extracts metadata for a specific video_id derived from the URL.
+  - Builds a query using random_birthday('birth_year', 'birth_month', 'birth_day') to simulate age-related access constraints and requests specific fields: description, duration, file_url_base, files, height, original, poster, rating, title, upload_date, width.
+  - Fetches data from the WordPress public API: https://public-api.wordpress.com/rest/v1.1/videos/{video_id}
+  - Determines base URL for video files from either https or http file_url_base.
+  - Builds formats:
+    - QUALITIES defined as ('std', 'dvd', 'hd') and mapped to a numeric scale via the qualities() helper.
+    - Iterates over video['files'] (a dict of format categories to file paths). For each format_id (e.g., 'std', 'dvd', 'hd') and each path, if the path ends with mp4 or ogg, constructs a format dict:
+      - url: urljoin(base_url, path)
+      - format_id: "{format_id}-{ext}"
+      - ext: determined with determine_ext(path, ext)
+      - quality: quality(format_id) to reflect the ordering (std < dvd < hd)
+    - If video['original'] URL exists, adds an 'original' format with:
+      - url: original
+      - format_id: 'original'
+      - quality: len(QUALITIES) (highest)
+      - width/height if available
+  - Sorts the formats with _sort_formats(formats).
+  - Returns a dictionary with:
+    - id: video_id
+    - title: video title
+    - description: description field
+    - thumbnail: poster
+    - duration: duration converted from milliseconds to seconds via float_or_none(video['duration'], 1000)
+    - timestamp: unified_timestamp(video['upload_date'])
+    - age_limit: parse_age_limit(video.get('rating'))
+    - formats: the assembled list of formats
+
+Important implementation details
+- URL handling:
+  - Supports videopress.com/embed/{id} and video.wordpress.com/embed/{id}.
+  - ID is extracted via _match_id from the _VALID_URL regex.
+  - _extract_urls scans for iframes whose src matches the embed path and id pattern to collect potential URLs.
+
+- Data sources:
+  - Uses WordPress public API: /rest/v1.1/videos/{video_id} to obtain metadata and available file formats.
+  - Random birthday query ensures access compatibility for age-restricted content (if any).
+
+- Formats and quality:
+  - Builds formats from video['files'], which is a mapping of format categories to dictionaries of extensions to paths.
+  - Considers only mp4 and ogg extensions.
+  - Creates format_id as "{format_id}-{ext}" to distinguish between std/dvd/hd variants and file extension.
+  - Applies quality ranking based on the predefined QUALITIES order using the qualities() helper.
+  - Adds an 'original' format when available, marking it as the highest quality and including width/height if provided.
+
+- Returned info:
+  - Follows youtube-dl conventions: id, title, description, thumbnail, duration (seconds), timestamp (unix), age_limit, and a list of formats.
+
+Overall, the extractor focuses on retrieving video metadata from WordPress VideoPress, assembling a robust set of available formats (including an explicit original format when present), and returning standard video information suitable for downstream processing and playback.

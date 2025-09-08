@@ -1,0 +1,46 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/bild.py
+
+- Purpose
+  - BildIE extracts video information from Bild.de video pages for youtube-dl.
+
+- Class and inheritance
+  - BildIE(InfoExtractor): implements extraction logic for Bild.de videos.
+
+- URL matching
+  - _VALID_URL: Regular expression that matches Bild.de video URLs of the form
+    http(s)://www.bild.de/.../<display_id>-<id>.bild.html
+    It also allows an optional ,auto=true segment before .bild.html.
+  - Captures:
+    - id: the numeric video ID used as the internal video_id.
+    - display_id: a slug-like display identifier (not used later in code).
+
+- Test data
+  - _TEST provides a sample URL, expected md5 of the downloaded video, and an info_dict with:
+    - id: '38184146'
+    - ext: 'mp4'
+    - title, description, thumbnail, duration
+
+- Core extraction logic (_real_extract)
+  - Derive video_id via self._match_id(url).
+  - Fetch JSON metadata from a derived URL:
+    - Take the base URL up to '.bild.html' and replace it with ',view=json.bild.html'
+    - Use self._download_json(..., video_id) to retrieve metadata; video_id is passed for error context.
+  - Build and return the information dictionary:
+    - id: video_id
+    - title: unescapeHTML(video_data['title']).strip()
+    - description: unescapeHTML(video_data.get('description'))
+    - url: video_data['clipList'][0]['srces'][0]['src'] (direct video URL)
+    - thumbnail: video_data.get('poster')
+    - duration: int_or_none(video_data.get('durationSec'))
+
+- Data handling details
+  - HTML entities in title/description are unescaped with unescapeHTML.
+  - durationSec is converted to int if present via int_or_none.
+  - Assumes at least one clip/source is present; uses the first source URL.
+
+- Implemented utilities
+  - int_or_none: safely convert numeric strings to int or return None.
+  - unescapeHTML: clean HTML entities in titles/descriptions.
+
+- Overall behavior
+  - The extractor retrieves a JSON representation of the video from Bild.de, parses the first clip/source URL as the actual video file, and returns a standard youtube-dl info dict containing id, title, description, direct video URL, thumbnail, and duration.

@@ -1,0 +1,42 @@
+Concise summary of the code in ./youtube-dl/devscripts/check-porn.py
+
+Purpose
+- A lightweight dev script for youtube-dl to help verify that porn sites in the test suite are properly age-limited (18+). It uses two simple approaches to detect porn sites and then checks consistency with age_limit metadata in the test cases.
+
+Main functionality
+- Iterates over test cases obtained from gettestcases().
+- Two operation modes:
+  - EURISTIC (default): fetch each test URL and check if the page content contains the substring "porn" (case-insensitive).
+  - LIST (when a file path is provided as the only command-line argument): treat the file as a domain list and check whether the test URL’s domain (reduced to its second-level domain) appears in that list.
+- For each test, after determining a RESULT (whether the test is considered porn by the chosen method), it compares RESULT against the test’s age_limit information:
+  - If RESULT is True but the test lacks an age_limit entry or age_limit != 18, prints a potential missing age_limit warning.
+  - If RESULT is False but the test has age_limit == 18, prints a potential false negative warning.
+  - Otherwise, prints a dot (.) to indicate a pass.
+- Outputs progress to stdout; failures print a “Fail: testname” line, and overall progress is a sequence of dots, with newlines for failures.
+
+Key components and implementation details
+- Dependency setup:
+  - Adjusts sys.path to import test.helper and gettestcases.
+  - Uses youtube_dl.utils.compat_urllib_parse_urlparse and compat_urllib_request for URL parsing and HTTP requests (provides compatibility across Python versions).
+- Operational modes:
+  - EURISTIC mode:
+    - Performs a HTTP GET to test['url'] with a 10-second timeout.
+    - Reads and decodes the page content as UTF-8 with replacement for errors.
+    - RESULT is True if the lowercased page contains 'porn'.
+  - LIST mode:
+    - Extracts domain from test['url'] via urlparse and uses only the last two labels (domain = "X.Y" where Y is the TLD or last two segments).
+    - Checks if the string ".domain\n" or "\ndomain\n" exists in the LIST content (the file read as UTF-8 text).
+- Age-limit consistency checks:
+  - If a porn-detected test lacks age_limit or has age_limit != 18, flags as potential missing age_limit check.
+  - If a non-porn-detected test has age_limit == 18, flags as potential false negative.
+  - Otherwise, prints a dot to indicate a successful alignment.
+- Output behavior:
+  - On failures to fetch in EURISTIC mode, prints a newline + "Fail: {name}" and continues.
+  - Otherwise prints either a newline-wrapped message for issues or a single dot for success, flushing after each test.
+  - Ends with a final newline.
+
+Notes and caveats
+- The EURISTIC approach is very naive (searches for the literal 'porn' in page content), which can yield false positives/negatives.
+- The LIST approach normalizes domains to their last two labels, which may mis-handle certain TLD structures (e.g., co.uk) in some inputs.
+- The LIST mode requires a file with one domain per line, and matches either a domain line or a domain prefixed by a newline, which may rely on exact formatting of the file.
+- The code is written with Python 2 conventions (e.g., decoding file contents after read, and the import style), though it uses compatibility helpers for URL parsing and requests.

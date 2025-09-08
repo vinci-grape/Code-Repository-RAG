@@ -1,0 +1,51 @@
+Summary of NDTV extractor (youtube_dl/extractor/ndtv.py)
+
+Purpose
+- Implements an InfoExtractor for NDTV video pages. It fetches the page, extracts metadata (title, description, upload date, duration, thumbnail), and constructs the final video URL to be downloaded.
+
+Main components
+- Class: NDTVIE(InfoExtractor)
+  - _VALID_URL: Regex to match NDTV video pages across subdomains (e.g., khabar.ndtv.com, movies.ndtv.com, auto.ndtv.com, etc.). Captures the numeric video id as "id" at the end of the slug.
+  - _TESTS: Array of tests verifying extraction on sample URLs, including two with full info_dict (title, description, duration, upload_date, thumbnail, ext mp4) and several only_matching tests to confirm URL pattern recognition.
+
+- _real_extract(self, url)
+  - video_id: Extracted using self._match_id(url) based on the _VALID_URL pattern.
+  - webpage: Downloaded HTML content via self._download_webpage(url, video_id).
+  - title:
+    - Tries to read a JavaScript variable __title from the page: __title = '...'
+    - Falls back to OpenGraph title if __title is not present.
+    - Uses compat_urllib_parse_unquote_plus to unquote the title.
+  - filename:
+    - Extracts a filename value from the page using a regex: (?:__)?filename\s*[:=]\s*'([^']+)'.
+  - video_url:
+    - The actual video URL is constructed by joining a base NDTV CDN URL with the extracted filename. Specifically uses:
+      urljoin('https://ndtvod.bc-ssl.cdn.bitgravity.com/23372/ndtv/', filename.lstrip('/'))
+    - This handles cases where the page provides a relative filename path.
+  - duration:
+    - Attempts to extract duration from a pattern like (?:__)?duration\s*[:=]\s*'([^']+)'.
+    - Parsed using parse_duration, with fatal=False so absence won’t fail extraction.
+    - Notes: For some sub-sites (e.g., doctor) the duration may be in MM:SS format and is still parsed correctly.
+  - upload_date:
+    - Attempts multiple sources due to site variations:
+      - HTML meta 'publish-date'
+      - HTML meta 'uploadDate'
+      - JSON-like datePublished field in the page (via a regex)
+    - Uses unified_strdate to convert to a YYYYMMDD string if found.
+  - description:
+    - Uses OpenGraph description, then trims a trailing " (Read more)" if present via remove_end.
+  - thumbnail:
+    - Retrieved via _og_search_thumbnail(webpage) (OpenGraph thumbnail extraction).
+  - Return value:
+    - A dict with keys: id, url, title, description, thumbnail, duration, upload_date.
+
+Important implementation details
+- Robust title extraction: prefers a page-internal __title if available, otherwise uses the usual OpenGraph title.
+- Video URL construction: NDTV pages often provide a filename that must be appended to a CDN base URL. The code uses urljoin with a specific base to form the final video URL.
+- Sub-site variability handling:
+  - Some sub-sites lack a publish date, so upload_date is obtained from any of several sources (publish-date, uploadDate, or datePublished field).
+  - Duration may appear in MM:SS format on some pages; parse_duration handles such cases.
+- Description handling: cleans up any trailing “ (Read more)” from the OpenGraph description.
+- Tests cover both concrete metadata extraction and pattern matching for various NDTV subdomains, including pages where only the URL matching is relevant.
+
+Overall functionality
+- The extractor targets NDTV video pages across multiple subdomains, derives a stable video id, fetches page data, and assembles a complete information dictionary including the direct video URL and common metadata (title, description, duration, upload date, thumbnail).

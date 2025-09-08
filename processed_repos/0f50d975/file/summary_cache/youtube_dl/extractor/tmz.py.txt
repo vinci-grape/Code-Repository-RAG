@@ -1,0 +1,51 @@
+This file defines two extractors for TMZ content in youtube-dl: TMZIE for TMZ video pages and TMZArticleIE for TMZ article pages that contain or point to a video.
+
+Main functionality and flow
+
+- TMZIE (video pages)
+  - URL pattern: https?://(www.)?tmz.com/videos/<id>
+  - _real_extract steps:
+    1. Normalize video_id by taking the URL match and replacing '-' with '_'.
+    2. Download the page (non-fatal if missing) and try to locate a TMZ internal video ID via the nodeRef TMZ:video GUID.
+    3. Fetch JSON data from https://www.tmz.com/_/video/<tmz_video_id> (non-fatal if missing).
+    4. If JSON is found:
+       - Read message field to obtain metadata: title, description, published_at, duration.
+       - Build a basic info dict with:
+         - _type: 'url_transparent'
+         - title, description, timestamp (converted via unified_timestamp), duration (int_or_none)
+       - If jwplayer_media_id exists:
+         - Set info['url'] to 'jwplatform:<id>' and info['ie_key'] to JWPlatformIE.ie_key()
+       - Else (no JW Platform id): fall back to Kaltura:
+         - kaltura_entry_id = message.get('kaltura_entry_id') or video_id
+         - kaltura_partner_id = message.get('kaltura_partner_id') or '591531'
+         - Set info['url'] to 'kaltura:<partner_id>:<entry_id>' and info['ie_key'] to KalturaIE.ie_key()
+       - Return the info dict (which will be resolved by the respective plugin).
+    5. If JSON not found or missing video, fall back to a direct Kaltura URL: 'kaltura:591531:<video_id>'.
+  - Key behavior: The extractor defers to the actual video hosting (JWPlatform or Kaltura) while exposing TMZ metadata (title, description, timestamp, duration). It gracefully handles missing pages and falls back to Kaltura when TMZ’s JSON isn’t available.
+
+- TMZArticleIE (article pages with potential embedded videos)
+  - URL pattern: https?://(www.)?tmz.com/YYYY/MM/DD/<id>
+  - _real_extract steps:
+    1. video_id = matched slug from the URL.
+    2. Download the article page.
+    3. Try to find a link within the article page that points to a TMZ video URL (matches TMZIE._VALID_URL). If found, return a URL result targeted at that TMZ video URL (which will then be processed by TMZIE).
+    4. If no direct TMZ video link is found, look for embedded video info via a JavaScript construct: tmzVideoEmbed({...}). Parse the JSON payload to extract an id.
+    5. Build a TMZ video URL using that id: http://www.tmz.com/videos/<id>/ and return a URL result for TMZIE to handle.
+  - Key behavior: It resolves TMZ articles to either a direct TMZ video link or to an embedded video entry that TMZIE can process. It uses skip_download for the article page (per test) when appropriate.
+
+Key implementation details
+
+- Uses InfoExtractor base class utilities: _VALID_URL, _TESTS, _real_extract, _download_webpage, _download_json, _parse_json, _search_regex, _html_search_regex, _match_id, _url_result.
+- Metadata handling:
+  - Uses unified_timestamp to convert published_at to a standard Unix timestamp.
+  - Uses int_or_none to safely coerce duration to an int when available.
+- Video source resolution:
+  - If TMZ JSON contains jwplayer_media_id, the video is served via JW Platform.
+  - If not, it uses Kaltura with a partner_id (default 591531) and entry_id to resolve the video.
+- Fallback behavior:
+  - If TMZ’s JSON data isn’t available, the code falls back to a Kaltura URL using a constructed id.
+- Tests illustrate expected behavior:
+  - A test case ensures proper extraction for a sample TMZ video and that it returns a JWPlatform URL when appropriate.
+  - Other tests check URL matching behavior (only_matching) for various TMZ video URLs.
+
+In short, TMZIE maps TMZ video pages to the underlying video hosting (JW Platform or Kaltura) while preserving basic metadata, and TMZArticleIE handles TMZ article pages by routing to the appropriate TMZ video resource for extraction.

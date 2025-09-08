@@ -1,0 +1,142 @@
+Below is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/common.py.
+
+Overview
+- This module implements the core foundation for all extractors in youtube-dl.
+- It defines the main base class InfoExtractor (and a small SearchInfoExtractor subclass) that other site-specific extractors inherit from.
+- Provides a large collection of utility methods for HTTP requests, parsing, formatting, logging, error handling, and support for a wide range of media delivery formats (HLS/DASH/ISM/RTMP and more).
+
+Main classes
+- InfoExtractor
+  - The central base class for all extractors. Subclasses implement:
+    - _VALID_URL (URL pattern(s) for the site)
+    - _real_extract(self, url) for the site-specific extraction logic
+  - Handles common tasks such as:
+    - URL matching and suitability checks
+    - Downloader integration, cookies, and geo-bypass
+    - Network requests and error handling
+    - Encoding detection and content-block detection
+    - Building standardized result dictionaries (videos, playlists, and URL redirections)
+    - Formatting and sorting video formats
+    - Subtitles and automatic captions merging
+    - Logging and user interaction helpers
+  - Rich feature set used by extractors to implement robust extraction logic with consistent outputs.
+
+- SearchInfoExtractor
+  - A specialized subclass of InfoExtractor for paged search queries.
+  - Provides common search URL construction, handling of prefixes like numbers or “all”, and a mechanism to fetch a configurable number of results via _get_n_results.
+  - Exposes a SEARCH_KEY property used by specific search extractors.
+
+Key data structures and fields
+- Information extraction results follow a common schema. Key fields include:
+  - _type: "video", "playlist", "url", or "url_transparent" to indicate how to handle the result
+  - id, title, description, duration, timestamp, upload_date, categories, tags, etc.
+  - formats: a list of dicts describing each available media format
+  - url, ext, format, protocol, bitrate fields, width/height, vcodec/acodec, etc.
+  - subtitles, automatic_captions: for captioning data
+  - playlist entries: for _type "playlist" with an "entries" list
+- Many helpers return or mutate these dictionaries, ensuring downstream code can handle a uniform structure.
+
+Main functionalities and implementation details
+
+1) URL handling and suitability
+- __match_valid_url and _VALID_URL
+  - _VALID_URL can be a single regex or a sequence of alternatives.
+  - Compiles and caches a tuple of regexes for fast matching.
+- suitable(url) and _match_id(url)
+  - Determine if the extractor is suitable for a URL and extract the ID from the URL.
+
+2) Geo-restriction bypass and IP spoofing
+- Geo bypass is supported via:
+  - _initialize_geo_bypass and __maybe_fake_ip_and_retry
+  - Randomly picks a country or IP block from _GEO_COUNTRIES / _GEO_IP_BLOCKS (or user-provided values via parameters like geo_bypass, geo_bypass_country, geo_bypass_ip_block).
+  - Fake X-Forwarded-For header used to bypass geo restrictions when possible.
+- IP-based bypass is optional and controlled by user parameters.
+
+3) Network requests and error handling
+- _request_webpage, _download_webpage_handle, and _download_webpage
+  - Centralized HTTP access with error handling, retry logic, and support for:
+    - Custom headers, POST data, and query strings
+    - Expected/non-expected HTTP status handling
+    - Proper error messages via ExtractorError
+  - If an X-Forwarded-For IP is set, it is automatically added to headers.
+- Encoding handling
+  - _guess_encoding_from_content analyzes Content-Type and meta charset to decode content safely.
+- Content-block detection
+  - _webpage_read_content calls __check_blocked to raise specific errors for known blocks (Websense, Indian censorship, etc.).
+
+4) Data parsing utilities
+- _parse_xml, _parse_json, _parse_jsonld
+  - Robust parsing with error handling; supports transform_source to pre-process content.
+- _search_regex, _html_search_regex, _get_netrc_login_info, _get_login_info
+  - Flexible regex-based content extraction.
+  - Support for .netrc credentials and login flow integration.
+- JSON-LD and OpenGraph
+  - _search_json_ld and _json_ld parse JSON-LD blocks embedded in HTML.
+  - OpenGraph helpers (_og_search_property, _og_search_title/description/thumbnail/url) extract metadata from HTML meta tags.
+
+5) Formats handling and sorting
+- Core format handling utilities:
+  - _sort_formats sorts the collected formats by a multi-criteria key accounting for:
+    - user preferences (e.g., prefer_free_formats)
+    - protocol priority (http/https vs others)
+    - audio/video presence, quality (tbr/abr/vbr), resolution, codecs, etc.
+    - format_id, language_preference, bitrate, and other fields
+  - _check_formats and _remove_duplicate_formats to validate URLs and deduplicate formats by URL.
+  - _is_valid_url and http_scheme help validate and construct URLs.
+
+6) Media format extraction methods
+Various extractors for different streaming technologies share common methods here:
+- F4M (Adobe HDS)
+  - _extract_f4m_formats, _parse_f4m_formats
+  - Handles bootstrapInfo, media nodes, bitrates, resolution, and nested manifest URLs (including recursion for f4m inside f4m).
+- M3U8 (HLS)
+  - _extract_m3u8_formats, _parse_m3u8_formats
+  - Parses master vs. media playlists, and builds formats with proper format_ids, widths/heights, and bitrates.
+  - Supports progressive URLs and segment lists with appropriate protocol tagging (m3u8/m3u8_native, etc.).
+- SMIL (Smooth)
+  - _extract_smil_formats, _parse_smil_formats
+  - Reads SMIL documents to extract RTMP/HTTP-based formats, including fragment URL patterns and initialization data.
+- ISM (Smooth Streaming)
+  - _extract_ism_formats, _parse_ism_formats
+  - Parses MS-SSTR ISM manifests, including StreamIndex/QualityLevel, Bitrate, Width/Height, and fragment URL generation.
+- MPD (DASH)
+  - _extract_mpd_formats_and_subtitles, _parse_mpd_formats_and_subtitles, _parse_mpd_formats
+  - Handles Periods, AdaptationSets, Representations, and creates formats with tbr, width/height, codecs, etc.
+  - Supports segment-based (fragments) and initialization data, as well as DRM indicators.
+- XSPF playlists
+  - _extract_xspf_playlist, _parse_xspf
+  - Parses XSPF playlist XML to extract track entries with their own formats and metadata.
+
+7) JWPlayer, Akamai, and other player data
+- JWPlayer
+  - _find_jwplayer_data, _extract_jwplayer_data, _parse_jwplayer_data, _parse_jwplayer_formats
+  - Handles flattened playlists, sources, tracks, and subtitles.
+- JWPlayer formats extraction logic delegates to _parse_jwplayer_formats, which can trigger m3u8/MPD/SMIL extraction or plain HTTP/other formats.
+
+8) Auxiliary utilities
+- _og_search_* and _html_search_meta helpers for extracting OpenGraph metadata and meta tags
+- _hidden_inputs and _form_hidden_inputs for extracting hidden form inputs from HTML (useful for login flows or forms)
+- _generic_id, _generic_title for deriving IDs/titles from URLs
+- _yes_playlist and related messaging for respecting --no-playlist behavior and user prompts
+- _live_title for generating a timestamped title for live streams
+- _set_cookie, _get_cookies, and _apply_first_set_cookie_header for cookie management
+- get_testcases, is_suitable for testing and compatibility checks
+
+9) Subtitles and captions
+- extract_subtitles and extract_automatic_captions methods provide a hook for subclass implementations.
+- _merge_subtitle_items and _merge_subtitles merge subtitles across multiple sources.
+
+Error handling and user feedback
+- The code is peppered with user-facing messages via to_screen and report_warning.
+- Many methods raise ExtractorError with appropriate messaging and optional causes.
+- Geo-restriction and login/captcha-like situations raise specific errors (GeoRestrictedError, raise_login_required).
+
+Usage and extensibility
+- This module is designed to be the shared backbone for site-specific extractors.
+- Subclasses implement site-specific logic in _VALID_URL and _real_extract, while reusing the common utilities for network access, parsing, and format handling.
+- The design emphasizes lazy loading, compatibility with Python 2/3, and a large set of supported media formats and manifest types.
+
+In short
+- The file provides the comprehensive, reusable core for extracting video information from a wide variety of sites and formats.
+- It includes robust networking, encoding, and error handling, a powerful format ranking and parsing system, and extensive helpers for metadata extraction (OpenGraph, JSON-LD, JWPlayer, etc.).
+- It enables consistent outputs (videos, playlists, and URL redirections) and supports geo-bypass, authentication, subtitles, and multiple streaming protocols.

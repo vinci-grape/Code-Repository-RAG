@@ -1,0 +1,79 @@
+- Purpose: TEDIE is a YouTube-DL extractor for TED talks, playlists, and embedded TED videos. It supports native TED formats, HLS/m3u8, RTMP, as well as YouTube cross-links and external embeds.
+
+- Class and entry point:
+  - Class: TEDIE(InfoExtractor)
+  - IE_NAME: 'ted'
+  - _VALID_URL: complex regex to match TED pages (talks, playlists, watch pages, embed URLs), with optional language in the path and a slug name.
+  - _TESTS: several examples covering talks, playlists, external YouTube links, missing HTTP bitrates, and embedded URLs; demonstrate expected id, ext, title, description, uploader, duration, thumbnails, and playlist details.
+
+- Key data and formats:
+  - _NATIVE_FORMATS: mapping for native formats used on TED pages
+    - low: 320x180
+    - medium: 512x288
+    - high: 854x480
+
+- Core helpers:
+  - _extract_info(self, webpage): extracts a JSON-like info object embedded in the page via a script pattern q("<something>.init", {...}); returns the parsed JSON.
+  - url_or_none, _search_regex, _og_search_title/description, _extract_m3u8_formats, _sort_formats, _is_valid_url, and other utility helpers are used throughout.
+
+- Main extraction flow (_real_extract):
+  - If URL is an embed, rewrite to the desktop TED URL and delegate to TED extractor.
+  - If type is talks -> _talk_info(url, name)
+  - If type is watch -> _watch_info(url, name)
+  - Otherwise (playlist) -> _playlist_videos_info(url, name)
+
+- Playlist extraction (_playlist_videos_info):
+  - Downloads the playlist page.
+  - Finds entries with data-ga-context="playlist" and builds a list of per-entry URLs as separate TED extractions.
+  - Determines playlist_id from the final og:url when available, and sets playlist_title/description via OpenGraph data.
+  - Returns a playlist_result with video entries, id, title, and description.
+
+- Talk extraction (_talk_info):
+  - Downloads the talk page and loads info via _extract_info.
+  - Retrieves data: either __INITIAL_DATA__ or the top-level info object; talks[0] is used for the current talk.
+  - Build formats from:
+    - nativeDownloads (e.g., direct URLs for different resolutions)
+    - subtitledDownloads for language-specific formats (added with language and format_id like low-en, etc.)
+    - Video resources from talk_info['resources'] and talk_info['player_talks']:
+      - hls: extract m3u8 formats using _extract_m3u8_formats
+      - h264: direct files with bitrate; create format_id like h264-700k and tbr
+      - rtmp: RTMP formats with streamer and play_path
+  - Post-processing:
+    - Filter m3u8 formats to ensure proper vcodec and protocol, and augment with width/height when available.
+    - If a direct http URL exists for h264, create http-adapted formats by substituting bitrate into the m3u8 URL when possible (to provide HTTP streaming variants).
+  - Audio: include an audioDownload format if present (vcodec set to none).
+  - External fallback: if no formats discovered and an external video is present (e.g., external service like YouTube), return a url_result for that external URL.
+  - Subtitles: _get_subtitles(video_id, talk_info) builds language subtitle URLs from talk_info['downloads']['languages'] or talk_info['languages'], mapping languageCode/ianaCode to a list of subtitle URLs (.ted and .srt formats).
+  - Final info dictionary includes:
+    - id, title, uploader, thumbnail, description (from OG data), subtitles, formats, duration (float), view_count, comment_count, tags.
+  - Sorting: _sort_formats(formats) is called to canonicalize ordering.
+  - Special fields:
+    - video_id from talks['id']
+    - uploader = speaker from talk_info or player_talks
+    - description from OG data if available
+
+- Watch extraction (_watch_info):
+  - Downloads the watch page.
+  - Tries to locate JWPlayer config in the page via a script pattern; if not found, falls back to an embedded video iframe and returns that URL as a TED page result.
+  - If config is found:
+    - video_url = config['video']['url']
+    - thumbnail = config.get('image', {}).get('url')
+    - title extracted from an H1 tag
+    - description extracted from one of two possible sections
+  - Returns a direct video entry dict with id (name from URL), url, title, thumbnail, description.
+
+- Notable implementation details:
+  - Handles multiple TED content types in a single extractor: talks, playlists, watch pages, and embed redirection.
+  - Robust data extraction: uses _extract_info to pull embedded JSON and gracefully handles missing data or alternate page structures.
+  - Flexible format generation to cover:
+    - Native direct downloads
+    - Subtitled downloads by language
+    - HLS/m3u8 streams
+    - H264 progressive/downloads with bitrate labeling
+    - RTMP streams
+  - Fallback logic for external/YouTube-connected videos when TED-native formats aren’t available.
+  - Subtitles are collected per language with both TED (.ted) and SRT formats.
+  - Uses OpenGraph data to populate playlist and video metadata where available.
+  - Careful URL handling for embed and desktop pages to avoid duplicating entries or missing content.
+
+Overall, TEDIE is a comprehensive extractor for TED’s site that normalizes talks and playlists into YouTube-DL’s standard InfoExtractor outputs, with broad support for TED’s various delivery formats and fallback paths to external video services when TED-native formats aren’t available.

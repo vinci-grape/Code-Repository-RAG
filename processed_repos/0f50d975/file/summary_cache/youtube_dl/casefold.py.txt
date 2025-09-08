@@ -1,0 +1,37 @@
+Concise summary of ./youtube-dl/youtube_dl/casefold.py
+
+- Purpose
+  - Provide Unicode case folding functionality by preloading a mapping from ICU’s CaseFolding data. It supports both simple (C+S) and full (C+F) case foldings. The code folds each character in a string according to this mapping.
+
+- Key data and structures
+  - _map_str: A large string containing ICU CaseFolding.txt data (embedded in the source). It includes mappings like “0041; C; 0061;” etc.
+  - _map: A dictionary mapping from a Unicode character (the “from” code point) to its case-folded string (the concatenation of the mapped target code points). Only statuses C (common) and F (full) are included.
+  - The mapping is constructed at import time by parsing _map_str.
+
+- Important implementation details
+  - _parse_unichr(s):
+    - Converts a hex string (e.g., '0041') to the corresponding Unicode character using compat_chr.
+    - Includes a fallback for narrow Python builds: if compat_chr raises ValueError, it constructs the character via a Unicode escape sequence ('\\U%08x' % s) and decodes it.
+  - _map construction:
+    - Iterates lines in _map_str, skipping blanks and comments.
+    - Each relevant line is split into from_, type_, to_ using '; ' as delimiter.
+    - If type_ is 'C' or 'F', computes the mapped string:
+      - to_ can contain multiple code points separated by spaces; each is converted with _parse_unichr.
+      - The resulting string is the concatenation of these characters.
+    - The key in _map is the actual “from” character (not the code point number) and the value is the mapped string.
+  - Post-processing:
+    - _map_str is deleted after building _map to save memory.
+  - _casefold(s):
+    - Internal function that expects s to be compat_str (unicode/text type).
+    - Returns a new string where each character is replaced by its mapping in _map if present; otherwise the character itself is kept.
+    - Implemented as a simple per-character lookup: ''.join((_map.get(c, c) for c in s)).
+
+- Usage and behavior
+  - _casefold is intended for internal use (name prefixed with an underscore), leveraging ICU-based mappings to perform Unicode case folding.
+  - Only C and F mappings are applied; lines with status T (Turkish-I related) are ignored by default.
+  - The approach supports both stable one-to-one foldings and full foldings that may expand the string length.
+
+- Main takeaways
+  - The module embeds a large ICU CaseFolding data block, parses it into a Python dictionary, and exposes an internal function _casefold to fold Unicode strings efficiently at runtime.
+  - It handles 32-bit code points and Python-wide unicode compatibility via compat utilities.
+  - Memory considerations are addressed by freeing the raw data string after building the mapping.

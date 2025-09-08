@@ -1,0 +1,67 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/trilulilu.py
+
+Purpose
+- Implement a YouTube-DL extractor for Trilulilu.ro to fetch metadata and direct media URLs for videos and audio on trilulilu.ro.
+
+Key class
+- TriluliluIE(InfoExtractor)
+  - Inherits common extractor behavior from InfoExtractor.
+
+Main functionality
+- URL matching
+  - Uses _VALID_URL to recognize trilulilu.ro pages and capture a display id (slug) from the URL.
+- Data source
+  - Retrieves JSON data from the mobile site: http://m.trilulilu.ro/<display_id>?format=json
+- Error handling and access control
+  - Checks media_info['errors']:
+    - friends -> video is private (ExtractorError, expected)
+    - geoblock -> not available in country (ExtractorError, expected)
+    - xxx_unlogged -> set age_limit to 18
+- Media validation
+  - Ensures media_class is either 'video' or 'audio'; otherwise raises an error.
+- Metadata extraction
+  - user information from media_info['user']
+  - thumbnail from media_info['cover_url'] (note: code calls thumbnail.format(...) but does not store the result, which is likely a bug)
+  - title from media_info['title']
+  - description from media_info.get('description')
+  - uploader_id from user['username'], uploader from user['fullname']
+  - published timestamp parsed via parse_iso8601(media_info.get('published'), ' ')
+  - duration, view_count, like_count, comment_count converted to integers with int_or_none
+  - age_limit determined from errors as 0 or 18
+
+Formats construction
+- Base format
+  - url: media_info['href']
+  - ext: stream_type (e.g., 'mp4')
+- HD format (if available)
+  - format_id: 'hd'
+  - url: media_info['hrefhd']
+  - ext: same as stream_type
+- Audio handling
+  - If media_class == 'audio', set formats[0]['vcodec'] = 'none' (no video)
+  - Else (video), set formats[0]['format_id'] = 'sd'
+- Note: The ext for all formats comes from stream_type
+
+Returned information
+- id: extracted from media_info['identifier'].split('|')[1]
+- display_id: the slug from the URL
+- formats: list of one or two format entries (base and optional HD)
+- title, description, thumbnail
+- uploader_id, uploader
+- timestamp (parsed)
+- duration, view_count, like_count, comment_count
+- age_limit
+
+Tests
+- _TESTS contains two sample URLs with expected metadata (md5, info_dict) to validate extraction:
+  - Example 1: http://www.trilulilu.ro/big-buck-bunny-1
+  - Example 2: http://www.trilulilu.ro/adena-ft-morreti-inocenta
+  - Tests validate id, title, description, uploader info, timestamps, and counts.
+
+Implementation notes and potential issues
+- thumbnail handling appears incorrect: thumbnail = media_info.get('cover_url'); if thumbnail: thumbnail.format(width='1600', height='1200')
+  - thumbnail.format(...) creates a new string but is not assigned back; likely intended to reassign thumbnail or pass new size elsewhere.
+- The code assumes certain fields exist (href, hrefhd, stream_type, identifier, etc.) in the JSON structure returned by Trilulilu.
+- Extensibility: supports both audio and video with proper handling of vcodec for audio and a default 'sd' format_id for video.
+
+Overall, this extractor fetches a JSON representation of a Trilulilu media item, handles common access errors, builds usable direct media URLs, and returns a rich metadata dictionary suitable for downstream processing by youtube-dl.

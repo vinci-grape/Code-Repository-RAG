@@ -1,0 +1,26 @@
+- Purpose: A YouTube-dl extractor for videos on the Romanian site 220.ro. It parses a page under a category/shorttitle/id URL and returns a playable MP4 format.
+
+- Main class and key components:
+  - Ro220IE(InfoExtractor): Defines extractor name (IE_NAME), URL pattern (_VALID_URL), and test data (_TEST).
+  - _real_extract(self, url): Core extraction logic.
+
+- How it works:
+  - video_id = self._match_id(url): Extracts the video ID from the URL using the named group in _VALID_URL.
+  - webpage = self._download_webpage(url, video_id): Downloads the page content.
+  - url = compat_urllib_parse_unquote(self._search_regex(...)): Searches the page for a script snippet containing clip: { ... url: '...'} and captures the video URL, then URL-decodes it.
+  - title = self._og_search_title(webpage): Retrieves the title from OpenGraph metadata.
+  - description = self._og_search_description(webpage): Retrieves the description from OpenGraph metadata.
+  - thumbnail = self._og_search_thumbnail(webpage): Retrieves the thumbnail URL from OpenGraph metadata.
+  - formats = [{ 'format_id': 'sd', 'url': url, 'ext': 'mp4' }]: Creates a single MP4 format (SD) pointing to the extracted URL.
+
+- Return value:
+  - A dict with keys: id, formats, title, description, thumbnail.
+
+- Notable implementation details:
+  - The video URL extraction relies on a regex targeting a JavaScript-like structure: clip: { ... url: '...'} and decodes the found URL.
+  - Uses OpenGraph helpers for metadata extraction.
+  - The _TEST block provides a concrete example URL, expected MD5 for the MP4, and an info_dict with id, extension, title, and a description regex for validation.
+
+- Limitations/considerations:
+  - Only a single SD format is exposed (no multi-quality extraction).
+  - Relies on the presence of the specific clip URL pattern in the page; if the page structure changes, extraction may fail.

@@ -1,0 +1,29 @@
+Concise summary of ./youtube-dl/devscripts/bash-completion.py
+
+- Purpose
+  - Generates a Bash completion script for youtube-dl by extracting all CLI options from youtube-dl’s option parser and injecting them into a template.
+
+- Main functionality
+  - build_completion(opt_parser): 
+    - Iterates over all option groups and options from the provided opt_parser.
+    - Collects each option’s flag string (option.get_opt_string()) into a list.
+    - Reads a Bash completion template (devscripts/bash-completion.in).
+    - Replaces the placeholder {{flags}} in the template with the space-separated list of collected flags.
+    - Writes the resulting content to youtube-dl.bash-completion.
+
+- Key components
+  - Imports youtube_dl and accesses its argument parser via parseOpts().
+  - Reads template content using read_file from utils.
+  - Opens the output file with compat_open (supports encoding for Python 2/3 compatibility) and writes UTF-8 content.
+
+- Important implementation details
+  - Path handling: adjusts sys.path to include the repository root so it can import the local youtube_dl module.
+  - Output and template paths are:
+    - TEMPLATE: devscripts/bash-completion.in
+    - OUTPUT: youtube-dl.bash-completion
+  - The script executes at import/run time: it fetches parser = youtube_dl.parseOpts()[0] and immediately calls build_completion(parser).
+  - The placeholder substitution is a simple string replace of "{{flags}}" with the gathered flags.
+
+- Notes
+  - Assumes the template and output paths are correct relative to the working directory when run.
+  - The comment mentions “long flags,” but the code collects all option strings, which may include short flags as well depending on how Option.get_opt_string() behaves.

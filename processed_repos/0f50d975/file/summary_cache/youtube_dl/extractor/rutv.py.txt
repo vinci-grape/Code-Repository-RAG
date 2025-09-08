@@ -1,0 +1,74 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/rutv.py
+
+What it is:
+- A YouTube-DL (yt-dlp-inspired) extractor for RUTV.RU and VGTRK player pages. It handles both live and VOD content delivered via RTMP, HLS (m3u8), and direct URLs.
+
+Main class and entry points:
+- RUTVIE(InfoExtractor): Main extractor class.
+- _VALID_URL: Complex regex to match:
+  - player.rutv.ru or player.vgtrk.com
+  - Paths for flash container, iframe-based video/live, or index/iframe/cast_id
+  - Extracts video_id from the URL
+- _extract_url(cls, webpage): Class method that scans HTML to find the actual video URL when the page embeds the player. It looks for:
+  - iframe src matching the supported domains
+  - meta og:video content containing the container.swf URL
+  Returns the extracted URL if found.
+- _real_extract(self, url): Core extraction logic:
+  - Parses video_id and path from the URL using _VALID_URL.
+  - Determines video_type:
+    - flash\d+v → 'video'
+    - iframe/... with type; swf is remapped to 'video'
+    - index/iframe/cast_id → 'live'
+  - is_live set if video_type == 'live'
+  - Fetches JSON data from:
+    - http://player.rutv.ru/iframe/data/video/id/{video_id} (for VOD)
+    - http://player.rutv.ru/iframe/data/live/id/{video_id} (for live)
+  - Validates JSON; raises ExtractorError if errors exist.
+  - Navigates json_data.data.playlist and medialist to obtain the first media entry.
+  - Extracts metadata:
+    - view_count = playlist.count_views (optional)
+    - priority_transport = playlist.priority_transport
+    - thumbnail, width, height
+    - description (anons), title, duration
+  - Builds a list of formats by iterating media.sources:
+    - For each transport and its URLs:
+      - Compute preference = -1 if this transport matches priority_transport, else -2
+      - RTMP:
+        - Parses RTMP URL into url, app, play_path via regex
+        - Creates a format with: url, play_path, app, page_url (http://player.rutv.ru),
+          player_url (http://player.rutv.ru/flash3v/osmf.swf?i=22), rtmp_live (True),
+          ext='flv', vbr from quality, and the computed preference
+      - HLS (m3u8):
+        - Uses _extract_m3u8_formats(url, video_id, 'mp4', preference, m3u8_id='hls')
+        - Skips adding a non-HLS format in this branch (continues)
+      - Other transports:
+        - Creates a format with {'url': url}
+      - Common metadata for each format:
+        - width, height (if available)
+        - format_id = '{transport}-{quality}'
+    - Appends each format to formats
+  - Sorts formats with _sort_formats(formats)
+  - Returns a dict with:
+    - id, title (live titles use self._live_title(title)), description, thumbnail,
+      view_count, duration, formats, is_live
+
+Key implementation details:
+- Live detection: video_type 'live' derived from path; title adjusted via _live_title when is_live.
+- Data source: JSON endpoint at /iframe/data/{video|live}/id/{id} providing playlist and medialist info.
+- Error handling: If json_data['errors'] or media['errors'] exist, raises ExtractorError with the server-provided message.
+- Format gathering:
+  - RTMP: strict parsing to extract url, app, play_path; sets rtmp_live and flv extension.
+  - HLS: uses existing yt-dlp/youtube-dl helper _extract_m3u8_formats to produce MP4 formats; assigns m3u8_id='hls'.
+  - Other transports: straightforward URL formats with width/height and a meaningful format_id.
+- Metadata uses helper utilities:
+  - int_or_none for numeric fields
+  - str_to_int for bitrate-like values
+- Tests (_TESTS) cover multiple URL patterns:
+  - iframe, flash-based container.swf, live iframe, and a test-only-matching URL
+  - Covers both VOD (mp4/flv) and live formats, with m3u8 download expectation (skip_download) when appropriate
+  - Includes duration, title, description (md5-hashed in tests), and is_live flags
+
+What you get from this extractor:
+- Works with both live and VOD content from Rutv.ru and VGTRK player pages.
+- Produces a standardized info dict including id, title, description, thumbnail, view_count, duration, is_live, and a list of formats with appropriate metadata (width, height, format_id, etc.).
+- Handles multiple streaming protocols (RTMP, HLS, direct HTTP) and selects formats according to server-provided priority_transport.

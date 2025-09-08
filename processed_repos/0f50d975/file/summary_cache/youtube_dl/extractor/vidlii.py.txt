@@ -1,0 +1,51 @@
+- Purpose
+  - Implement a YouTube-DL extractor for VidLii videos (VidLiiIE). It fetches a video page, discovers available MP4 formats, and extracts rich metadata (title, description, uploader, dates, counts, categories, tags, etc.).
+
+- Key components
+  - Class VidLiiIE(InfoExtractor)
+    - _VALID_URL: Regex to match VidLii watch and embed URLs with a video id captured as id (11 chars of [0-9A-Za-z_-]).
+    - _TESTS: Includes tests for regular watch pages (with expected metadata and md5), an HD example, and an embed URL (only_matching test).
+    - _real_extract(url): Core extraction logic.
+
+- Main workflow in _real_extract
+  - video_id extraction
+  - Download page: fetches https://www.vidlii.com/watch?v=<video_id>
+  - Formats extraction
+    - Defines helper add_format(format_url, height=None) that infers height by looking for a number before ".mp4" in the URL and builds a format dict with url, height, and format_id (e.g., "360p").
+    - Finds video sources in the page via a JS-like pattern: src: "<url>" (supports both http/https and unquoted URLs until a closing quote).
+    - Resets formats list, then:
+      - If there are at least two sources, add the second source first (likely HD) and run _check_formats to validate.
+      - If there is at least one source, add the first source.
+    - Sorts the formats with _sort_formats.
+  - Metadata extraction
+    - Title: from <h1> or <title> with a VidLii suffix.
+    - Description: prefer meta description or twitter:description, else fallback to the des_text element.
+    - Thumbnail: from twitter:image meta; if missing, try to locate an img path in the page and join with base URL.
+    - Uploader and uploader_url: regex-based extraction for a user link, constructs the uploader URL if found.
+    - Upload date: prefers datePublished meta, else tries an inline <date> tag, normalized via unified_strdate.
+    - Duration: from video:duration meta or a regex pattern duration: <n>, converted to int.
+    - View count: robust extraction via two patterns (e.g., “123 views” or “Views: <strong>123</strong>”).
+    - Comment count: via patterns for a cmt_num element or a “Comments: <strong>” pattern.
+    - Average rating: extracted as a float if present.
+    - Categories: single category detected via a specific pattern; stored as a list if present.
+    - Tags: extracted from anchor links that look like search results (q parameter), cleaned, or None if none found.
+  - Return value: a dictionary with id, formats, title, description, thumbnail, uploader, uploader_url, upload_date, duration, view_count, comment_count, average_rating, categories, and tags.
+
+- Important implementation details
+  - Formats handling
+    - Uses a small helper to infer height from the mp4 URL (height defaults to 360 if not detectable).
+    - Adds up to two formats from the page sources, attempting to prioritize higher quality by adding the secondary source first and then the primary.
+  - Metadata parsing
+    - Flexible title extraction (supports both h1 and title patterns).
+    - Multi-source description extraction with a fallback to des_text element.
+    - Thumbnail extraction supports meta tags first, with a robust JS/HTML fallback if needed.
+    - Upload date normalization via unified_strdate for consistent date formatting.
+  - Resilience and robustness
+    - Multiple regex fallbacks for counters (views, comments), duration, and category.
+    - Optional fields (uploader, thumbnail, etc.) are handled gracefully when not found (fatal=False or None).
+  - Tests
+    - Verifies extraction on known VidLii watch URLs, including HD, and ensures correct id, title, description, counts, categories, and tags.
+    - Includes an embed URL test with only_matching to ensure URL pattern recognition works even if not fully extracting.
+
+- Overall
+  - This extractor focuses on discovering VidLii video sources embedded in the page, constructing a minimal, consistent formats list, and compiling a rich metadata dictionary for downstream use in youtube-dl. It handles common VidLii page structures and provides fallbacks for metadata extraction to maximize success across VidLii pages.

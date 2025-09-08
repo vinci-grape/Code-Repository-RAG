@@ -1,0 +1,74 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/mnet.py
+
+Overview
+- Implements an InfoExtractor for Mnet (Mnet TV/VOD) videos, named MnetIE.
+- Supports URLs from mnet.com and mnet.interest.me under the /tv/vod/ path.
+- Fetches video metadata and streaming formats via Mnet’s API endpoints and CDN config, then returns a standard YouTube-dl info dict.
+
+Key components
+- Class: MnetIE(InfoExtractor)
+- URL pattern: _VALID_URL matches:
+  - http(s)://(www.)?mnet.(com|interest.me)/tv/vod/(optional clip_id parameter)?<id>
+  - Extracts video_id as the numeric ID at the end or after clip_id
+
+- Tests: _TESTS
+  - Test 1: Typical Mnet URL, expects id, title, description (md5 placeholder), duration, upload_date, timestamp, age_limit, thumbnails, ext, and to skip download (RTMP download not attempted by default in test).
+  - Test 2 & 3: only_matching tests ensuring other URL formats/domains don’t trigger extraction.
+
+Core extraction logic
+- _real_extract(self, url):
+  - video_id = self._match_id(url)
+  - Fetch vod config:
+    - Endpoint: http://content.api.mnet.com/player/vodConfig
+    - Query: id=video_id, ctype=CLIP, stype=H
+    - Returns JSON: data.info contains video metadata
+  - title = info['title']
+
+  - Fetch CDN data:
+    - cdn_url = info['cdn'] (a URL to CDN JSON)
+    - CDN JSON: data[0] contains details for the primary CDN
+    - m3u8_url = cdn_data['url']
+    - If token present and not '-', append as query string to m3u8_url (m3u8_url += '?' + token)
+
+  - Formats:
+    - Use _extract_wowza_formats with m3u8_url
+    - Skip protocols: ['rtmp', 'rtsp', 'f4m'] (note: code has a TODO to implement RTMP extraction)
+    - Call self._sort_formats(formats)
+
+  - Metadata extraction:
+    - description: info.get('ment')
+    - duration: parse_duration(info.get('time'))
+    - timestamp: parse_iso8601(info.get('date'), delimiter=' ')
+    - age_limit: info.get('adult')
+      - If age_limit is not None: convert 'N' to 0, else 18
+    - thumbnails: build list from info.get('cover', {}):
+      - Each item: {'id': thumb_format, 'url': thumb['url'], 'width': int_or_none(thumb.get('width')), 'height': int_or_none(thumb.get('height'))}
+      - Only include entries with a 'url'
+
+  - Return dictionary:
+    - id: video_id
+    - title
+    - description
+    - duration
+    - timestamp
+    - age_limit
+    - thumbnails
+    - formats
+
+Important implementation details
+- Data sources:
+  - vodConfig API returns video metadata under data.info
+  - CDN JSON in info['cdn'] provides the actual streaming URL (m3u8) and optional token
+- Streaming formats:
+  - Primary format source is an m3u8 (Wowza) URL derived from the CDN JSON
+  - Uses _extract_wowza_formats to build formats, skipping rtmp/rtsp/f4m as not supported by default
+  - Token handling: if token exists and is not '-', it is appended to the m3u8 URL
+- Metadata handling:
+  - Time/dates parsed with parse_duration and parse_iso8601
+  - Age limit logic: 'adult' field mapped to 0 for 'N' else 18
+  - Thumbnails support multiple sizes via the 'cover' dict in info
+- TODO note in code:
+  - There is a comment indicating RTMP format extraction is not implemented; current extraction focuses on Wowza (HLS) formats.
+
+In short
+- This extractor fetches Mnet video metadata and an m3u8-based streaming URL via the vodConfig and CDN endpoints, assembles a list of playable formats (preferring Wowza/HLS), and returns a rich info dictionary with id, title, description, duration, timestamp, age_limit, thumbnails, and formats. It deliberately avoids RTMP/Rtsp/F4M format extraction (not yet implemented).

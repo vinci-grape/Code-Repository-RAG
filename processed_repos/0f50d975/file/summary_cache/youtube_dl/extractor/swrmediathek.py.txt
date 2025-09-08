@@ -1,0 +1,77 @@
+Concise summary of SWRMediathek extractor (youtube_dl/extractor/swrmediathek.py)
+
+Purpose
+- Implement a YouTube-DL extractor for SWR Mediathek provider. It fetches video metadata and streaming formats from the SWR Mediathek “player” pages.
+
+Key class
+- SWRMediathekIE(InfoExtractor)
+  - Inherits from InfoExtractor and implements _real_extract to obtain video info and formats.
+
+URL matching
+- _VALID_URL = r'https?://(?:www\.)?swrmediathek\.de/(?:content/)?player\.htm\?show=(?P<id>[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})'
+  - Matches URLs like:
+    - http(s)://swrmediathek.de/player.htm?show=<uuid>
+    - http(s)://swrmediathek.de/content/player.htm?show=<uuid>
+
+Tests
+- _TESTS contains three scenarios:
+  1) A SWR odysso video (mp4) with all metadata (title, description, thumbnail, duration, upload_date, uploader, uploader_id).
+  2) A redirect case (skip) for a different show.
+  3) An audio entry (mp3) with skip redirect as well.
+- Each test provides expected id, ext, title, description (via md5), thumbnail pattern, duration, upload_date, uploader, uploader_id, and a skip condition when redirected.
+
+Main extraction flow (_real_extract)
+1) Extract video_id from URL using self._match_id(url).
+2) Download JSON metadata from:
+   http://swrmediathek.de/AjaxEntry?ekey=<video_id>
+   - Uses self._download_json with video_id as the display id.
+3) Parse base attributes:
+   - attr = video['attr']
+   - title = attr['entry_title']
+   - media_type = attr.get('entry_etype')  # typically 'Video' or 'Audio'
+4) Build formats by iterating video['sub']:
+   - Only consider items where entry['name'] == 'entry_media'.
+   - entry_attr = entry.get('attr', {})
+   - f_url = entry_attr.get('val2')  # media URL
+   - Skip if no f_url.
+   - codec = entry_attr.get('val0')  # e.g., 'm3u8', 'f4m', or direct codec
+   - If codec == 'm3u8':
+     - Extract HLS formats via self._extract_m3u8_formats(f_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+   - Else if codec == 'f4m':
+     - Extract HDS formats via self._extract_f4m_formats(f_url + '?hdcore=3.7.0', video_id, f4m_id='hds', fatal=False)
+   - Else (direct format URL):
+     - Build a format dict:
+       - 'format_id': determine_protocol({'url': f_url})
+       - 'url': f_url
+       - 'quality': int_or_none(entry_attr.get('val1'))
+       - 'vcodec': codec if media_type == 'Video' else 'none'
+       - 'acodec': codec if media_type == 'Audio' else None
+5) Sort formats with self._sort_formats(formats).
+6) Upload date:
+   - upload_date = None
+   - entry_pdatet = attr.get('entry_pdatet')
+   - If present, upload_date = entry_pdatet[:-4] (strip trailing characters, likely timezone)
+7) Return a dictionary with video metadata and formats:
+   - 'id': video_id
+   - 'title': title
+   - 'description': attr.get('entry_descl')
+   - 'thumbnail': attr.get('entry_image_16_9')
+   - 'duration': parse_duration(attr.get('entry_durat'))
+   - 'upload_date': upload_date
+   - 'uploader': attr.get('channel_title')
+   - 'uploader_id': attr.get('channel_idkey')
+   - 'formats': formats
+
+Important implementation details
+- The code handles multiple format types:
+  - HLS (m3u8) and HDS (f4m) streaming formats are extracted when indicated by codec values.
+  - Direct media URLs are added with protocol-derived format_id and appropriate codecs based on media type (Video vs Audio).
+- It uses helper utilities:
+  - parse_duration to convert duration strings to seconds.
+  - int_or_none to safely parse integers (quality).
+  - determine_protocol to derive a stable format_id for direct URLs.
+- It gracefully handles missing media URLs by skipping those entries.
+- The final metadata includes uploader information and unique uploader_id, aligning with SWR Mediathek’s metadata fields (channel_title, channel_idkey).
+
+In short
+- This extractor retrieves a SWR Mediathek show entry via AjaxEntry, processes its media sub-entries to build a robust list of available formats (HLS, HDS, and direct), and returns a structured metadata dictionary with id, title, description, thumbnail, duration, upload date, uploader details, and the formats.

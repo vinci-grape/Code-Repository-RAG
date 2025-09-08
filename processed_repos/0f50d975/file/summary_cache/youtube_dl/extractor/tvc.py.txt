@@ -1,0 +1,57 @@
+Summary of ./youtube-dl/youtube_dl/extractor/tvc.py
+
+Purpose:
+- Implements two extractors for TVC (Russian TV channel) content:
+  - TVCIE: for video pages loaded via an iframe (Video ID based JSON endpoint).
+  - TVCArticleIE: for standard article/ channel pages that link to a TVC video via Open Graph data.
+
+Key classes and main functionality:
+- TVCIE (InfoExtractor)
+  - URL pattern: https://(www.)?tvc.ru/video/iframe/id/{id}
+  - _extract_url(webpage): class method that scans a page for an iframe src pointing to a TVC video iframe and returns that URL.
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Downloads JSON at http://www.tvc.ru/video/json/id/{video_id}.
+    - Builds formats from video.get('path', {}).get('quality', []) where each entry has:
+      - video_url: the actual video file URL
+      - width/height and bitrate (tbr)
+    - Derives a format_id from the video URL using regex on cdnvideo paths.
+    - Creates a formats list with fields: url, format_id, width, height, tbr.
+    - Sorts formats with _sort_formats.
+    - Returns a video info dict: id, title, thumbnail (video.get('picture')), duration (int, if present), formats.
+  - Notes:
+    - Uses int_or_none to safely parse integers.
+    - Uses _download_json to fetch the video JSON.
+    - Robust to missing format URLs (skips those entries).
+
+- TVCArticleIE (InfoExtractor)
+  - URL pattern: https://(www.)?tvc.ru/(anything except video/iframe/id)/... (general TVC article/channel pages)
+  - _tests: includes multiple article URLs with expected id, title, description (as md5), thumbnail, duration, ext mp4.
+  - _real_extract(url):
+    - Downloads the page HTML.
+    - Returns a url_transparent type that delegates extraction to TVC (ie_key: 'TVC').
+    - Supplies:
+      - 'url': Open Graph video URL from the page (self._og_search_video_url)
+      - 'title': cleaned Open Graph title (clean_html on _og_search_title)
+      - 'description': cleaned Open Graph description (clean_html on _og_search_description)
+      - 'thumbnail': Open Graph thumbnail (self._og_search_thumbnail)
+  - This effectively reuses TVCIE for the actual video after discovering it via OG tags.
+
+Important implementation details:
+- Data extraction utilities:
+  - _og_search_video_url, _og_search_title, _og_search_description, _og_search_thumbnail for Open Graph metadata.
+  - clean_html to sanitize text.
+  - int_or_none to safely convert numeric strings to integers.
+  - _search_regex to derive format_id from video URL.
+  - _download_json for API JSON response.
+  - _download_webpage for page HTML/content.
+  - _sort_formats to order formats by quality/bres.
+- URL patterns:
+  - TVCIE strictly handles video iframe URLs.
+  - TVCArticleIE handles all other TVC pages, delegating to TVC after retrieving OG data.
+- Tests:
+  - TVCIE _TEST validates id, title, duration, thumbnail, and format extraction from the video JSON.
+  - TVCArticleIE _TESTS validate that article pages yield a URL_TRANSparent with a TVC video URL and sanitized metadata.
+
+Overall:
+- The module provides robust extraction for TVC videos both from direct iframe-based video endpoints and from article/channel pages that embed or reference those videos via Open Graph metadata, returning standardized YouTube-dl compatible info with proper handling of formats, metadata, and fallbacks.

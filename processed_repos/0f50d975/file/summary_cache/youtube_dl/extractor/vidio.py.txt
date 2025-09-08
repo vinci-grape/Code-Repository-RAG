@@ -1,0 +1,76 @@
+Here is a concise, comprehensive summary of the Vidio extractor code.
+
+- Purpose
+  - Implement a youtube-dl (youtube_dl) extractor for Vidio video pages to fetch metadata and download formats from Vidio.
+
+- Main class
+  - VidioIE(InfoExtractor): primary extractor class handling Vidio videos.
+
+- URL matching
+  - _VALID_URL regex: matches URLs like https://www.vidio.com/watch/{video_id}-{display_id}
+  - Captures:
+    - id: numeric video_id
+    - display_id: human-friendly slug used for display and API calls
+
+- Test cases
+  - _TESTS contains two tests:
+    - A normal video URL with an expected info_dict (id, display_id, ext, title, description hash, thumbnail, duration, counts, uploader/channel info, timestamps, and tags).
+    - A second URL with only_matching: True to ensure the extractor recognizes the URL pattern.
+
+- Initialization (_real_initialize)
+  - Fetches an API key from Vidio:
+    - Calls https://www.vidio.com/auth with an empty POST body (data=b'')
+    - Stores api_key from the response as self._api_key
+  - This key is used for subsequent API requests.
+
+- Video data extraction (_real_extract)
+  - Parse video_id and display_id from the URL using _VALID_URL.
+  - Retrieve video data:
+    - Request: https://api.vidio.com/videos/{video_id}
+    - Headers: Content-Type: application/vnd.api+json and X-API-KEY: self._api_key
+    - Uses display_id as the display id for the request (helps with error messages).
+  - Data model assumptions:
+    - video = data['videos'][0]
+    - clip/hls info at data['clips'][0]['hls_url'] is used to build formats.
+  - Title:
+    - title = video['title'].strip()
+  - Formats:
+    - Extract HLS formats via _extract_m3u8_formats(data['clips'][0]['hls_url'], display_id, 'mp4', 'm3u8_native')
+    - Sort formats with _sort_formats
+  - Helper utilities for nested data:
+    - get_first function: tries to fetch data[x + 's'][0] (e.g., channels[0] or users[0]); returns {} if not present.
+    - channel = get_first('channel')
+    - user = get_first('user')
+    - username = user.get('username')
+    - get_count(x): int_or_none(video.get('total_' + x)) to normalize numeric counts
+  - Metadata mapping (returned info_dict):
+    - id: video_id
+    - display_id: display_id
+    - title: title
+    - description: stripped with strip_or_none(video.get('description'))
+    - thumbnail: video.get('image_url_medium')
+    - duration: int_or_none(video.get('duration'))
+    - like_count: get_count('likes')
+    - formats: extracted formats
+    - uploader: user.get('name')
+    - timestamp: parse_iso8601(video.get('created_at'))
+    - uploader_id: username
+    - uploader_url: https://www.vidio.com/@{username} if username exists
+    - channel: channel.get('name')
+    - channel_id: str_or_none(channel.get('id'))
+    - view_count: get_count('view_count')
+    - dislike_count: get_count('dislikes')
+    - comment_count: get_count('comments')
+    - tags: video.get('tag_list')
+  - Return value is a standard youtube-dl info dictionary with the above fields.
+
+- Important implementation details
+  - API key-based authentication: _real_initialize obtains an API key required for the video data request.
+  - Formats extraction via HLS: uses data['clips'][0]['hls_url'] and builds mp4 formats using the m3u8_native extractor.
+  - Robust data access: uses try_get and helper lambdas (get_first, get_count) to gracefully handle missing fields.
+  - Data normalization: uses int_or_none, parse_iso8601, str_or_none, and strip_or_none to convert and sanitize values.
+  - Output fields align with typical youtube-dl conventions (id, display_id, title, description, thumbnail, duration, like_count, etc.) and include uploader/channel metadata when available.
+
+- Overall flow
+  - Initialize: obtain API key
+  - Extract: fetch video data via Vidio API, parse title and metadata, build formats from HLS URL, and assemble a complete info dictionary for youtube-dl.

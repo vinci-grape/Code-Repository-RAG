@@ -1,0 +1,76 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/rtp.py.
+
+ overview
+- Implements an extractor for RTP (Portugal) media pages inside youtube-dl.
+- Main class: RTPIE, subclass of InfoExtractor.
+- Supports extracting both direct media URLs and HLS (.m3u8) playlists from RTP’s RTPPlayer config embedded in the page.
+
+ key components
+- _VALID_URL
+  - Regex: https?://(?:www\.)?rtp\.pt/play/p(?P<program_id>[0-9]+)/(?P<id>[^/?#]+)/?
+  - Captures program_id and id from the RTP play page URL.
+- _TESTS
+  - Test 1: Validates extraction of an MP3 media with id e174042, title, description, and thumbnail. Checks MD5 of the downloaded file.
+  - Test 2: A sample URL that matches the pattern but is not tested for a full extraction (only_matching True).
+- _real_extract(self, url)
+  - Core logic to fetch and parse RTP media data from the page.
+
+ main workflow in _real_extract
+1. video_id = self._match_id(url)
+   - Extracts the id portion from the URL (the RTP media id).
+
+2. webpage = self._download_webpage(url, video_id)
+   - Downloads the HTML content of the RTP play page.
+
+3. title = self._html_search_meta('twitter:title', webpage, display_name='title', fatal=True)
+   - Extracts the title from the page’s Twitter meta tag.
+
+4. config extraction
+   - Looks for a JavaScript block containing RTPPlayer({...}) and extracts the JSON-like object.
+   - Uses self._search_regex with pattern '(?s)RTPPlayer\(({.+?})\);' and then parses it with self._parse_json(..., js_to_json) to convert JS to JSON.
+   - Resulting config dict typically contains keys like:
+     - file: URL to the media resource (could be direct media URL or an m3u8 playlist)
+     - fileKey: optional key for an auxiliary CDN stream
+     - poster: thumbnail URL
+     - mediaType: 'audio' or possibly 'video'
+
+5. Determine media formats
+   - file_url = config['file']
+   - ext = determine_ext(file_url)
+
+   - If ext == 'm3u8' (HLS):
+     - file_key = config.get('fileKey')
+     - formats = self._extract_m3u8_formats(file_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=file_key)
+       - Builds a list of HLS formats. The 'fatal' parameter ties to whether a missing fileKey should abort.
+     - If file_key exists:
+       - Append an extra format: {'url': 'https://cdn-ondemand.rtp.pt' + file_key, 'preference': 1}
+       - This pulls an additional CDN-backed stream and marks it with higher preference.
+     - self._sort_formats(formats)
+   - Else (direct media URL):
+     - formats = [{'url': file_url, 'ext': ext}]
+
+6. Audio-only adjustment
+   - If config.get('mediaType') == 'audio':
+     - For every format in formats, set f['vcodec'] = 'none' to indicate no video track (audio-only).
+
+7. Return metadata dict
+   - id: video_id
+   - title: extracted title
+   - formats: list of formats prepared above
+   - description: from HTML meta tags, using self._html_search_meta(['description', 'twitter:description'], webpage)
+   - thumbnail: config.get('poster') or self._og_search_thumbnail(webpage)
+
+ implementation details and notes
+- The extractor supports both direct media URLs (e.g., MP3) and HLS streams. For HLS, it can optionally incorporate an additional CDN-based stream when a fileKey is present.
+- Title is sourced from the page’s Twitter meta tag, ensuring a stable title even if on-page headings vary.
+- Description is pulled from standard description meta tags, with a fallback to Twitter description if available.
+- Thumbnail uses the poster field from RTP config if present; otherwise, it falls back to the page’s Open Graph thumbnail.
+- Audio-only content is correctly handled by removing video streams (vcodec set to 'none').
+- The code uses a combination of:
+  - _download_webpage to fetch HTML
+  - _html_search_meta to retrieve meta tags
+  - _search_regex and _parse_json/js_to_json to extract and parse RTPPlayer config
+  - _extract_m3u8_formats to parse HLS playlists
+  - _og_search_thumbnail as a fallback for the thumbnail
+
+In short, RTPIE extracts RTP media by locating a RTPPlayer configuration object on the page, determines the media URL and type (direct file vs. HLS), builds a list of playable formats, optionally augments with a CDN-based URL, handles audio-only content, and returns a structured dictionary with id, title, formats, description, and thumbnail.

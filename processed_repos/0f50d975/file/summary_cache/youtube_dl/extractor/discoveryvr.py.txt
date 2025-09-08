@@ -1,0 +1,47 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/discoveryvr.py
+
+- Purpose
+  - Implements an InfoExtractor for Discovery VR watch pages to extract video metadata and available formats.
+
+- Key class
+  - DiscoveryVRIE(InfoExtractor): main extractor class.
+
+- URL pattern and test
+  - _VALID_URL matches: http(s)://www.discoveryvr.com/watch/{slug}
+  - _TEST provides a sample URL, expected md5, and info dict (id, ext, title, description).
+
+- Core extraction flow (_real_extract)
+  - Derives display_id from the URL using _match_id.
+  - Downloads the page via _download_webpage.
+  - Locates the bootstrap JSON data with regex:
+    - Pattern: root.DVR.bootstrapData = "({.+?})";
+    - Captures a JSON-like string inside quotes.
+  - Decodes unicode escapes and parses the JSON to a Python object (bootstrap_data).
+  - Extracts the videos list from bootstrap_data['videos'], which itself is JSON-encoded; parses to get a dict with 'allVideos'.
+  - Selects the target video using the video slug matching the display_id.
+  - Builds the title:
+    - series = video_data.get('showTitle')
+    - title = video_data.get('title') or series
+    - If both exist and differ, combine as "Series - Title".
+  - Formats extraction:
+    - Iterates over potential formats: (cdnUriM3U8, mobi), (webVideoUrlSd, sd), (webVideoUrlHd, hd).
+    - For each available URL, appends a format dict with 'format_id' and 'url'.
+  - Returns a video info dictionary including:
+    - id, display_id
+    - title, description
+    - thumbnail
+    - duration (parsed via parse_duration(video_data.get('runTime')))
+    - formats (assembled list)
+    - episode (same as title unless separated)
+    - series (showTitle when available)
+
+- Important implementation details
+  - Uses a precise regex to extract embedded bootstrap JSON data from the Discovery VR page.
+  - Handles nested JSON: bootstrap_data contains a 'videos' field that itself is a JSON-encoded string (needs a second _parse_json).
+  - Uses unicode_escape decoding prior to JSON parsing to properly handle escaped characters.
+  - Only includes formats that exist; preserves a priority order (mobi, sd, hd) via the iteration order.
+  - No authentication or extra headers required; relies on publicly available data on the page.
+
+- Dependencies and helpers
+  - Inherits from InfoExtractor (youtube-dl core).
+  - Utilizes _download_webpage, _search_regex, _parse_json, and parse_duration.

@@ -1,0 +1,89 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/cbs.py
+
+What it does
+- Implements a CBS (and related) extractor that reads video data from CBS/Paramount+ pages (including Colbert Show) using ThePlatform feeds, collects available video formats and subtitles, and returns a structured info dictionary for each video.
+
+Key classes
+- CBSBaseIE (inherits ThePlatformFeedIE)
+  - Provides shared utilities for CBS-related extractors.
+  - _parse_smil_subtitles(self, smil, namespace=None, subtitles_lang='en')
+    - Parses subtitle URLs from a SMIL document.
+    - Looks for param elements with names:
+      - sMPTE-TTCCURL -> ext 'tt'
+      - ClosedCaptionURL -> ext 'ttml'
+      - webVTTCaptionURL -> ext 'vtt'
+    - Returns a dict of subtitles keyed by language (default 'en'), each containing a list of dicts with 'ext' and 'url'.
+    - Uses helper functions find_xpath_attr and xpath_text to navigate XML.
+
+- CBSIE (inherits CBSBaseIE)
+  - _VALID_URL
+    - Regex covering CBS/Paramount+ video pages and Colbert sites:
+      - URLs under cbs.com/shows/.../video, colbertlateshow.com (video/podcasts), and paramoutplus domains.
+  - _TESTS
+    - Includes sample CBS video (with metadata like id, title, duration, timestamp, etc.), and some Colbert/Paramount+ URLs marked as only_matching or blocked outside US.
+  - _extract_video_info(self, content_id, site='cbs', mpx_acc=2198311517)
+    - Core extraction routine:
+    - Downloads XML data from ThePlatform video service:
+      - URL: http://can.cbs.com/thunder/player/videoPlayerService.php
+      - query: partner=site, contentId=content_id
+    - Parses:
+      - video title
+      - a ThePlatform path tp_path and release URL tp_release_url
+    - Iterates over each item in the ThePlatform response:
+      - Collects unique asset types, skipping missing/duplicate asset types and those containing 'HLS_FPS' or 'DASH_CENC'
+      - For each asset_type, builds a query with:
+        - mbr=true
+        - assetTypes=asset_type
+        - formats hint:
+          - If asset_type starts with 'HLS' or asset_type in ('OnceURL', 'StreamPack'): formats = 'MPEG4,M3U'
+          - If asset_type in ('RTMP', 'WIFI', '3G'): formats = 'MPEG4,FLV'
+      - Calls self._extract_theplatform_smil(updated_tp_release_url, content_id, 'Downloading %s SMIL data' % asset_type)
+        - This is provided by ThePlatformFeedIE and returns (tp_formats, tp_subtitles)
+      - Accumulates formats and merges subtitles via _merge_subtitles
+      - If an ExtractorError occurs and no formats collected yet, remember the error to raise later
+    - After processing all assets:
+      - If a last error occurred and no formats were gathered, re-raise that error
+      - Sorts the collected formats with _sort_formats
+    - Gathers additional metadata via _extract_theplatform_metadata(tp_path, content_id)
+    - Builds the final info dict:
+      - id: content_id
+      - title: from video data
+      - series, season_number, episode_number, duration (ms to seconds via int_or_none with 1000), thumbnail
+      - formats: collected list
+      - subtitles: collected subtitles
+    - Returns the info dict
+  - _real_extract(self, url)
+    - Extracts the content_id from the URL using _match_id and delegates to _extract_video_info
+
+Important implementation details
+- Subtitle handling
+  - _parse_smil_subtitles enables extracting multiple subtitle formats (tt, ttml, vtt) from ThePlatform/SMIL data, mapping to language keys (default 'en').
+  - Subtitles structure follows YouTube-DL conventions: { 'en': [ { 'ext': 'tt', 'url': '...' }, ... ] }
+
+- ThePlatform integration
+  - Uses ThePlatformFeedIE helpers:
+    - _extract_theplatform_smil(...) to fetch per-asset SMIL data (formats and subtitles)
+    - _extract_theplatform_metadata(...) to fetch video metadata
+  - Builds tp_path and tp_release_url to locate ThePlatform assets:
+    - tp_path example: 'dJ5BDC/media/guid/{mpx_acc}/{content_id}'
+    - tp_release_url: 'http://link.theplatform.com/s/' + tp_path
+
+- Asset/format selection logic
+  - Avoids duplicates and clearly handles asset type classes:
+    - HLS-based assets (HLS*, OnceURL, StreamPack) -> formats hint: MPEG4,M3U
+    - RTMP/WIFI/3G -> MPEG4,FLV
+  - If a particular asset type fails to fetch SMIL data, it records the error but continues processing other assets.
+  - If all assets fail and no formats are collected, the last error is raised to indicate failure.
+
+- Data extraction and normalization
+  - Title is taken from videoTitle (with fallback to title).
+  - Additional metadata: seriesTitle, seasonNumber, episodeNumber, videoLength, previewImageURL
+  - duration is normalized with int_or_none(..., 1000) to convert from milliseconds to seconds where appropriate
+  - Final info dict includes id, title, series, season_number, episode_number, duration, thumbnail, formats, subtitles
+
+- Robustness
+  - If the content is geo-blocked or otherwise unavailable (as in tests), tests indicate skip/mocking behavior (e.g., _skip: 'Blocked outside the US').
+  - Graceful handling of partial failures: collects formats from any successful assets and only raises an error if nothing could be retrieved.
+
+In short
+- CBSIE scrapes CBS/Paramount+ (and Colbert) videos via ThePlatform, collecting multiple asset types, formats, and SMIL-based subtitles. It builds a complete video info dictionary including id, title, series/season/episode, duration, thumbnail, available formats, and subtitles. The CBSBaseIE provides the shared SMIL subtitle parsing utility.

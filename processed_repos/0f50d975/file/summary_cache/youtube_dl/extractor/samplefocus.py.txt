@@ -1,0 +1,49 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/samplefocus.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for samples hosted on samplefocus.com, enabling extraction of metadata and the audio URL (MP3) for a given sample page.
+
+- Main class
+  - SampleFocusIE (inherits from InfoExtractor)
+
+- URL pattern and tests
+  - _VALID_URL matches https://www.samplefocus.com/samples/{id}
+  - _TESTS includes:
+    - A fully fleshed example with expected fields (id, display_id, ext, title, thumbnail, license, uploader, uploader_id, like_count, comment_count, categories) and a specific MD5 for the MP3.
+    - Two additional tests with only_matching to ensure URL matching works for other sample pages.
+
+- Core extraction flow (_real_extract)
+  - Display ID and page content:
+    - Determines display_id via _match_id and downloads the webpage with _download_webpage.
+  - Sample ID:
+    - Extracts the numeric sample_id from an input tag with id="sample_id" and its value attribute.
+  - Title:
+    - Tries OpenGraph title via _og_search_title; if not found, falls back to an HTML <h1> extraction.
+  - MP3 URL:
+    - Tries to extract an MP3 URL from an input tag with id="sample_mp3" and its value (via a non-greedy pattern). If not found, attempts to read a contentUrl via a meta tag (itemprop="contentUrl") and then uses extract_attributes to fetch the content value.
+  - Thumbnail:
+    - Uses the OpenGraph thumbnail if available; otherwise attempts to extract a waveform image URL from an <img> tag with class "waveform responsive-img".
+  - Comments:
+    - Parses comments with a regex targeting author blocks and corresponding body text. Builds a list of dicts with author, author_id, and text.
+  - Uploader info:
+    - Attempts to parse uploader_id and uploader from a line like “By <a href="/users/{id}">Name</a>”.
+  - Categories (breadcrumb):
+    - Finds a BreadcrumbList block and extracts category names from spans with property="name".
+  - Like and comment counts:
+    - Helper function extract_count reads numeric counts from spans with a count class (e.g., sample-{id}-favorites for likes, comments for comments).
+  - License:
+    - Attempts to extract the license text from a link to /license within the page.
+  - Return value:
+    - A dictionary including:
+      - id, title, url (MP3 URL), display_id, thumbnail, uploader, license, uploader_id, like_count, comment_count, comments, categories
+
+- Key implementation details
+  - Uses several utility helpers: extract_attributes, get_element_by_attribute, int_or_none.
+  - Robust parsing with multiple fallbacks and fatal flags:
+    - mp3 URL and license extraction use fatal=False to tolerate missing fields.
+  - Regex-driven parsing:
+    - Carefully crafted patterns to pull numeric IDs, URLs, and structured content (comments, categories) from HTML.
+  - Data shaping:
+    - Returns a clean dictionary aligned with youtube-dl’s expected InfoExtractor output, suitable for downstream formatting and storage.
+
+Overall, this extractor focuses on assembling a complete set of metadata for a sample on samplefocus.com, plus the direct MP3 URL, while handling possible variations or missing fields gracefully.

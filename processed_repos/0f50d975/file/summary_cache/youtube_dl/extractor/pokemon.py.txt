@@ -1,0 +1,59 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/pokemon.py
+
+Purpose
+- Implement a YouTube-DL extractor for Pokémon site pages. It discovers video data on Pokémon pages and delegates actual video extraction to the LimelightMedia extractor.
+
+Main class
+- PokemonIE(InfoExtractor)
+  - Inherits common extraction helpers from youtube-dl.
+
+Key attributes
+- _VALID_URL: Regex that matches Pokémon site URLs for two patterns:
+  - With a play parameter containing a 32-character id: ...play=<32-char-id>
+  - Or a URL path with a display_id after a language code, e.g., /us/pokemon-episodes/.../<display_id>
+  - Supports multiple locales (language prefixes like us, fr, uk, de, etc.).
+- _TESTS: Several test cases verifying:
+  - Correct id extraction and metadata for English and French pages.
+  - Fallbacks for title when data-video-title is absent (uses pk-title meta or h1.us-title).
+  - Metadata expectations (title, description, thumbnail) and that the underlying extractor (LimelightMedia) is used via add_id and ie_key.
+
+Core functionality (_real_extract)
+- Parse identifiers:
+  - video_id, display_id = re.match(self._VALID_URL, url).groups()
+- Download the page:
+  - webpage = self._download_webpage(url, video_id or display_id)
+- Locate video data:
+  - Find an HTML element that includes data-video-id, matching either:
+    - the specific video_id if present, or
+    - any 32-hex-character id
+  - Use _search_regex to capture that element as a string.
+  - Use extract_attributes to parse that HTML tag into a dictionary (video_data).
+- Extract actual video id:
+  - video_id = video_data['data-video-id']
+- Determine title:
+  - Priority:
+    1) video_data.get('data-video-title')
+    2) _html_search_meta('pkm-title', webpage, ' title', default=None)
+    3) _search_regex for an <h1> with class us-title to capture the title text
+- Build the result as a url_transparent entry pointing to LimelightMedia:
+  - _type: 'url_transparent'
+  - id: video_id
+  - url: 'limelight:media:%s' % video_id
+  - title: resolved title
+  - description: video_data.get('data-video-summary')
+  - thumbnail: video_data.get('data-video-poster')
+  - series: 'Pokémon'
+  - season_number: int_or_none(video_data.get('data-video-season'))
+  - episode: title
+  - episode_number: int_or_none(video_data.get('data-video-episode'))
+  - ie_key: 'LimelightMedia' (delegate actual video extraction/authentication to LimelightMedia)
+
+Important implementation details
+- Uses extract_attributes to convert the HTML data-video-* attributes into a Python dict for easy access.
+- Uses int_or_none to safely convert numeric attributes that may be missing or non-numeric.
+- The final output is a url_transparent dict that delegates to LimelightMedia, enabling reuse of an existing extractor for the actual video content.
+- Title extraction includes robust fallbacks to handle pages with missing data-video-title.
+- Designed to work across multiple locales of pokemon.com and handles pages with either a direct play id or a slug-like display_id.
+
+Overall
+- The extractor scrapes the Pokémon site for metadata embedded in a data-video-* HTML element, then returns a pointer to the LimelightMedia resource with rich metadata (title, description, thumbnail, episode/season info). It’s concise, relies on standard utilities (extract_attributes, int_or_none, _search_regex), and uses a transparent delegation pattern to reuse LimelightMedia’s extraction logic.

@@ -1,0 +1,61 @@
+- Purpose: DeezerPlaylistIE extracts a Deezer playlist page and converts it into a YouTube-DL playlist object with per-track entries.
+
+- Class and entry point:
+  - Class: DeezerPlaylistIE(InfoExtractor)
+  - Main method: _real_extract(self, url)
+
+- URL pattern and tests:
+  - _VALID_URL matches Deezer playlist URLs: http(s)://www.deezer.com/playlist/{id}
+  - _TEST provides a sample playlist with expected id, title, uploader, thumbnail, and a 30-item count; includes a skip note about geoblocking.
+
+- Behavior and implementation details:
+  - Preview limitation notice: If not in a test environment, issues a warning that only the first 30-second previews are supported.
+  - Playlist ID extraction: Parse numeric id from the URL using the regex.
+  - Webpage retrieval: Download the playlist page content.
+  - Geoblocking check: Look for a geoblocking message in a <p class="soon-txt"> element; if present, raise ExtractorError (marked as expected for geoblocking).
+  - Data extraction: Extract a JSON blob embedded in the page that contains the playlist data. It tries two patterns:
+    - __DZR_APP_STATE__ = {...}
+    - naboo.display('...', ...);
+    Then parse the JSON into a Python dict.
+  - Top-level playlist info: 
+    - Title: data['DATA']['TITLE']
+    - Uploader: data['DATA']['PARENT_USERNAME']
+    - Thumbnail: from an img tag with id="naboo_playlist_image"
+  - Preview URL template: Locate a JavaScript variable SOUND_PREVIEW_GATEWAY that provides a URL template (with placeholders {0}, {1}, {2}). This is optional (fatal=False), so extraction continues if missing.
+  - Song entries: Iterate over data['SONGS']['data'] and for each song:
+    - puid = s['MD5_ORIGIN']
+    - Build preview URL by substituting:
+      - {0} with the first character of puid
+      - {1} with the full puid
+      - {2} with s['MEDIA_VERSION']
+    - Formats: Create a single format entry:
+      - format_id: 'preview'
+      - url: constructed preview URL
+      - ext: 'mp3'
+      - preference: -100 (indicating only the 30-second preview is preferred)
+    - Metadata for the track:
+      - id: s['SNG_ID']
+      - duration: int_or_none(s.get('DURATION'))
+      - title: "<artists> - <SNG_TITLE>" where artists is a deduplicated, comma-joined list of ART_NAME from s['ARTISTS'] using orderedSet
+      - uploader: s['ART_NAME']
+      - uploader_id: s['ART_ID']
+      - age_limit: 16 if s.get('EXPLICIT_LYRICS') == '1' else 0
+      - formats: the single preview format
+    - The per-track information is accumulated into a list of entries.
+  - Return value: A playlist dictionary with:
+    - _type: 'playlist'
+    - id: playlist_id
+    - title: playlist_title
+    - uploader: playlist_uploader
+    - thumbnail: playlist_thumbnail
+    - entries: list of per-track dictionaries
+
+- Key implementation notes:
+  - Uses _download_webpage, _html_search_regex, and _search_regex to fetch and parse data.
+  - Uses json.loads to parse the embedded state JSON.
+  - Uses int_or_none to safely parse duration values.
+  - Uses orderedSet to preserve artist order while removing duplicates.
+  - Uses _sort_formats to sort the single-format entries (though only one format is provided per track).
+  - Handles geoblocking gracefully by raising an expected ExtractorError with the site-provided message.
+
+- Overall: The extractor focuses on obtaining a Deezer playlist’s metadata and constructing per-track entries that point to the 30-second preview MP3 URLs, returning a standard YouTube-DL playlist object.

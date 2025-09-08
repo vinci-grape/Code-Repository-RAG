@@ -1,0 +1,42 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/nintendo.py
+
+Purpose
+- NintendoIE is a YouTube-DL extractor for Nintendo pages (games detail and Nintendo Direct). It collects embedded videos from Nintendo pages that are served via the Ooyala player and defers to OoyalaIE for the actual video URLs and metadata.
+
+Main functionality
+- Match Nintendo page URLs and extract embedded Ooyala video codes.
+- Build a playlist of videos (one or more) found on the page.
+- Attempt to extract an overall page title, used for the playlist title.
+- Leverage OoyalaIE to resolve individual video entries.
+
+Key components
+- Class: NintendoIE(InfoExtractor)
+  - _VALID_URL: Regexp to match:
+    - https://www.nintendo.com/games/detail/<id>
+    - https://www.nintendo.com/nintendo-direct/<id>
+    - and capture the <id> part
+  - _TESTS: Three test cases demonstrating:
+    - A single Ooyala video (Duck Hunt Wii U trailer) with expected id, extension, title, duration; skip_download; uses Ooyala IE.
+    - A page that yields a playlist (Tokyo Mirage Sessions) with 4 items; uses Ooyala IE.
+    - A Nintendo Direct page with a single Ooyala video (id, ext, title, duration); skip_download; uses Ooyala IE.
+
+- Method: _real_extract(self, url)
+  - page_id = self._match_id(url): extract the id portion from the URL.
+  - webpage = self._download_webpage(url, page_id): fetch the HTML content.
+  - entries: Build a list of Ooyala video entries by scanning the page for Ooyala video codes:
+    - Regex: data-(?:video-id|directVideoId)=(['"])(?P<code>(?:(?!\1).)+)\1
+    - For each match, create an entry using OoyalaIE._build_url_result(m.group('code'))
+      - This converts the Ooyala video code into a resolvable URL entry for the playlist.
+  - title: Try to extract a page title with:
+    - Regex: (?s)<(?:span|div)[^>]+class="(?:title|wrapper)"[^>]*>.*?<h1>(.+?)</h1>
+    - Uses fatal=False, so it’s optional if the title isn’t found.
+  - Return: self.playlist_result(entries, page_id, title)
+    - Produces a playlist of the discovered Ooyala entries, with an optional title.
+
+Important implementation details
+- The extractor does not resolve the actual video URLs itself. It collects all Ooyala video codes found in the page and delegates to OoyalaIE via _build_url_result to resolve each video.
+- It supports both single-video pages and pages with multiple embedded Ooyala videos, returning either a simple video entry or a playlist of entries.
+- The title extraction is tolerant (fatal=False), so absence of a title won’t fail extraction; the title, if found, is used as the playlist title.
+- The regex for detecting Ooyala codes is designed to handle both single-quoted and double-quoted attribute values: data-video-id or data-directVideoId.
+
+Overall, NintendoIE focuses on parsing Nintendo site pages to discover Ooyala-embedded videos and to present them as a playlist, utilizing OoyalaIE for the actual media resolution.

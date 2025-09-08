@@ -1,0 +1,85 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/bilibili.py
+
+What this file does
+- Implements several extractors for bilibili content in youtube-dl:
+  - BiliBiliIE: main extractor for bilibili videos (supporting older AV IDs and new BV IDs, plus Bangumi anime episodes).
+  - BiliBiliBangumiIE: extractor for bilibili Bangumi anime season pages, producing a playlist of episodes.
+  - BilibiliAudioBaseIE, BilibiliAudioIE, BilibiliAudioAlbumIE: extractors for bilibili audio/music (tracks and albums).
+  - BiliBiliPlayerIE: a small redirector that maps a bilibili player page to the corresponding AV video page.
+- Uses signed requests to bilibili APIs to obtain video formats and metadata. It handles geo-verification headers and back-up URLs for formats.
+- Converts BV IDs to playable formats by querying the v2 playurl API with an MD5 signature (using APP_KEY and BILIBILI_KEY constants).
+
+Key classes and main functionality
+
+1) BiliBiliIE (InfoExtractor)
+- URL patterns: supports bilibili URLs with AV/ BV IDs and Bangumi anime pages.
+- _real_extract(url):
+  - Unsmuggles potential extra data from the URL.
+  - Determines video_id from AV (id) or BV (id_bv) path components; anime_id for Bangumi episodes.
+  - Downloads the page and figures out the content CID (cid) needed by the playurl API:
+    - If not an anime URL: tries to extract cid from the page (regex for cid or embedded player parameters).
+    - If an anime Bangumi URL: calls Bangumi API (web_api/get_source) to get the episode cid.
+  - Prepares headers including Referer and geo verification headers.
+  - Fetches video info pages from bilibili API: http://interface.bilibili.com/v2/playurl with appkey, cid and a signed payload (two renditions:
+    - qn=80&quality=80&type=
+    - quality=2&type=mp4
+    Signatures are MD5 of (payload + _BILIBILI_KEY).
+  - Processes video_info['durl'] to build formats:
+    - Each durl yields a format with url, filesize, and possible backup_url entries (lower-priority).
+    - Adds Referer header to each format.
+    - Sorts formats and accumulates entries per video part.
+  - Builds a list of entries (one per part), each with id, duration, and formats.
+  - Extracts metadata from the HTML: title, description, timestamp, thumbnail, and uploader (from page or meta).
+  - If there is a single entry, returns it directly; otherwise returns a multi_video object containing all entries with the common metadata.
+- _report_error(result): helper to raise ExtractorError with friendly messages if the API returns an error or missing fields.
+
+2) BiliBiliBangumiIE (InfoExtractor)
+- URL pattern: https://bangumi.bilibili.com/anime/<id>
+- _real_extract(url):
+  - Fetches season info via JSONP API: http://bangumi.bilibili.com/jsonp/seasoninfo/<id>.ver, strips JSONP.
+  - Builds a list of entries for the season by mapping episodes to transparent URLs:
+    - Each entry uses the episode’s webplay_url and smuggled data to suppress the “no bangumi tip”.
+    - Uses BiliBiliIE to extract each episode (ie_key() = BiliBiliIE).
+  - Sorts entries by episode_number and returns a playlist_result with season_id, title, and evaluation text.
+
+3) BilibiliAudioBaseIE, BilibiliAudioIE, BilibiliAudioAlbumIE
+- Base class BilibiliAudioBaseIE provides _call_api(path, sid, query=None) to call bilibili audio API endpoints and return data['data'].
+- BilibiliAudioIE
+  - URL pattern: https?://(www.)?bilibili.com/audio/au<id>
+  - _real_extract(url):
+    - Calls API path 'url' to obtain the actual CDN URLs (formats) for the audio track.
+    - Builds a formats list with the first CDN URL and filesize if provided.
+    - Calls API path 'song/info' to fetch metadata (title, artist, intro/description, duration, cover/thumbnail, passtime).
+    - If lyrics exist, builds subtitles with a URL to the lyric file.
+    - Assembles final info dict: id, title, formats, artist, description, duration, thumbnail, timestamp, uploader, view_count, and comment_count.
+- BilibiliAudioAlbumIE
+  - URL pattern: https?://(www.)?bilibili.com/audio/am<id>
+  - _real_extract(url):
+    - Calls API 'song/of-menu' to get the list of songs in the album/menu.
+    - For each song, creates a url_result pointing to the corresponding au<id> track via BilibiliAudioIE.
+    - If any tracks exist, fetches album info via 'menu/info' to attach album title and intro to entries.
+    - Returns a playlist_result for the album or a simple playlist with the collected tracks.
+
+4) BiliBiliPlayerIE
+- URL pattern: https://player.bilibili.com/player.html?aid=<id> (or similar)
+- _real_extract(url):
+  - Extracts the video_id from the query and redirects to the corresponding AV URL using BiliBiliIE as the extractor (via url_result with ie_key).
+
+Important implementation details and behavior
+- New vs old IDs: Supports both AV URLs (old id) and BV URLs (new id). Extracts video_id accordingly and uses the same sign-based API to fetch video data.
+- CID retrieval: For non-Bangumi videos, cid is extracted from the HTML; for Bangumi episodes, cid is obtained via the bangumi API (get_source) for the episode.
+- API signing: Uses two constants, _APP_KEY and _BILIBILI_KEY, to generate a signature for the playurl API (MD5 over payload + key). This is required to access the video URLs.
+- Renditions: Attempts two render options (80 quality and mp4) and builds formats for each durl. If a video_info response has no durl, it proceeds to the next rendition or reports an error if at the last rendition.
+- Backups and headers: Each format includes http_headers with a Referer to the original page; backup URLs are added with lower priority.
+- Metadata extraction: Title is parsed via multiple patterns from the HTML; description is taken from meta tags; timestamp is parsed from a time tag or uploadDate meta. Thumbnails are pulled from og:image or thumbnailUrl. Uploader info is sourced from a space.bilibili.com link in the page or meta author field.
+- Multiple entries handling: If there are multiple parts (e.g., a video split into segments), returns a multi_video object with entries; otherwise returns a single video entry.
+- Bangumi support: Bangumi episodes are exposed as a playlist of BiliBiliIE-based entries, with a note about downloading all episodes when applicable.
+- Geo restrictions: Uses geo_verification_headers() when needed to satisfy regional access policies.
+- Testing: The _TESTS sections provide representative URLs and expected info_dict structures to validate extraction, including georestricted cases and single/multi-entry scenarios.
+
+Key constants
+- _APP_KEY and _BILIBILI_KEY: Used to construct the signed request to bilibili’s playurl API.
+- _VALID_URL patterns: Enable matching of several bilibili URL formats, including the new BV ID format and Bangumi anime pages.
+
+In short
+This file implements a set of extractors for bilibili content (videos with AV/BV IDs, Bangumi anime episodes, and audio tracks/albums), with robust handling of CID discovery, signed API requests to obtain formats, metadata extraction, and support for both single-entry and multi-part videos as well as Bangumi playlists. It includes thoughtful error handling, back-up URLs, and geo-verification considerations.

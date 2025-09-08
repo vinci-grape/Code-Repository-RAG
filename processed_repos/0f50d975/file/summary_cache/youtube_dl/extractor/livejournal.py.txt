@@ -1,0 +1,43 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/livejournal.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for LiveJournal video albums. It parses a LiveJournal video album page, extracts embedded video metadata, and delegates actual video extraction to the EaglePlatform-based extractor.
+
+- Key class
+  - LiveJournalIE(InfoExtractor)
+    - Inherits from the common InfoExtractor.
+
+- Main components
+  - _VALID_URL
+    - Regexp matching LiveJournal video album pages that contain an id parameter: 
+      https?://(?:[^.]+\.)?livejournal\.com/video/album/\d+...id=(?P<id>\d+)
+  - _TEST
+    - Sample URL and expected metadata used by tests:
+      - URL example provided
+      - Expected md5 for the page content
+      - info_dict with id, ext, title, upload_date, timestamp (used to validate extraction)
+  - _real_extract(self, url)
+    - Core extraction workflow:
+      - video_id = self._match_id(url): extract the numeric id from the URL using the _VALID_URL pattern.
+      - webpage = self._download_webpage(url, video_id): fetch the album page.
+      - record = self._parse_json(
+          self._search_regex(r'Site\.page\s*=\s*({.+?});', webpage, 'page data'),
+          video_id
+        )['video']['record']: locate a JSON blob embedded in a JavaScript snippet (Site.page = { ... };), parse it, and access the nested video record data.
+      - storage_id = compat_str(record['storageid']): get the storage identifier as a string (compat for Python 2/3).
+      - title = record.get('name'): retrieve the video title; if present, strip the trailing file extension (e.g., .mp4, .mov) to produce a clean title.
+      - Return a dict with:
+        - '_type': 'url_transparent' — indicates this is a transparent wrapper that delegates to another extractor.
+        - 'id': video_id — the numeric id from the URL.
+        - 'title': title extracted above.
+        - 'thumbnail': record.get('thumbnail')
+        - 'timestamp': int_or_none(record.get('timecreate')) — convert creation time to int if available.
+        - 'url': 'eagleplatform:vc.videos.livejournal.com:' + storage_id — a platform-specific URL used by the EaglePlatform extractor.
+        - 'ie_key': 'EaglePlatform' — specifies that the EaglePlatform extractor should be used to fetch the actual video data.
+
+- Important implementation details
+  - Extraction relies on a JavaScript-embedded JSON blob found with the pattern Site.page = ({...});, which is parsed to access video metadata.
+  - The final video URL is not a direct HTTP link; instead, it uses a custom EaglePlatform URL, delegating to the EaglePlatform extractor (ie_key set to 'EaglePlatform').
+  - Title normalization removes the file extension from the name when present.
+  - Uses compat_str for cross-version string handling and int_or_none for robust timestamp parsing.
+  - The approach enables retrieving metadata (title, thumbnail, timestamp) from LiveJournal and then deferring actual media extraction to a specialized EaglePlatform extractor.

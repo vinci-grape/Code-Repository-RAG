@@ -1,0 +1,44 @@
+This file implements a SlidesLive extractor for youtube-dl (yt-dlp-style). It determines the real video source hosted by SlidesLive and builds a proper information dictionary or transparent URL for downstream extractors.
+
+Main functionality
+- Class SlidesLiveIE(InfoExtractor) handles URLs like https://slideslive.com/<digits>.
+- Fetches internal video data from https://ben.slideslive.com/player/{video_id} to learn where the actual video is hosted and how to access it.
+- Supports multiple hosting backends:
+  - url: direct URL to the media
+  - yoda: media served via Yoda CDN; builds formats from m3u8 (HLS) and mpd (DASH) manifests
+  - youtube: delegates to YouTube extractor via a url_transparent entry
+  - vimeo: delegates to Vimeo extractor via a url_transparent entry, with a Referer header
+- Collects subtitles (WebVTT) if present, grouped by language.
+- Returns a structured info dictionary with appropriate fields depending on the backend, including id, title, description, uploader, timestamps, and formats.
+
+Key components and implementation details
+- _VALID_URL: Validates slideslive URLs and captures the numeric ID.
+- _TESTS: Contains several test scenarios for different video_service_name values (YOUTUBE, yoda, youtube, url, vimeo) to verify extraction paths and metadata.
+- _real_extract(url):
+  - video_id = self._match_id(url)
+  - video_data = self._download_json('https://ben.slideslive.com/player/' + video_id, video_id)
+  - service_name = video_data['video_service_name'].lower(), restricted to ('url', 'yoda', 'vimeo', 'youtube')
+  - service_id = video_data['video_service_id']
+  - Subtitles: parse video_data['subtitles'] (if present), require webvtt_url, default language 'en', build subtitles dict as {lang: [{ 'url': webvtt_url }, ...]}
+  - Base info dict includes id, thumbnail, is_live (bool_or_none), and subtitles
+  - If service_name is 'url' or 'yoda':
+    - info['title'] = video_data['title']
+    - If 'url': info['url'] = service_id
+    - If 'yoda':
+      - Build formats from manifests using:
+        - _MANIFEST_PATTERN = 'https://01.cdn.yoda.slideslive.com/%s/master.%s'
+        - m3u8 formats via _extract_m3u8_formats(manifest, service_id, 'mp4', m3u8_id='hls', fatal=False)
+        - mpd formats via _extract_mpd_formats(manifest, service_id, mpd_id='dash', fatal=False)
+      - Sort formats and set info['id'] = service_id and info['formats'] = formats
+  - Else (youtube or vimeo): provide a url_transparent entry:
+    - info.update({ '_type': 'url_transparent', 'url': service_id, 'ie_key': service_name.capitalize(), 'title': video_data.get('title') })
+    - If service_name == 'vimeo': wrap the Vimeo URL with Referer header using smuggle_url to preserve context when Vimeo verifies the origin
+- Return info
+
+Important notes
+- The extractor gracefully handles missing subtitles and missing fields using try_get and defaults.
+- For the 'yoda' path, it uses M3U8 and MPD manifests to fetch formats, with fatal=False to avoid failing when one of them is unavailable.
+- The 'vimeo' path uses a Referer header via smuggle_url, which is often required by Vimeo when embedding from another site.
+- The code asserts the service_name is one of the expected values after normalization, guarding against unexpected backend responses.
+
+In short, SlidesLiveIE centralizes the logic to interpret a SlidesLive video entry, identify the actual hosting backend, fetch appropriate formats or delegate to the respective platform extractors, and assemble a complete info dictionary including subtitles and metadata.

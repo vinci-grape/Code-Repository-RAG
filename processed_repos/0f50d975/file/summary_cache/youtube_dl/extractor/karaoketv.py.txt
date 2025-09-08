@@ -1,0 +1,58 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/karaoketv.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (KaraoketvIE) for videos hosted on karaoketv.co.il.
+
+- Key class
+  - KaraoketvIE(InfoExtractor)
+    - Inherits from InfoExtractor, providing a _REAL_EXTRACT pipeline for Karaoketv.
+
+- URL matching
+  - _VALID_URL: r'https?://(?:www\.)?karaoketv\.co\.il/[^/]+/(?P<id>\d+)'
+  - Extracts a numeric video_id from the URL path.
+
+- Test data
+  - _TEST contains:
+    - A sample URL (encoded Hebrew slug with numeric ID 58356)
+    - Expected info_dict: id '58356', ext 'flv', title 'קריוקי של איזון'
+    - skip_download: True (since the format uses RTMP/FLV and is typically not downloaded by default)
+
+- Extraction flow (_real_extract)
+  1. Retrieve video_id via _match_id(url).
+  2. Download the initial webpage and locate the API play URL using a regex that finds an iframe src pointing to:
+     https://www.karaoke.co.il/api_play.php?... (stored as api_page_url)
+  3. Download the API page and locate the video CDN URL via another regex that finds an iframe src pointing to:
+     https://www.video-cdn.com/embed/iframe/...
+     (stored as video_cdn_url)
+  4. Download the video CDN page and extract:
+     - play_path from the JSON inside a JavaScript variable:
+       var options = { ... }; then options.clip.url
+     - settings from:
+       var settings = { ... }; which may include servers
+       - settings is parsed as JSON; if missing or invalid, defaults to {}
+  5. Server selection:
+     - servers = settings.get('servers')
+     - If servers is missing or not a list, fall back to ('wowzail.video-cdn.com:80/vodcdn',)
+  6. Build formats (RTMP):
+     - For each server in servers, create a format dict with:
+       - url: 'rtmp://<server>' unless the server already starts with 'rtmp', in which case use as-is
+       - play_path: the previously extracted play_path
+       - app: 'vodcdn'
+       - page_url: video_cdn_url
+       - player_url: 'http://www.video-cdn.com/assets/flowplayer/flowplayer.commercial-3.2.18.swf'
+       - rtmp_real_time: True
+       - ext: 'flv'
+  7. Return a dict with:
+     - id: video_id
+     - title: extracted from the page via _og_search_title(webpage)
+     - formats: the constructed formats list
+
+- Important implementation details
+  - The extractor navigates through multiple embedded pages (initial page → API play page → video CDN page) to derive the actual RTMP stream information.
+  - It uses _search_regex with named groups to robustly capture URLs from iframes.
+  - The clip URL and servers are embedded in JavaScript variables (options and settings) on the CDN page; they are parsed as JSON.
+  - It includes a fallback for servers if the parsed settings are absent or malformed.
+  - The formats are RTMP-based (flv) with a fixed SWF player URL, and rtmp_real_time is enabled.
+
+- Overall
+  - The extractor’s main job is to assemble RTMP stream details (servers, play_path, app) from a chain of embedded pages and JSON-like script blocks, then present a single video entry with id, title, and a list of RTMP formats suitable for downloading/playing in flv RTMP contexts.

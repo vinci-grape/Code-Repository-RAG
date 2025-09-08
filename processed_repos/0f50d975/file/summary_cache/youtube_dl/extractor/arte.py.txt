@@ -1,0 +1,112 @@
+Here is a concise, comprehensive summary of the Arte YouTube-dl extractor code (youtube-dl/youtube_dl/extractor/arte.py).
+
+Overview
+- Purpose: Implement extractors for Arte TV videos, playlists, embeds, and category pages. It fetches video data via Arte's API, builds available formats (including HLS and RTMP), handles language/dubbing/subtitle preferences, and exposes metadata (title, description, upload date, thumbnail).
+
+Key classes
+- ArteTVBaseIE (InfoExtractor)
+  - Holds common constants:
+    - _ARTE_LANGUAGES: supported language codes (fr, de, en, es, it, pl)
+    - _API_BASE: base URL for Arte API (https://api.arte.tv/api/player/v1)
+
+- ArteTVIE (main video extractor)
+  - _VALID_URL: matches Arte TV video pages in supported languages or Arte API config endpoints. Uses _ARTE_LANGUAGES for language matching.
+  - _TESTS: includes sample URLs for a standard video, a non-matching language page, and an API endpoint (to ensure URL matching logic works).
+  - _real_extract(url):
+    - Parses video_id and language from the URL (supports both web pages and API config URLs).
+    - Fetches config via: /config/{lang}/{video_id} using Arte API (via _download_json).
+    - Retrieves video data from info['videoJsonPlayer'] and ensures a valid VSR (video service/render) exists; otherwise raises ExtractorError with an informative message.
+    - Upload date: prefers 'shootingDate', falls back to VRA/VDA or empty.
+    - Title: uses VTI or VID; appends subtitle (VSU) if present.
+    - Subtitle/caption handling is represented in versionCode logic.
+    - Builds language mapping for the requested language:
+      - LANGS maps lang codes to internal language markers (e.g., fr -> F, en -> E[ANG], etc.).
+      - langcode is derived from the requested language or falls back to the raw lang string.
+    - Formats extraction:
+      - vsr contains format data for each available format (url, streamer, versionCode, width/height, bitrate, quality, mediaType).
+      - If the format is HLS (media_type == 'hls'):
+        - Use _extract_m3u8_formats and attach language_preference to each format.
+      - Otherwise, construct a format dict with:
+        - format_id, possibly a special 'preference' if videoFormat is M3U8,
+        - language_preference (derived from PREFERENCES),
+        - format_note combining versionCode and versionLibelle,
+        - width, height, tbr (bitrate), and quality (mapped via a quality function).
+        - RTMP: set 'url' to streamer, 'play_path' to "mp4:" + url, and 'ext' to 'flv'.
+        - Non-RTMP: set 'url' to the direct URL.
+      - PREFERENCES: a prioritized list of regex patterns that define language/subtitle preferences (e.g., VO/VT variants, with or without ST/STM suffixes and language tags). The code matches versionCode to determine a numeric language preference (lang_pref) based on its position in the PREFERENCES list.
+    - After collecting all formats, sorts them via _sort_formats.
+    - Returns an info dict with:
+      - id: VID or video_id
+      - title, description (VDE)
+      - upload_date (normalized via unified_strdate)
+      - thumbnail (programImage or VTU.IUR)
+      - formats: list of format dicts
+
+- ArteTVEmbedIE (embed extractor)
+  - _VALID_URL: matches arte.tv embed URLs that contain a json_url parameter.
+  - _TESTS: includes an example embed and a non-matching URL.
+  - _extract_urls(webpage): static helper to pull all candidate json_url links from iframes/scripts in a page.
+  - _real_extract(url):
+    - Parses json_url from the query string of the embed URL.
+    - Determines video_id from the json_url using ArteTVIE._match_id.
+    - Returns a url_result pointing to json_url with ie_key set to ArteTVIE (so the main video extractor handles it).
+
+- ArteTVPlaylistIE (playlist extractor)
+  - _VALID_URL: matches Arte TV playlists RC-YYYYYY in a given language.
+  - _TESTS: includes a sample RC-016954 playlist with a minimum count and a non-matching language example.
+  - _real_extract(url):
+    - Extracts lang and playlist_id from the URL.
+    - Fetches collection data via /collectionData/{lang}/{playlist_id}?source=videos.
+    - Iterates over collection['videos']:
+      - Skips non-dict entries.
+      - Determines video_url from 'url' or 'jsonUrl'.
+      - Builds a transparent entry for each video with:
+        - url: video_url
+        - id: programId
+        - title, alt_title (subtitle), thumbnail (mainImage.url), duration (durationSeconds), view_count
+        - ie_key: ArteTVIE
+    - Returns a playlist_result with entries and metadata (title/description from collection data).
+
+- ArteTVCategoryIE (category page extractor)
+  - _VALID_URL: matches Arte language category pages (e.g., https://www.arte.tv/en/videos/politics-and-society/).
+  - _TESTS: includes a sample category page with expected id, title, and description; playlist_mincount indicates expected number of items.
+  - suitable(cls, url):
+    - Returns False for URLs that match ArteTVIE or ArteTVPlaylistIE (to avoid conflicts) and otherwise uses the parent suitability check.
+  - _real_extract(url):
+    - Extracts lang and playlist_id from the URL.
+    - Downloads the category page HTML.
+    - Scans for anchor tags linking to video pages in the same language (avoiding links back to the category page itself).
+    - If candidate video URLs are found and are suitable for ArteTVIE or ArteTVPlaylistIE, collects them as items.
+    - If items exist:
+      - Tries to derive a title from OG metadata or the page title (trimmed at the last '|').
+      - Builds a playlist from the matched URLs (playlist_from_matches) with the collected id and title.
+      - Adds description from OG metadata if available.
+      - Returns the assembled playlist.
+
+Important implementation details
+- Language handling:
+  - Arte offers multiple language variants. The code maps URL-provided language codes to internal markers and uses a prioritized list (PREFERENCES) to determine language preference for each format. This helps select the best match for the user’s language with or without subtitles.
+- Error handling:
+  - If VSR data is missing or the video isn’t available, it raises ExtractorError with a meaningful message.
+- Format construction:
+  - Supports both HLS (m3u8) and non-HLS formats, plus RTMP fallbacks.
+  - For HLS, formats are augmented with a language_preference attribute.
+  - For RTMP, the format uses the streamer URL, appropriate play_path, and FLV extension.
+  - Each format includes metadata like width, height, bitrate, and a quality score derived from a quality mapping function.
+- Metadata extraction:
+  - Upload date is derived from shootingDate or VRA/VDA fields and normalized to YYYYMMDD.
+  - Title is composed from VTI or VID with an optional subtitle (VSU).
+  - Thumbnail is sourced from programImage or VTU.IUR when available.
+- Embedding and playlists:
+  - Embeds are supported by resolving to the main Arte API JSON via the json_url parameter.
+  - Playlists (ArteTVPlaylistIE) output a list of videos as transparent entries pointing to the individual video URLs, enabling the core video extractor to process them.
+  - Category pages (ArteTVCategoryIE) gather links to individual videos and assemble a playlist if suitable items exist, with a best-guess title/description from the page.
+- Tests:
+  - Each IE includes _TESTS entries to validate URL patterns, expected metadata, and playlist behavior.
+
+In short
+- ArteTVIE handles direct video extraction from Arte API config, including complex language/subtitle preferences and multiple formats (HLS/RTMP).
+- ArteTVEmbedIE resolves embedded Arte player URLs to the main video extractor.
+- ArteTVPlaylistIE builds playlists from Arte’s collectionData API, exposing videos as transparent entries.
+- ArteTVCategoryIE parses category pages to assemble a curated playlist if suitable video links exist.
+- The code emphasizes robust language handling, error reporting, and metadata extraction to deliver consistent video information and properly sorted formats.

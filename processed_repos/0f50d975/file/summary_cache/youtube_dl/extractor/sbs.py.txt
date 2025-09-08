@@ -1,0 +1,33 @@
+- Purpose: SBSIE is a YouTube-DL extractor for SBS On Demand videos. It fetches metadata from SBS API and delegates the actual media retrieval to ThePlatform.
+
+- Key class:
+  - SBSIE(InfoExtractor): SBS On Demand extractor.
+
+- URL matching:
+  - _VALID_URL matches SBS On Demand and related pages (ondemand, news embeds, watch, etc.) and captures a numeric video id as group "id".
+
+- Core workflow (_real_extract):
+  1. Extract video_id from the URL using _match_id.
+  2. Download JSON metadata from SBS API: http://www.sbs.com.au/api/video_pdkvars/id/{video_id}?form=json.
+  3. Error handling:
+     - If the API returns an error, build a user-friendly message based on errorCode:
+       - ComingSoon: video not yet available (uses video title if available).
+       - Forbidden or intranetAccessOnly: cannot be accessed via this site.
+       - Expired: video is no longer available.
+     - Raise ExtractorError with a descriptive message (marked as expected).
+  4. If successful, select a platform media URL from the releaseUrls structure in priority order: progressive, then html, then standard, else fall back to relatedItemsURL.
+  5. Return a URL-transparent result that delegates to ThePlatform:
+     - _type: 'url_transparent'
+     - ie_key: 'ThePlatform'
+     - id: video_id
+     - url: a protocol-relative URL converted via _proto_relative_url and wrapped with smuggle_url(..., {'force_smil_url': True}) to hint ThePlatform to use SMIL.
+
+- Important implementation details:
+  - The extractor uses _download_json to fetch the SBS API data.
+  - It constructs a robust error message using the top-level error and nested video data when available.
+  - The final URL is marked as a ThePlatform extraction, so the actual media URL is resolved by ThePlatform’s extractor.
+  - _proto_relative_url is used to normalize the platform URL, and smuggle_url with force_smil_url ensures proper handling of SMIL-based streams.
+
+- Tests:
+  - _TESTS includes a real example that yields an mp4 with id '_rFBPRPO4pMR' and metadata such as title, description, duration, timestamp, and uploader.
+  - Other test cases use only_matching to ensure non-direct SBS URLs are recognized by the regex but not further processed by this extractor.

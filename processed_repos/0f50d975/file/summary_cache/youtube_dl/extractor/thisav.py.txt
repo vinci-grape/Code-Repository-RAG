@@ -1,0 +1,64 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/thisav.py
+
+- Purpose
+  - A YouTube-DL extractor that retrieves video metadata and playable formats from ThisAV.com video pages.
+
+- Key class
+  - ThisAVIE(InfoExtractor): Django-like extractor class extending Youtube-DL's InfoExtractor.
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?thisav\.com/video/(?P<id>[0-9]+)/.*'
+  - Captures the numeric video ID from ThisAV video pages.
+
+- Tests
+  - _TESTS contains two scenarios:
+    - 1) A JWPlayer-based page returning an FLV/other file via direct file URL, with id 47734, title, uploader, and uploader_id.
+    - 2) An HTML5 video page returning an MP4, with id 242352 and corresponding metadata.
+  - Each test provides an expected md5 and info_dict (id, ext, title, uploader, uploader_id).
+
+- Main extraction flow (_real_extract)
+  - Extract video_id from the URL using the _VALID_URL regex.
+  - Download the page: webpage = self._download_webpage(url, video_id).
+  - Title extraction:
+    - Uses _html_search_regex to extract the <title>...</title> content.
+    - Cleans a specific suffix from the title via remove_end(..., ' - 視頻 - ThisAV.com-世界第一中文成人娛樂網站').
+  - Video URL extraction:
+    - First tries to locate a direct file URL via addVariable('file', '...') in the page:
+      - video_url = self._html_search_regex(r"addVariable\('file','([^']+)'\);", ..., default=None)
+    - If video_url is found:
+      - info_dict = {'formats': [{'url': video_url}]}
+    - If no direct file URL is found:
+      - Try HTML5 media entries: entries = self._parse_html5_media_entries(url, webpage, video_id)
+        - If entries exist, use the first entry: info_dict = entries[0]
+      - Else fall back to JWPlayer data: info_dict = self._extract_jwplayer_data(webpage, video_id, require_title=False)
+  - Uploader information (optional, non-fatal extraction):
+    - uploader: _html_search_regex for the uploader name pattern in the page
+      - Pattern looks for: ': <a href="http://www.thisav.com/user/<id>/...">name</a>'
+      - fatal=False to avoid failing if not present
+    - uploader_id: similarly extracts the slug/right-hand side of the user URL
+  - Final assembly:
+    - info_dict.update({
+        'id': video_id,
+        'uploader': uploader,
+        'uploader_id': uploader_id,
+        'title': title,
+      })
+  - Return info_dict containing at least id, title, and formats, plus optional uploader info.
+
+- Important implementation details
+  - Uses remove_end to normalize the title by stripping a known ThisAV suffix.
+  - Handles multiple possible video sources:
+    - Direct file URL (via addVariable('file', ...))
+    - HTML5 video entries (via _parse_html5_media_entries)
+    - JWPlayer data (via _extract_jwplayer_data)
+  - Non-fatal regex lookups (fatal=False) to gracefully handle missing uploader information.
+  - Formats field is populated as a list of format dictionaries when a direct video URL is found.
+
+- Output
+  - Returns a dictionary (info_dict) with:
+    - id (video_id)
+    - title
+    - uploader (optional)
+    - uploader_id (optional)
+    - formats (primary source of playable URLs, could be a direct URL or HTML5/jwplayer-derived)
+  - The tests indicate the expected extension (ext) and MD5 for the downloaded content in each scenario.

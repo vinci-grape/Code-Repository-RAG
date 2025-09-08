@@ -1,0 +1,93 @@
+Here is a concise, focused summary of the code in youtube-dl/youtube_dl/extractor/viki.py
+
+Main purpose
+- Implement extraction for Viki videos and channels, including signed API access, login handling, error reporting, MPD-based video formats, subtitles, and channel playlists.
+
+Key classes
+- VikiBaseIE (InfoExtractor)
+  - Core utilities and shared logic for Viki API access and error handling.
+  - Constants:
+    - _VALID_URL_BASE, _API_URL_TEMPLATE
+    - _DEVICE_ID, _APP, _APP_VERSION, _APP_SECRET (used to sign API requests)
+    - _GEO_BYPASS, _NETRC_MACHINE
+    - _token for session management
+    - _ERRORS mapping for geo/upcoming/paywall errors
+  - Important methods:
+    - _stream_headers(timestamp, sig): returns required headers for streaming requests (device/app info, timestamp, signature, app version).
+    - _api_query(path, version=4, **kwargs): builds the API query string, including app id and token if present, plus extra kwargs as query parameters.
+    - _sign_query(path): creates a signed query (version 5) using HMAC-SHA1 with APP_SECRET. Returns (timestamp, sig, full API URL).
+    - _call_api(path, video_id, note, data=None, query=None, fatal=True): fetches JSON from the API. If query is None, uses signed query from _sign_query; otherwise uses a version 4 query. Handles authentication headers and error status, and raises or warns on errors via _raise_error.
+    - _raise_error(error, fatal=True): formats and raises or warns about API errors.
+    - _check_errors(data): inspects blocking info from video/channel data; handles geo, paywall, and login requirements by raising appropriate errors or warnings.
+    - _real_initialize(self): triggers login on initialization.
+    - _login(self): obtains user credentials via _get_login_info(); if provided, calls sessions.json to obtain a token and stores it in _token.
+    - dict_selection(dict_obj, preferred_key): helper to select a value from a dict by preferred key or the first non-null value.
+- VikiIE (Video extractor)
+  - Inherits VikiBaseIE
+  - IE_NAME = 'viki'; _VALID_URL matches video URLs (videos or player) with an id ending in v (e.g., 12345v).
+  - _real_extract(self, url):
+    - Extract video_id via _match_id.
+    - Fetch video JSON: _call_api('videos/{video_id}.json', ...).
+    - _check_errors(video) to enforce geo/paywall constraints.
+    - Title resolution:
+      - Try to get video['titles']['en']; if missing, construct from type (episode vs others) and container title fallback to produce a readable title.
+    - Playback streams:
+      - Request playback streams: _call_api('playback_streams/{video_id}.json?drms=dt3&device_id=...', ...) and take the first main stream.
+      - mpd_url from resp['url']; download initial MPD to possibly discover a higher-quality manifest.
+      - If needed, locate a new manifest via regex on the MPD content, and prefer mpdhd_high for 1080p if available.
+      - Extract formats via _extract_mpd_formats(mpd_url, video_id) and sort with _sort_formats(formats).
+    - Metadata:
+      - description from video['descriptions']['en'] (if present)
+      - thumbnails built from video['images'] (id, url)
+      - like_count from video['likes']['count']
+      - duration, timestamp (parse_iso8601 on created_at)
+      - uploader / uploader_url from video fields
+      - age_limit via parse_age_limit(video['rating'])
+      - episode_number if present
+    - Subtitles:
+      - Build per-language subtitles by calling an authenticated subtitles API URL for each language and extension (srt, vtt) using the stream_id from the chosen stream.
+    - Return dict with id, formats, title, description, duration, timestamp, uploader, uploader_url, like_count, age_limit, thumbnails, subtitles, episode_number.
+- VikiChannelIE (Channel/Playlist extractor)
+  - Inherits VikiBaseIE
+  - IE_NAME = 'viki:channel'; _VALID_URL matches channel endpoints (tv, news, movies, artists)
+  - _video_types = ('episodes', 'movies', 'clips', 'trailers')
+  - _entries(self, channel_id):
+    - Iterates through each video_type and pages of containers/{channel_id}/{video_type}.json
+    - Builds requests with app/token/only_ids/sort/page/per_page and yields video ResultInfo for each video_id found (https://www.viki.com/videos/{video_id})
+  - _real_extract(self, url):
+    - channel_id = _match_id(url)
+    - channel = _call_api('containers/{channel_id}.json', channel_id, 'Downloading channel JSON')
+    - _check_errors(channel)
+    - Return a playlist_result consisting of all entries from _entries(channel_id), with title/description derived from channel titles/descriptions (prefer English title/description via dict_selection)
+
+Important implementation details
+- API access uses a two-step signing approach:
+  - _api_query builds the query string with app id and optional token.
+  - _sign_query signs the query with HMAC-SHA1 using APP_SECRET to produce a secure URL for API version 5.
+  - Token-based login is supported via _login and stored in _token; subsequent API calls include token in the query.
+- Error handling is centralized:
+  - _check_errors interprets blocking statuses to enforce geo restrictions, paywalls, or login requirements.
+  - _raise_error and _call_api handle API error messages, with fatal vs warning behavior.
+- Video extraction flow:
+  - Retrieve initial video JSON to determine metadata and availability.
+  - Retrieve playback streams to obtain an MPD URL.
+  - Download initial MPD to locate/modify manifest URL for high resolution (1080p) if needed.
+  - Extract formats from MPD with _extract_mpd_formats, then sort.
+  - Build rich metadata: title (with container fallback), description, duration, timestamp, uploader, thumbnail list, like_count, age_limit, and episode_number.
+  - Build per-language, per-format subtitles using an authenticated subtitles endpoint that requires a stream_id.
+- Channel extraction flow:
+  - Fetch channel JSON to get title/description.
+  - Iterate through multiple video types and pages to enumerate video IDs.
+  - Yield individual video URLs as entries for the playlist.
+- Helper utilities:
+  - dict_selection helps robustly pick English titles/descriptions when available.
+  - _STREAM_HEADERS provide required headers for Viki’s streaming endpoints (device, OS, app version, etc.).
+- Tests indicate support for multiple URL patterns, including player URLs, and various sample outputs (titles, ids, durations, uploads, etc.), plus handling of DRM/geo/paywall conditions.
+
+In short, this file implements a robust Viki extractor with:
+- Authenticated API access and login support
+- Comprehensive error handling (geo, paywall, login)
+- Video extraction using signed MPD-based formats with resolution adjustments
+- Rich metadata extraction (title, description, duration, timestamp, uploader, thumbnails, like counts, age limits)
+- Subtitles extraction via authenticated endpoints
+- Channel/playlist extraction with pagination across several video types

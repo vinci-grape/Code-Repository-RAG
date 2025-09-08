@@ -1,0 +1,44 @@
+- Purpose
+  - A YouTube-dl extractor for Gfycat video pages. It fetches video metadata and available formats from Gfycat API and outputs a structured info dictionary.
+
+- Key class
+  - GfycatIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL regex covers various Gfycat URL forms, including subdomains (www, giant, thumbs) and paths like ru/, ifr/, gifs/detail/. It captures the video id.
+
+- Tests
+  - _TESTS contains two real Gfycat URLs with expected info_dicts (id, ext, title, timestamp, upload_date, uploader, duration, counts, categories, age_limit, etc.).
+  - Some URLs are marked only_matching to verify the regex handles other formats without attempting extraction.
+
+- Core functionality (_real_extract)
+  - Extracts video_id from the URL using _match_id.
+  - Downloads video info from Gfycat API: https://api.gfycat.com/v1/gfycats/{id}
+    - Uses _download_json; if API returns an error key, raises ExtractorError with the API message.
+    - Uses the gfyItem payload for metadata.
+  - Metadata extraction and normalization:
+    - title: gfyItem['title'] or gfyName
+    - description: gfyItem['description']
+    - timestamp: int from createDate
+    - uploader: userName
+    - view_count, like_count, dislike_count: via int_or_none
+    - age_limit: 18 if nsfw == '1' else 0
+    - width, height, fps, num_frames: via int_or_none
+    - duration: computed as float(num_frames) / fps if both exist; otherwise None
+    - categories: gfyItem['tags'] or gfyItem['extraLemmas'] or []
+  - Formats
+    - Supported formats: gif, webm, mp4
+    - quality mapping created via qualities(FORMATS)
+    - For each format_id, build video_url from gfyItem['<format>Url'] and filesize from <format>Size if present
+    - Each format dict contains: url, format_id, width, height, fps, filesize, quality
+    - Collects all available formats and sorts them with _sort_formats
+  - Return value
+    - A dict with id, title, description, timestamp, uploader, duration, view_count, like_count, dislike_count, categories, age_limit, formats
+
+- Implementation details
+  - Uses int_or_none and float_or_none to robustly parse numeric fields.
+  - Duration calculation relies on both numFrames and frameRate; if either is missing, duration remains None.
+  - Formats are built if a corresponding URL exists; filesize is optional.
+  - Error handling aligns with YouTube-dl patterns: explicit ExtractorError when API returns an error message.
+
+In short: GfycatIE fetches data from Gfycat’s API, extracts video metadata and multiple possible formats (gif/webm/mp4), computes duration, handles counts and age limits, and returns a standardized info dictionary suitable for downloading.

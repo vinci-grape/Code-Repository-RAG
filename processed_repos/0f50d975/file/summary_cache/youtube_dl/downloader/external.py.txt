@@ -1,0 +1,112 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/downloader/external.py
+
+Overview
+- This module implements support for external downloaders used by youtube-dl. It defines a generic ExternalFD downloader and several concrete subclasses that wrap common external tools (curl, axel, wget, aria2/aria2p, httpie) as well as FFmpeg/AVconv for post-processing/downloading.
+- It includes a dynamic registry of available external downlader classes and helper utilities for cookies, headers, proxies, and command construction.
+
+Main components
+
+1) Base class: ExternalFD (inherits FileDownloader)
+- Core role: provides common workflow to run an external downloader and integrate its progress/status with youtube-dl.
+- Key methods:
+  - real_download(filename, info_dict): orchestrates download, handles live-stream cancellation, cleans up cookies file, and on success renames the temporary file and reports progress/status.
+  - get_basename(): returns the downloader name derived from class name (e.g., CurlFD -> 'curl').
+  - available()/supports()/can_download(): determine whether a given downloader is usable for a particular URL/info_dict.
+  - _option/_bool_option/_valueless_option/_configuration_args: thin wrappers around generic CLI argument helpers to build command lines from self.params.
+  - _write_cookies(): creates a temporary cookies file if needed and persists cookies from the cookiejar.
+  - _call_downloader(tmpfilename, info_dict): builds and runs the external command, captures stderr on error, returns exit code.
+  - _header_items(info_dict): helper to extract HTTP headers from info_dict for inclusion in commands.
+- Cookie/headers support: writes cookies to a file when needed and passes cookies/headers to the external command.
+- Progress integration: uses self._hook_progress to update status with bytes read, elapsed time, etc.
+- Error handling: on non-zero exit codes, reports error; on KeyboardInterrupt for live streams, treats as normal termination to allow post-processing.
+
+2) Concrete downloader implementations (subclasses of ExternalFD)
+
+- CurlFD
+  - _make_cmd(tmpfilename, info_dict): builds a curl command with location following redirects, output to tmpfilename, compressed transfer, cookies header, all HTTP headers from info_dict, proxy, rate limiting, retries, and other configuration args. Appends the target URL at end.
+  - _call_downloader: runs curl, does not capture progress (curl writes progress to stderr; it’s not parsed by youtube-dl here).
+
+- AxelFD
+  - _make_cmd(tmpfilename, info_dict): uses axel with -o output, adds HTTP headers, cookies header, configuration args, and the URL.
+
+- WgetFD
+  - _make_cmd(tmpfilename, info_dict): uses wget with -O, -nv, and --compression=auto; supports loading cookies from a cookies file if present; adds headers, rate limit, retry/tries, bind-address, proxy environment, no-check-certificate, and config args; ends with the URL.
+
+- Aria2cFD
+  - _make_cmd(tmpfilename, info_dict):
+    - Uses aria2c with multi-connection options, sets directory/out file, headers, cookies, and configuration args (max-connection-per-server, proxy, etc.).
+    - Special handling for spaces in paths via _aria2c_filename to work around aria2c path handling.
+    - If info_dict contains fragments, creates a .frag.urls file with per-fragment URLs and uses -i to feed aria2c; otherwise uses a single URL.
+    - For non-fragment downloads, uses --out and --dir for proper file placement.
+  - Notes: supports fragments and direct URL mode; handles file/directory name normalization for aria2c.
+
+- Aria2pFD
+  - available(): checks for aria2p Python package availability.
+  - _call_downloader(tmpfilename, info_dict): uses aria2p (RPC API) to control a running aria2c daemon.
+    - Connects to localhost:6800, creates a download with add_uris, sets options (dir, out, load-cookies, headers, etc.).
+    - Polls the download status, periodically updating progress via self._hook_progress, until complete or error.
+    - Returns whether the download was not complete (logical success depending on status).
+
+- HttpieFD
+  - available(): checks if httpie is available via --version.
+  - _make_cmd(tmpfilename, info_dict): builds a httpie download command: http --download --output tmpfilename url, appends headers, and includes a Cookie header if present in the cookiejar.
+
+- FFmpegFD
+  - supports(info_dict): supports protocols including http/https/ftp/ftps/m3u8/rtsp/rtmp/mms/http_dash_segments.
+  - available(): returns True if FFmpegPostProcessor is available (FFmpeg/avconv must be installed).
+  - _call_downloader(tmpfilename, info_dict):
+    - Instantiates FFmpegPostProcessor with downloader=self.ydl, checks availability/version.
+    - Builds arguments for ffmpeg/avconv:
+      - Sets -loglevel based on verbose/quiet params.
+      - Optionally -seekable based on info_dict['_seekable'] for stability with servers that don’t support Range requests.
+      - Adds cookies if needed; handles HTTP headers via -headers with properly formatted CRLF endings.
+      - Handles HTTP proxy via environment variables (HTTP_PROXY/http_proxy) if a proxy is configured.
+      - If protocol is rtmp, adds a number of rtmp-specific options (rtmp_swfverify, rtmp_pageurl, rtmp_app, rtmp_playpath, etc.).
+      - Chooses output format based on protocol:
+        - For m3u8/m3u8_native: if hls_use_mpegts or tmpfilename is '-' use MPEG-TS; otherwise MP4 with extra flags (aac_adtstoasc when necessary for older ffmpeg).
+        - For RTMP: FLV.
+        - Else: use EXT_TO_OUT_FORMATS mapping to determine output container.
+      - Always specifies input URL (-i url) and copies codecs (-c copy).
+      - If test mode, sets -fs to a small test size.
+    - Executes FFmpeg/AVconv via subprocess with a robust wait/kill path, handles KeyboardInterrupt cleanly on non-Windows.
+    - Returns the exit code from the ffmpeg process.
+
+3) Registry and discovery
+
+- _BY_NAME: a dynamic registry mapping downloader base names to their classes. It collects all classes ending with FD (except ExternalFD) and uses their get_basename() as keys.
+- list_external_downloaders(): returns sorted list of available downloader names.
+- get_external_downloader(external_downloader): given an executable name, normalizes it (drops .exe on Windows) and returns the corresponding FD class from _BY_NAME.
+
+Key implementation details and nuances
+
+- Cookies and headers:
+  - _write_cookies() creates a temporary cookies file if the cookie jar has no filename, and saves cookies to disk for use by external tools.
+  - _header_items(info_dict) gathers HTTP headers from info_dict['http_headers'] and feeds them to the downloader commands via --header or equivalent headers list.
+  - Special care for cookies: some tools require a cookie header string; get_cookie_header returns a proper header value.
+
+- Progress and errors:
+  - External downloaders report progress via self._hook_progress in various ways (direct polling for aria2p, aria2c fragment progress, etc.).
+  - real_download handles KeyboardInterrupt gracefully for live streams by completing post-processing instead of failing outright.
+
+- FFmpeg/AVconv specifics:
+  - Supports seeking control (-seekable) to avoid mis-detection of range support.
+  - Handles RTMP advanced options (rtmp_swfverify, rtmp_pageurl, etc.) and live mode.
+  - Chooses output format depending on protocol and HLS/DASH specifics; includes fallbacks for older ffmpeg behavior.
+
+- aria2p integration:
+  - If aria2p is installed, Aria2pFD uses RPC to manage downloads, enabling easier progress tracking (via polling) and remote control.
+
+- Path/name handling:
+  - Aria2c path handling explicitly adjusts dir/out to avoid aria2c stripping spaces, by prefixing with "./" and ensuring trailing slashes as needed.
+
+- Dynamic discovery:
+  - The module auto-discovers supported external downloaders via class naming (e.g., CurlFD -> 'curl') and exposes a simple API to list and fetch downloader classes.
+
+Usage overview
+- This module allows youtube-dl to offload downloads to external tools when configured, enabling parallel/download-manager behavior or leveraging specialized protocols/optimizations via those tools.
+- It provides flexible command construction, cookie/header handling, proxy support, and protocol-specific logic (FFmpeg for remuxing/stream extraction, aria2c for multi-connection downloads, etc.).
+
+In short
+- ExternalFD is the common framework for running external download utilities with cookies/headers/proxies and progress hooks.
+- Multiple concrete classes (CurlFD, AxelFD, WgetFD, Aria2cFD, Aria2pFD, HttpieFD, FFmpegFD, AVconvFD) implement tool-specific command construction and execution.
+- A dynamic registry enables you to query and select an external downloader by name.

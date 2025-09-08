@@ -1,0 +1,62 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/njpwworld.py
+
+Purpose
+- Implement an InfoExtractor (NJPWWorldIE) for extracting videos from New Japan Pro-Wrestling World (njpwworld.com / front.njpwworld.com).
+
+Key classes, functions, and flow
+- NJPWWorldIE (subclass of InfoExtractor)
+  - _VALID_URL: Regex to match video pages, supporting both njpwworld.com/p/... and front.njpwworld.com/p/... URLs. Captures the video id as id.
+  - IE_DESC: Description string for the extractor.
+  - _NETRC_MACHINE: Credentials machine name used for login (njpwworld).
+  - _TESTS: Two test cases describing sample pages, expected info_dict (id, ext, title, tags), and skip_download due to AES-encrypted m3u8 or login requirements.
+  - _LOGIN_URL: URL used for login ("https://front.njpwworld.com/auth/login").
+
+Initialization and login
+- _real_initialize(self): Called before extraction; delegates to _login to establish a session if credentials are available.
+- _login(self): 
+  - Retrieves username and password via _get_login_info().
+  - If no credentials provided, returns True (no login).
+  - Otherwise, initializes a session by requesting https://njpwworld.com/ to set cookies.
+  - Performs a POST to _LOGIN_URL with login_id and pw (encoded via urlencode_postdata), sending a Referer header for the login flow.
+  - If the login endpoint redirects back to _LOGIN_URL (i.e., login failed), it logs a warning and returns False; otherwise returns True.
+
+Extraction of video information
+- _real_extract(self, url):
+  - video_id: Extracted from the URL via _match_id.
+  - webpage: Downloaded HTML page content.
+  - Formats extraction:
+    - Scans the webpage with a regex:
+      r'if\s+\(\s*imageQualityType\s*==\s*\'([^\']+)\'\s*\)\s*{\s*video_id\s*=\s*"(\d+)"'
+    - For each match (quality kind and video_id vid), builds a format entry:
+      - player_path: '/intent?id=%s&type=url' % vid
+      - player_url: Absolute URL joined with the page URL (using compat_urlparse.urljoin)
+      - format fields:
+        - url: player_url
+        - format_id: kind (e.g., 'high', or other quality labels)
+        - ext: 'mp4'
+        - protocol: 'm3u8'
+        - quality: 2 if kind == 'high' else 1
+    - Collects all such formats and sorts them with _sort_formats.
+  - Tags extraction:
+    - tag_block: HTML element with class 'tag-block' (found via get_element_by_class).
+    - If present, extracts tag texts from anchor elements whose class matches tag-... pattern:
+      r'<a[^>]+class="tag-[^"]+"[^>]*>([^<]+)</a>'
+    - If tag_block is absent, tags is None.
+  - Result dictionary:
+    - id: video_id
+    - title: content of element with class 'article-title', or falls back to _og_search_title(webpage)
+    - formats: the collected formats
+    - tags: the extracted tags list (or None)
+
+Implementation details and notable points
+- Uses helper utilities:
+  - get_element_by_class to locate elements by class name in HTML.
+  - urlencode_postdata to prepare login POST data.
+  - compat_urlparse.urljoin to construct absolute URLs for format entries.
+- The login flow is optional. If credentials aren’t provided, the extractor proceeds without logging in.
+- The code looks for specific JavaScript-in-page patterns to discover video format URLs (imageQualityType and video_id combinations) and builds m3u8-based formats from those IDs via an /intent endpoint.
+- Tags are parsed from a dedicated tag-block section in the article page.
+- Title extraction prioritizes a dedicated article-title element, with a fallback to the Open Graph title.
+- The tests indicate that some videos are AES-encrypted in m3u8, hence skip_download is used in tests, and login may be required for access.
+
+Overall, this extractor handles optional login, builds video formats from in-page JavaScript hints, extracts tags and title, and returns a structured information dictionary suitable for youtube-dl.

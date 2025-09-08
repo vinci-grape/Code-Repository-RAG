@@ -1,0 +1,75 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/vk.py
+
+What it does
+- Implements VK (VKontakte) extractors for youtube-dl, enabling extraction of:
+  - Individual VK videos (VKIE)
+  - VK user video playlists (VKUserVideosIE)
+  - VK wall-post audio/video playlists (VKWallPostIE)
+- Supports a variety of VK URL patterns (direct video, embedded players, mobile URLs, daxab/embed, Sibnet, Rutube, YouTube/Vimeo/Dailymotion/Pladform embedded providers, etc.).
+- Handles VK login when needed to access age-restricted or account-protected content.
+- Retrieves video data via VK endpoints, parses formats, and surfaces metadata (title, uploader, duration, timestamp, view/like/comment counts).
+- For wall posts, can parse and assemble audio playlists from data-audio attributes, including de-obfuscating masked audio URLs.
+
+Key classes and their roles
+- VKBaseIE (InfoExtractor)
+  - Handles VK login flow and payload fetching
+  - _login: logs in to vk.com via form submission, encoding credentials as cp1251, applies a cookie workaround, and checks for login failures
+  - _real_initialize: triggers login on initialization
+  - _download_payload: wraps VK’s al_video AJAX-like endpoint, returns payload from the JSON response; handles login-required and other payload errors
+- VKIE (main VK video extractor)
+  - Extracts a single VK video from various VK URL formats
+  - _VALID_URL handles many cases (direct video, embedded, daxab, etc.)
+  - _real_extract:
+    - If a video_id is present: uses al_video show_inline to fetch inline data, including mvData and player info
+    - If no video_id: fetches info_page via video_ext.php embed_query
+    - Error handling for login prompts, copyright, regional blocks, and various VK error messages
+    - Tries to detect and delegate to external providers (YouTube, Vimeo, Pladform, Rutube, Dailymotion, Odnoklassniki, Sibnet)
+    - If internal data is available, builds formats from data fields (url/cache format, hls with m3u8, rtmp), plus metadata like title, uploader, duration, timestamp, view/like/comment counts
+    - Special live-video handling: adjusts title for live streams
+- VKUserVideosIE
+  - Extracts a VK user’s videos playlist
+  - _VALID_URL: matches https://vk.com/videos<id> with optional section (all, uploaded, etc.)
+  - Uses VK’s al_video load_videos_silent API to page through videos (OnDemandPagedList) and yields video entries as VKIE results
+  - Page size is 1000; returns a playlist with id "<page_id>_<section>"
+- VKWallPostIE
+  - Extracts audio/video playlists from VK wall posts
+  - _VALID_URL matches VK wall post URLs (including mobile)
+  - _decode and _unmask_url: implement deobfuscation of masked audio URLs returned by VK (base64-like encoding and a custom permutation/bitwise unmasking)
+  - _real_extract:
+    - Fetches wall post data via wkview with act=show
+    - Parses description and uploader
+    - Extracts audio entries from data-audio attributes, decodes URLs, and builds audio entries with id, url, title, performer, duration, thumbnails, etc. Uses unmasked URL and supports masking artifacts
+    - Also scans for inline video links in the post and adds them as VKIE results
+    - Returns a playlist consisting of the audio entries (and optional linked videos), with a composed title and optional description
+
+Important implementation details
+- Login handling
+  - Credentials are read via _get_login_info; they are encoded as cp1251 for VK compatibility
+  - A cookie handling quirk is addressed with apply_first_set_cookie_header for remixlhk
+- Payload retrieval
+  - _download_payload calls the VK endpoint path.php with POST data, marks requests as AJAX with X-Requested-With
+  - Interprets payload structure: code '3' means login required, code '8' yields a user-facing error message
+- Video extraction flow (VKIE)
+  - For video_id-based URLs: uses al_video with act=show_inline to get data; mvData and player data are used to populate the final info
+  - For embedded URLs: uses video_ext.php and parses various error messages (copyright, login-only, region restrictions)
+  - Detects external providers by inspecting info_page and delegating to YoutubeIE, VimeoIE, PladformIE, DailymotionIE, OdnoklassnikiIE, Sibnet extraction where applicable
+  - If internal formats are present, builds a formats list supporting:
+    - direct URLs (url, cache) with possible height extraction
+    - HLS (m3u8) via _extract_m3u8_formats
+    - RTMP (ext 'flv')
+  - Populates standard metadata fields: id, title, thumbnail, uploader, uploader_id, duration, timestamp, view_count, like_count, comment_count, is_live
+- Wall post extraction
+  - The audio decoding logic is non-trivial and tailored to VK’s obfuscated audio data
+  - Each audio entry becomes a playable item with id owner_id and id, and a URL that is unmasked
+  - Videos linked in the wall post are also collected as VKIE results
+  - The final output is an ordered playlist with a descriptive title and description
+- Error handling and edge cases
+  - Handles various login-required, age-restricted, copyright, region-locked, and removed content messages
+  - Some videos are not downloadable or require credentials; tests mark those as skipped or only-matching
+  - Live and post-live videos are treated with appropriate metadata adjustments
+- Tests
+  - A comprehensive _TESTS suite covers multiple VK URL patterns, embedded providers, direct videos, live streams, removed/age-restricted content, and wall-post scenarios
+
+NotableNotes
+- The extractor is designed to be robust across VK’s evolving URL schemes and embed formats, with fallbacks to external providers when VK’s own formats are not available.
+- Wall post handling includes a bespoke deobfuscation routine to recover audio URLs, illustrating VK’s anti-scraping measures and the need for reverse-engineered decoding logic.

@@ -1,0 +1,42 @@
+- Purpose: GodTubeIE is an extractor for youtube-dl that handles GodTube watch pages and returns standard video metadata and the direct video URL.
+
+- URL pattern:
+  - _VALID_URL matches: http(s)://(www.)?godtube.com/watch/?v=<id>
+  - The video id is captured as the group 'id'.
+
+- Tests:
+  - Includes a sample with id 0C0CNNNU.
+  - Verifies expected metadata: id, extension (mp4), title, duration (159), timestamp (1205712000), uploader, upload_date (20080317), and a thumbnail URL pattern.
+
+- Core functionality (_real_extract):
+  - Extracts video_id from the URL using the regex.
+  - Downloads the player config XML from:
+    http://www.godtube.com/resource/mediaplayer/<video_id>.xml
+    (video_id is lowercased for the request path)
+  - Parses the config XML to obtain:
+    - video_url from the <file> element
+    - uploader from the <author> element
+    - timestamp from the ISO8601 date in <date> using parse_iso8601
+    - duration from <duration> using parse_duration
+    - thumbnail from <image>
+  - Downloads a second XML with media details from:
+    http://www.godtube.com/media/xml/?v=<video_id>
+  - Parses the title from the <title> element of this media XML.
+  - Returns a dictionary containing:
+    - id: video_id
+    - url: video_url (the direct video URL)
+    - title: title parsed from media XML
+    - thumbnail: thumbnail URL
+    - timestamp: parsed upload timestamp
+    - uploader: uploader/author
+    - duration: parsed duration (in seconds)
+
+- Implementation details:
+  - Uses InfoExtractor._download_xml to fetch both XML resources.
+  - Uses two separate XML sources: one for technical/metadata (file, author, date, duration, image) and one for the title (title) from the media XML.
+  - Duration and timestamp are converted to numeric formats via parse_duration and parse_iso8601.
+  - The extension is inferred from the video URL (the test expects mp4, but the code does not hardcode an ext).
+
+- Notes:
+  - The approach relies on GodTube’s two XML endpoints and specific XML structure; changes to those endpoints/fields could require updates.
+  - The code focuses on conveying enough metadata for the video entry and providing the direct media URL for download/streaming.

@@ -1,0 +1,70 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/pinkbike.py
+
+Overview
+- Implements a Youtube-DL extractor for Pinkbike video pages.
+- Class PinkbikeIE extends InfoExtractor and extracts video metadata and available formats from Pinkbike video pages.
+
+Key components
+- _VALID_URL
+  - Regex to identify valid Pinkbike video URLs and capture the video id.
+  - Matches:
+    - http(s)://www.pinkbike.com/video/{id}
+    - es.pinkbike.org/i/kvid/kvid-y5.swf?id={id}
+  - Captures id as (?P<id>[0-9]+).
+
+- _TESTS
+  - Provides sample tests to validate extraction:
+    - Test 1: http://www.pinkbike.com/video/402811/
+      - Expected: mp4, with metadata including id, title, description, thumbnail, duration, upload_date, uploader, location, view_count, comment_count.
+    - Test 2: es.pinkbike.org/i/kvid/kvid-y5.swf?id=406629
+      - only_matching test to ensure URL pattern recognition.
+
+- _real_extract(self, url)
+  - Core extraction logic:
+    - video_id = self._match_id(url): extracts the numeric id from the URL.
+    - Downloads the page at http://www.pinkbike.com/video/{video_id}.
+
+  - Formats extraction:
+    - Scans the page for data-quality attributes and corresponding sources with a regex:
+      data-quality=((?:\\)?["'])(.+?)\1[^>]+src=\1(.+?)\1
+    - For each match:
+      - format_id is the second captured group.
+      - src is the third captured group (URL to the video format).
+      - height is extracted from format_id by matching a number followed by p/P (e.g., 720p) and converting to int.
+      - Appends a format dict: {'url': src, 'format_id': format_id, 'height': height}.
+    - Calls self._sort_formats(formats) to sort by quality/bandwidth as per youtube-dl conventions.
+
+  - Title and description:
+    - title = remove_end(self._og_search_title(webpage), ' Video - Pinkbike')
+    - description:
+      - Tries to extract from a media-description div via regex.
+      - If not found, falls back to removing the title prefix from the Open Graph description.
+
+  - Thumbnail, duration, uploader, upload_date, location:
+    - thumbnail: self._og_search_thumbnail(webpage)
+    - duration: int_or_none(self._html_search_meta('video:duration', webpage, 'duration'))
+    - uploader: optional author link text via regex, fatal=False
+    - upload_date: tries to parse from a fullTime element's title attribute, converted via unified_strdate; fatal=False
+    - location: optional location field via HTML regex, fatal=False
+
+  - View and comment counts:
+    - Defines helper extract_count(webpage, label) which searches for a block matching:
+      <span class="stat-num">...< /span> <span class="stat-label"> label
+      and converts the numeric value to int via str_to_int.
+    - view_count = extract_count(webpage, 'Views')
+    - comment_count = extract_count(webpage, 'Comments')
+
+  - Result:
+    - Returns a dict with:
+      - id, title, description, thumbnail, duration, upload_date, uploader, location, view_count, comment_count, formats
+
+Implementation details and behavior
+- Uses a mix of OpenGraph, HTML meta tags, and page-specific HTML structure to gather metadata.
+- Highly tolerant parsing:
+  - Handles quoted attributes and potential escaping in the formats regex.
+  - Provides fallbacks for missing fields (description, uploader, upload_date, location, counts) with reasonable defaults or None.
+- Utilizes youtube-dl helper methods:
+  - _og_search_title/_og_search_description/_og_search_thumbnail for OpenGraph data.
+  - _html_search_meta and _html_search_regex for HTML-based extraction.
+  - unified_strdate to normalize dates; int_or_none and str_to_int for numeric values.
+- Focuses on extracting multiple video formats and associated metadata from a Pinkbike video page, then returns a structured dictionary consumable by youtube-dl.

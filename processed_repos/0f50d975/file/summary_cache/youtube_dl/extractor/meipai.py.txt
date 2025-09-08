@@ -1,0 +1,68 @@
+Here is a concise, focused summary of the code in youtube-dl/youtube_dl/extractor/meipai.py:
+
+- Purpose
+  - Implement an InfoExtractor for Meipai (a Chinese video platform) to extract video metadata and formats for both regular uploaded videos and recorded live streaming.
+
+- Main class
+  - MeipaiIE(InfoExtractor)
+  - IE_DESC: "美拍"
+  - _VALID_URL: regex to match URLs like http(s)://www.meipai.com/media/<id> (id is digits)
+  - _TESTS: two tests
+    - Regular uploaded video with id 531697625
+    - Live streaming record with id 585526361
+  - Inherits common extraction helpers from InfoExtractor and uses utility helpers for parsing.
+
+- Core extraction flow (_real_extract)
+  - video_id = self._match_id(url)
+  - webpage = self._download_webpage(url, video_id)
+
+  - Title extraction
+    - Try Open Graph title via self._og_search_title(webpage, default=None)
+    - If not found, fall back to the HTML title using a regex
+    - Result stored as title
+
+  - Formats collection
+    - Attempt to extract HLS formats from a m3u8 URL found in the page:
+      - m3u8_url found via a JavaScript-encoded string pattern:
+        file: encodeURIComponent('"...url..."')
+      - If found, call self._extract_m3u8_formats with:
+        - m3u8_url, video_id, ext 'mp4', entry_protocol 'm3u8_native'
+        - m3u8_id 'hls', fatal=False
+      - Appends results to formats
+    - If no formats yet (likely for regular uploads), try to fetch a direct video URL:
+      - Look for data-video attribute: data-video="URL"
+      - If found, append a single-format entry with {'url': video_url, 'format_id': 'http'}
+  - Metadata extraction
+    - timestamp: derived from release date via self._og_search_property('video:release_date', webpage, 'release date', fatal=False) and unified_timestamp
+    - upload_date: effectively populated via timestamp in the returned dict (via unified_timestamp)
+    - tags: self._og_search_property('video:tag', webpage, 'tags', default='').split(',')
+    - view_count: int_or_none(self._html_search_meta('interactionCount', webpage, 'view count'))
+    - duration: parse_duration(self._html_search_meta('duration', webpage, 'duration'))
+    - creator: self._og_search_property('video:director', webpage, 'creator', fatal=False)
+  - Return info dictionary with:
+    - id: video_id
+    - title
+    - description: self._og_search_description(webpage)
+    - thumbnail: self._og_search_thumbnail(webpage)
+    - duration
+    - timestamp
+    - view_count
+    - creator
+    - tags
+    - formats
+
+- Important implementation details
+  - Two-mode handling: supports both live-record (via m3u8) and regular uploads (via data-video URL).
+  - m3u8 extraction uses a robust search for an encoded URL embedded in a JS snippet:
+    file: encodeURIComponent("...URL...")
+  - For m3u8 formats, uses entry_protocol 'm3u8_native' and m3u8_id 'hls', with fatal=False to avoid failing if the m3u8 path is unavailable.
+  - Title resolution prefers OG data but falls back to a plain HTML title.
+  - Metadata extraction uses a combination of OG meta properties and HTML meta tags:
+    - video:release_date for timestamp
+    - video:tag for tags (split by comma)
+    - interactionCount for view_count
+    - duration for duration
+    - video:director for creator
+  - The final info dict includes standard fields used by youtube-dl: id, title, description, thumbnail, duration, timestamp, view_count, creator, tags, and formats.
+
+In short, MeipaiIE fetches the page, derives the video id, obtains the title and thumbnail via OG/html fallbacks, builds a formats list from either an m3u8 stream (preferred for live-recordings) or a direct video URL, and collects common metadata (duration, timestamp, view_count, creator, tags) to return a complete video info dictionary.

@@ -1,0 +1,51 @@
+concisely describe the main functionality and implementation details of the code in DRBonanza extractor.
+
+What it does
+- Implements a YouTube-DL (youtube_dl) extractor for DR.dk Bonanza video pages.
+- Combines information from two sources on the page:
+  - HTML5 media entries (formats such as MP4 or HLS) via the standard HTML5 media parsing helper.
+  - A JavaScript object embedded in the page (currentAsset) that contains metadata like title, description, duration, and thumbnail.
+- Merges both sources into a single video information dictionary returned to the caller.
+
+Key components and workflow
+- Class DRBonanzaIE(InfoExtractor)
+  - _VALID_URL: Regex to recognize DR Bonanza episode URLs and capture two parts:
+    - id: numeric asset id from the URL path
+    - display_id: human-friendly slug from the URL
+  - _TEST: Provides a sample URL and the expected info_dict for testing, including id, display_id, extension, title, description (as md5), thumbnail pattern, and duration.
+
+- _real_extract(self, url)
+  1. Parse URL with _VALID_URL to obtain video_id and display_id.
+  2. Download the page HTML via _download_webpage.
+  3. Extract initial video formats using:
+     - _parse_html5_media_entries(url, webpage, display_id, m3u8_id='hls', m3u8_entry_protocol='m3u8_native')
+     - Take the first entry and call it info; then sort its formats with _sort_formats(info['formats']).
+     - This yields the primary format list (including HLS) for the video.
+  4. Extract asset metadata from JavaScript:
+     - Find a JavaScript object assigned to currentAsset with a regex on the page.
+     - Parse the matched JSON-like string using _parse_json(..., transform_source=js_to_json) to convert JS to Python dict.
+     - The resulting asset dict provides fields like AssetTitle, AssetId, AssetImageUrl.
+  5. Title handling:
+     - title = unescapeHTML(asset['AssetTitle']).strip()
+  6. Inline helper extract(field):
+     - Uses a regex to pull textual content from the page HTML corresponding to fields such as Programinfo (description) and Tid (duration).
+     - Returns None if not found.
+  7. Build final info dictionary by updating the initially extracted info with:
+     - 'id': asset.get('AssetId') or video_id
+     - 'display_id': display_id
+     - 'title': title
+     - 'description': extract('Programinfo')
+     - 'duration': parse_duration(extract('Tid'))
+     - 'thumbnail': asset.get('AssetImageUrl')
+  8. Return the merged info dictionary (which already contains the formats from step 3).
+
+Important implementation details
+- Uses two data sources on the page:
+  - HTML5 media entries (handled by _parse_html5_media_entries with HLS via m3u8_id and m3u8_native protocol).
+  - A JavaScript object currentAsset embedded in the page, parsed via _search_regex and _parse_json with js_to_json to convert JS syntax to JSON.
+- Title is taken from AssetTitle (HTML-unescaped); duration is parsed from Tid using parse_duration.
+- id falls back to the numeric id from the URL if AssetId isn’t present.
+- Description is extracted from the HTML segment labeled Programinfo; if not found, it remains None.
+- The code is designed for compatibility with both Python 2 and 3 (unicode_literals import).
+
+Overall, the extractor robustly pulls both the media formats and metadata from a DR Bonanza page and compiles them into a standard video info dictionary for downstream processing by youtube-dl.

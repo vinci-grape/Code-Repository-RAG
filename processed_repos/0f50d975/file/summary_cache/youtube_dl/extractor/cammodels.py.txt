@@ -1,0 +1,49 @@
+concise summary of ./youtube-dl/youtube_dl/extractor/cammodels.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for cammodels.com cam pages. It fetches a live stream manifest and builds a list of available video formats (plus thumbnails) for the page.
+
+- Key class
+  - CamModelsIE(InfoExtractor)
+    - _VALID_URL: Matches cammodels.com/cam/<id> URLs.
+    - _TESTS: Includes a test with a sample URL, only_matching=True, and age_limit=18 (adult content).
+
+- Main workflow (_real_extract)
+  - Extracts user_id from the URL using _match_id.
+  - Downloads a JSON manifest from https://manifest-server.naiadsystems.com/live/s:%s.json using the user_id.
+  - Iterates over manifest['formats'] (format_id -> format_dict):
+    - Skips non-dict entries; expects format_dict['encodings'] to be a list.
+    - Reads vcodec (videoCodec) and acodec (audioCodec).
+    - Iterates over encodings (media dicts):
+      - Gets media_url from media['location']; skips if missing.
+      - Builds format_id_list starting with format_id; if videoHeight exists, appends "<height>p".
+      - Constructs a format dict f with:
+        - url, format_id (joined by '-'), width, height,
+        - vbr (videoKbps), abr (audioKbps), fps,
+        - vcodec, acodec
+      - Heuristics for extension and ordering:
+        - If 'rtmp' in format_id: ext = 'flv'
+        - If 'hls' in format_id: ext = 'mp4' and set 'preference' to -1 (HLS deprioritized in favor of other formats)
+        - Else:
+          - If format_id == 'jpeg': treat as thumbnail, append to thumbnails list with URL and dimensions, then skip adding to formats.
+          - Otherwise, skip (no format added).
+      - Append the constructed format dict to formats when appropriate.
+  - After processing, calls self._sort_formats(formats) to order the formats.
+  - Returns a dict with:
+    - id: user_id
+    - title: self._live_title(user_id) (derived title)
+    - thumbnails: collected thumbnails
+    - is_live: True
+    - formats: the list of available formats
+    - age_limit: 18 (adult content)
+
+- Important implementation details
+  - Robust parsing helpers: int_or_none and url_or_none ensure safe extraction of integers and URLs.
+  - Manifest-driven: All formats and media come from a remote manifest; multiple encodings per format are supported.
+  - Format identification:
+    - RTMP formats are treated as FLV and not given an extension override beyond 'ext' = 'flv'.
+    - HLS formats get ext 'mp4' and a lower preference to be considered after non-HLS formats.
+    - JPEG formats are treated as thumbnails (not as playable formats) and collected separately.
+  - Returns an is_live=True payload, indicating live streaming content.
+
+Overall, the extractor fetches a live cam manifest, builds structured format entries and thumbnails, handles RTMP/HLS distinctions, and produces a YouTube-DL friendly dictionary for playback.

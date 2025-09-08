@@ -1,0 +1,96 @@
+Summary of ./youtube-dl/youtube_dl/extractor/brightcove.py
+
+Purpose
+- Implement two extractors for Brightcove videos:
+  - BrightcoveLegacyIE: handles legacy Brightcove embeds (HTMLFederated/viewer, older parameters, or simple Brightcove URLs that point to a download via a Brightcove player).
+  - BrightcoveNewIE: handles Brightcove’s newer players that use the Brightcove Edge/Playback API and Adobe Pass authentication.
+
+Main classes
+- BrightcoveLegacyIE (InfoExtractor)
+  - IE_NAME: 'brightcove:legacy'
+  - _VALID_URL matches legacy Brightcove URLs and embedded forms.
+  - _extract_brightcove_url(s): discovers Brightcove embed URLs on a page via meta tags, object/BrightcoveExperience, inline JS (customBC.createVideo), or iframe sources.
+  - _build_brightcove_url, _build_brightcove_url_from_js: construct a Brightcove URL (http://c.brightcove.com/services/viewer/htmlFederated) from XML/JS that contains fields like playerID, playerKey, @videoPlayer (video ID), and optional linkBaseURL.
+  - _make_brightcove_url: helper to build the final URL with query parameters.
+  - _real_extract: main entry-point for legacy URLs. It:
+    - Unsmuggles any embedded Referer data.
+    - Normalizes certain query fields to @videoPlayer and playerKey.
+    - If a Brightcove New URL can be inferred (publisher_id present or derivable from policy), returns a BrightcoveNewIE URL as the result.
+    - Otherwise, raises UnsupportedError (some legacy formats aren’t directly downloadable by this code path).
+
+- BrightcoveNewIE (AdobePassIE)
+  - IE_NAME: 'brightcove:new'
+  - _VALID_URL matches Brightcove’s newer embedded player URLs (accounts/player/embed IDs) and video/playlist IDs (including ref: variants).
+  - _extract_urls: static method that scans a page for potential Brightcove embed URLs:
+    - Iframes pointing to players.brightcove.net
+    - <video> embeds with data-video-id, data-account, data-player, etc. (constructs a bc_url)
+    - Optional script tag referencing Brightcove player JS to derive URL
+    - Fallbacks for RTMP or direct link formats
+  - _parse_brightcove_metadata: converts Brightcove playback API JSON into youtube-dl’s internal format:
+    - Iterates sources to build formats
+    - Skips DRM and ISM formats; handles m3u8 (HLS) and MPD (DASH) through _extract_m3u8_formats / _extract_mpd_formats
+    - Builds generic HTTP/RTMP formats with bitrate, resolution, codecs, etc.
+    - Builds subtitles from text_tracks
+    - Handles live video (duration <= 0) and sets is_live
+    - Returns a dict with id, title, description, thumbnail, duration, timestamp, uploader_id, formats, subtitles, tags, is_live
+  - _real_extract: main entry-point for new Brightcove URLs
+    - Unsmuggles data and initializes geo-bypass if needed
+    - Parses account_id, player_id, embed, content_type, video_id from URL
+    - Policy key handling:
+      - Uses a cache to store policy_key by (account_id, player_id)
+      - If absent, extracts policy_key via:
+        - config.json on the player’s config page
+        - or index.min.js and parsing catalog or policyKey fields
+      - Stores policy_key back into cache
+    - Builds edge API URL: https://edge.api.brightcove.com/playback/v1/accounts/{account_id}/{content_type}s/{video_id}
+    - Prepares headers with Referer/Origin if available
+    - Retries with a policy key in Accept header (application/json;pk={policy_key}) up to 2 times
+    - On 401/403, tries to extract error message from response and handle:
+      - geo restrictions (TVE_AUTH -> may trigger _extract_mvpd_auth)
+      - INVALID_POLICY_KEY -> clear policy key and retry
+    - If errors indicate TVE authentication, uses _extract_mvpd_auth to obtain a token and re-downloads
+    - If content_type is 'playlist', returns a playlist_result built from all video items via _parse_brightcove_metadata
+    - Otherwise, returns a single video’s metadata via _parse_brightcove_metadata
+
+Key implementation details
+- Robust URL extraction:
+  - Handles multiple embed formats across sites, including meta properties, object tags, embedded JS, and iframes.
+  - Builds Brightcove URLs using either XML/JS-based parameter extraction or direct reconstruction.
+  - Uses various compatibility helpers for XML/URL parsing, and fixes malformed HTML/XML (e.g., ampersands, stray <-- sequences).
+- Brightcove URL construction:
+  - _build_brightcove_url and _build_brightcove_url_from_js extract:
+    - playerID (mandatory)
+    - playerKey (optional)
+    - @videoPlayer / videoId / videoID / videoList (video identifiers)
+    - linkBaseURL (optional)
+  - Builds final URL: http://c.brightcove.com/services/viewer/htmlFederated with appropriate query params
+- BrightcoveNewIE flow and policy key:
+  - Manages Brightcove policy keys (pk) with caching, and fetches them from:
+    - config.json on the player’s page, or
+    - index.min.js via a catalog structure, or
+    - direct policyKey snippet in the page
+  - Uses edge playback API to fetch video/playlist metadata with Accept header including the policy key.
+  - Handles TVE authentication via Adobe Pass (MVPD) if required.
+- Metadata to formats:
+  - _parse_brightcove_metadata translates Brightcove sources into:
+    - formats with url, ext, container, vcodec, width/height, tbr (bitrate), filesize, and playing method (http, http-streaming, or RTMP)
+    - a format_id scheme combining kind, bitrate, and height
+    - HTTP headers propagated to formats
+  - Supports HLS/DASH through dedicated extractors
+  - Captions via text_tracks
+  - Live video handling via duration and is_live flag
+  - Basic metadata: id, title, description, thumbnail, duration, timestamp, uploader_id, tags
+- Error handling and edge cases:
+  - DRM sources are skipped; DRM-protected videos trigger informative errors
+  - Some embeds are ignored if they can’t be clearly identified as Brightcove
+  - Handles various error codes from Brightcove (e.g., geo-restrictions, auth issues)
+
+Tests and coverage
+- _TESTS in BrightcoveLegacyIE and BrightcoveNewIE cover multiple real-world embed scenarios:
+  - Legacy embeds with various video IDs and formats (mp4, flv, etc.)
+  - Playlists and experiences that should be treated as unsupported or require special handling
+  - New embeds with both video and playlist IDs, including RTMP and HLS formats
+  - Edge cases like unusable URLs or non-downloadable content
+
+In short
+- This file provides a comprehensive solution for downloading Brightcove videos by supporting both legacy and new Brightcove embeds. It includes robust URL extraction from pages, URL reconstruction, policy-key management for the modern player, support for DRM/DRM-free sources, and conversion of Brightcove playback data into youtube-dl’s standard format representation (formats, subtitles, metadata, and live indicators).

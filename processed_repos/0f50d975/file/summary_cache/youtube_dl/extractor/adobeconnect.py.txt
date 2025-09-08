@@ -1,0 +1,47 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/adobeconnect.py
+
+Purpose:
+- Implement an extractor (AdobeConnectIE) for Adobe Connect hosted videos/pages to produce a list of RTMP/FLV formats and metadata.
+
+Key components:
+- Class: AdobeConnectIE(InfoExtractor)
+  - _VALID_URL: Regex matching Adobe Connect pages, capturing the page id from URLs like http(s)://subdomain.adobeconnect.com/<id>
+  - _real_extract(self, url): Core extraction logic
+
+Main workflow and implementation details:
+- Video identification:
+  - video_id = self._match_id(url)
+- Page retrieval:
+  - webpage = self._download_webpage(url, video_id)
+- Title extraction:
+  - title = self._html_search_regex(r'<title>(.+?)</title>', webpage, 'title')
+- SWF URL and query parsing:
+  - Extract swfUrl via regex r"swfUrl\s*=\s*'([^']+)'"
+  - Take the portion after the '?' in the swfUrl string and parse it as a query string using compat_parse_qs
+  - QS dictionary (qs) now contains details like isLive, conStrings, appInstance, streamName, ticket, etc.
+- Live status:
+  - is_live = qs.get('isLive', ['false'])[0] == 'true'
+- Format construction:
+  - Iterate over con_string values in qs['conStrings'][0], split by comma.
+  - For each con_string, create a format dict with:
+    - 'format_id': scheme part before '://' in con_string
+    - 'app': URL-quoted string built as '?' + the portion after '?' in con_string + 'flvplayerapp/' + qs['appInstance'][0]
+    - 'ext': 'flv'
+    - 'play_path': 'mp4:' + qs['streamName'][0]
+    - 'rtmp_conn': 'S:' + qs['ticket'][0]
+    - 'rtmp_live': is_live
+    - 'url': con_string
+- Result assembly:
+  - Return a dict with:
+    - 'id': video_id
+    - 'title': title, or potentially a live-friendly title via _live_title(title) if is_live
+    - 'formats': list of the constructed formats
+    - 'is_live': is_live
+
+Notes on behavior and assumptions:
+- The code relies on specific SWF URL query parameters (conStrings, appInstance, streamName, ticket) being present in the swfUrl’s query string.
+- For live streams, the title is adjusted using _live_title.
+- Each format represents a distinct RTMP/FLV connection option derived from conStrings.
+
+Overall function:
+- Extracts metadata and multiple streaming formats from an Adobe Connect page by parsing the embedded SWF URL's query string and constructing RTMP/FLV format entries for video extraction.

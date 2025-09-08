@@ -1,0 +1,115 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/piksel.py
+
+Purpose
+- Implement a YouTube-DL extractor for Piksel-hosted video content. It discovers video metadata and formats by querying Piksel’s web service API and assembling available video/audio formats and subtitles.
+
+Key class
+- PikselIE (subclass of InfoExtractor)
+  - Core entry point for extracting Piksel video information.
+
+Important constants and tests
+- _VALID_URL: Complex regex matching Piksel player URLs and related domains (player.piksel.com, api/multicast variants, NHK, etc.) and capturing refid (optional) and id.
+- _TESTS: Examples of input URLs with expected results (id, ext, title, timestamp, etc.), plus an example for non-matching iframe pattern.
+
+Static helper
+- _extract_url(webpage): Scans a webpage for an iframe source pointing to a Piksel player URL and returns that URL if found.
+
+Core API interaction
+- _call_api(app_token, resource, display_id, query, fatal=True)
+  - Builds API endpoint: http://player.piksel.com/ws/ws_<resource>/api/<app_token>/mode/json/apiv/5
+  - Performs a JSON request via _download_json, using display_id as the display id for logging.
+  - Extracts response['response'], checks for failure messages at response['failure']['reason'].
+  - If a failure occurs and fatal=True, raises ExtractorError; otherwise logs a warning and continues.
+  - Returns the response payload.
+
+Main extraction flow (_real_extract)
+1) URL parsing
+   - Extracts ref_id and display_id from the URL using _VALID_URL.
+   - Downloads the video page HTML (webpage).
+
+2) App token discovery
+   - Searches the page for the app token via regex:
+     - clientAPI\s*:\s*"([^"]+)"
+     - data-de-api-key\s*=\s*"([^"]+)"
+   - app_token is used for API calls.
+
+3) Build API query
+   - If ref_id is present: query = {'refid': ref_id, 'prefid': display_id}
+   - Else: query = {'v': display_id}
+
+4) Fetch program data
+   - Call _call_api(app_token, 'program', display_id, query) to obtain WsProgramResponse.
+   - program = response['WsProgramResponse']['program']
+   - video_id = program['uuid']
+   - video_data = program['asset']
+   - title = video_data['title']
+   - asset_type = video_data.get('assetType', {}).get('asset_type')
+
+5) Formats collection
+   - Initialize empty formats list.
+   - Helper: process_asset_file(asset_file)
+     - Skip if asset_file is falsy.
+     - http_url = asset_file.get('http_url'); skip if missing.
+     - vbr = int_or_none(asset_file.get('videoBitrate'), 1024)
+     - abr = int_or_none(asset_file.get('audioBitrate'), 1024)
+     - tbr calculation:
+       - If asset_type == 'video': tbr = vbr + abr
+       - If asset_type == 'audio': tbr = abr
+     - format_id starts as ['http']; append tbr if available (as string) to format_id.
+     - Append format dict:
+       - format_id: '-'.join(format_id)
+       - url: unescapeHTML(http_url)
+       - vbr, abr, width, height, filesize, tbr
+   - process_asset_files(asset_files): iterate over list and call process_asset_file for each.
+   - Process assets in order:
+     - video_data.get('assetFiles')
+     - video_data.get('referenceFile')
+   - Fallback: If no formats collected:
+     - asset_id = video_data.get('assetid') or program.get('assetid')
+     - If asset_id exists, call API for asset files via:
+       self._call_api(app_token, 'asset_file', display_id, {'assetid': asset_id}, False)
+     - Use the response to extract AssetFiles via try_get(...) and process_asset_files.
+   - HLS formats (m3u8):
+     - m3u8_url fetched from video_data using any of:
+       'm3u8iPadURL','ipadM3u8Url','m3u8AndroidURL','m3u8iPhoneURL','iphoneM3u8Url'
+     - If present, extend formats using _extract_m3u8_formats with:
+       - base url: m3u8_url
+       - video_id, ext='mp4', note 'm3u8_native', m3u8_id='hls'
+       - fatal=False
+   - SMIL formats:
+     - smil_url = video_data.get('httpSmil') or video_data.get('hdSmil') or video_data.get('rtmpSmil')
+     - If present, optionally adjust transform_source for NHK World:
+       - If ref_id == 'nhkworld', modify the SMIL transform to fix relative paths
+     - Extend formats with _extract_smil_formats(replaced_smil_url, video_id, transform_source=transform_source, fatal=False)
+
+6) Finalize formats and subtitles
+   - self._sort_formats(formats)
+   - Subtitles:
+     - Iterate video_data.get('captions', [])
+     - For each caption with a 'url', add to subtitles[caption['locale'] or 'en'] as {'url': caption_url}
+   - Return a dict with:
+     - 'id': video_id
+     - 'title': title
+     - 'description': video_data.get('description')
+     - 'thumbnail': video_data.get('thumbnailUrl')
+     - 'timestamp': parse_iso8601(video_data.get('dateadd'))
+     - 'formats': formats
+     - 'subtitles': subtitles
+
+Notable implementation details
+- Robust format extraction:
+  - Handles multiple asset file types (assetFiles, referenceFile, asset file API fallback).
+  - Computes total bitrate (tbr) and individual vbr/abr when available.
+  - Builds format_id strings like "http" or "http-<tbr>" for clarity.
+- Multiple source formats:
+  - Supports direct HTTP formats, HLS (m3u8), and SMIL-based formats.
+  - Special-case handling for NHK World when parsing SMIL URLs to fix potential path issues.
+- Safe fallbacks:
+  - If asset files are not present, attempts to fetch AssetFiles via asset_id using the asset_file API endpoint.
+- Captions/subtitles:
+  - Captions are gathered from video data and organized by locale.
+- Metadata extraction:
+  - Title, description, thumbnail, and timestamp are extracted from video_data and program data, with timestamp parsed via parse_iso8601.
+
+Overall flow
+- Access Piksel player page → extract app token → query program data via Piksel API → build a list of available formats (HTTP, HLS, SMIL) from assets → optionally fetch more assets if needed → collect subtitles → return a structured metadata dictionary ready for download.

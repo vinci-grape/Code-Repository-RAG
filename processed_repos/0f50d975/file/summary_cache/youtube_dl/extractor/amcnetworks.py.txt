@@ -1,0 +1,74 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/amcnetworks.py
+
+Purpose
+- Implement an extractor for AMC Networks sites (AMC, BBC America, IFC, Sundance TV, WE TV, etc.) by leveraging ThePlatform metadata and AMC’s content API to obtain video formats, subtitles, and metadata.
+
+Key class
+- AMCNetworksIE(ThePlatformIE)
+  - Inherits handling and utilities from ThePlatformIE to process ThePlatform-based video streams.
+
+Main components and behavior
+- _VALID_URL
+  - Regex that matches AMC Networks sites (amc, bbcamerica, ifc, we.tv, sundancetv) and captures:
+    - site: which domain section (e.g., bbcamerica)
+    - id: the display path for the content (e.g., shows/.../episode)
+- _TESTS
+  - Several test cases illustrating expected extraction results, including one with a full metadata fetch and MVPD authentication handling.
+- _REQUESTOR_ID_MAP
+  - Maps site to requestor IDs used with AMC’s content APIs, e.g., amc -> 'AMC', bbcamerica -> 'BBCA', etc.
+
+Core extraction flow (_real_extract)
+1. Parse URL with _VALID_URL to obtain:
+   - site (e.g., 'bbcamerica')
+   - display_id (content path)
+   - requestor_id via _REQUESTOR_ID_MAP[site]
+2. Query AMC content API to fetch content properties:
+   - URL: https://content-delivery-gw.svc.ds.amcn.com/api/v2/content/amcn/{requestor_id.lower()}/url/{display_id}
+   - Response: data.properties contains videoPid and video category information.
+3. Prepare media URL table for ThePlatform:
+   - tp_path = 'M_UwQC/media/' + properties['videoPid']
+   - media_url = 'https://link.theplatform.com/s/' + tp_path
+   - query params initialized with mbr=true and manifest=m3u
+4. Retrieve ThePlatform metadata:
+   - theplatform_metadata = self._download_theplatform_metadata(tp_path, display_id)
+   - info = self._parse_theplatform_metadata(theplatform_metadata)
+   - video_id = theplatform_metadata['pid']
+   - title = theplatform_metadata['title']
+   - rating = the platform rating if present
+5. MVPD authentication handling (if applicable):
+   - If properties['videoCategory'] ends with '-Auth', use MVPD resource helpers:
+     - resource = self._get_mvpd_resource(requestor_id, title, video_id, rating)
+     - query['auth'] = self._extract_mvpd_auth(url, video_id, requestor_id, resource)
+   - Update media_url with query params (including auth when needed) via update_url_query.
+6. Retrieve formats and subtitles:
+   - formats, subtitles = self._extract_theplatform_smil(media_url, video_id)
+   - self._sort_formats(formats)
+7. Populate basic info:
+   - id: video_id
+   - title, series, season_number, episode, episode_number (as available from ThePlatform metadata)
+   - age_limit: derived from rating via parse_age_limit
+   - subtitles and formats are attached to info
+8. Enhance title with series/season/episode details when available:
+   - If ThePlatform metadata includes an XML namespace (ns) and show/season/episode fields, prepend/adjust title accordingly and fill:
+     - series, season_number, episode, episode_number
+9. Return assembled info dictionary with video formats, subtitles, and metadata.
+
+Important implementation details
+- Data sources:
+  - AMC content API: to obtain videoPid and other properties (via content-delivery-gw service).
+  - ThePlatform: to retrieve robust metadata and actual streaming formats (SMIL-based).
+- ThePlatform integration:
+  - Uses _download_theplatform_metadata to fetch JSON-like metadata and _extract_theplatform_smil to obtain actual playable formats and subtitles.
+- MVPD authentication:
+  - If videoCategory ends with '-Auth', the extractor engages MVPD authentication flow via _get_mvpd_resource and _extract_mvpd_auth.
+- Metadata enrichment:
+  - Title can be augmented with series and season/episode information from ThePlatform metadata when available (supports multi-namespace keys).
+- Age rating handling:
+  - Age limit is derived from rating using parse_age_limit, to populate age_limit in the final info.
+- URL construction:
+  - media_url built from ThePlatform path, with mbr and manifest parameters, and optional auth parameter appended when required.
+- Robustness:
+  - Handles multiple sites with a single extractor via _VALID_URL and _REQUESTOR_ID_MAP.
+  - Includes tests for both matching and non-matching URLs, including a real-world example with expected metadata.
+
+In short, AMCNetworksIE centers around assembling a ThePlatform-based stream URL using AMC’s content API, fetching and parsing ThePlatform metadata, optionally handling MVPD authentication, and returning a standardized info dict with id, title, series/season/episode, formats, subtitles, and age rating.

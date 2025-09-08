@@ -1,0 +1,97 @@
+Summary of ./youtube-dl/youtube_dl/extractor/facebook.py
+
+Purpose
+- Implements extraction logic for Facebook video content in youtube-dl.
+- Provides two extractors:
+  - FacebookIE: the main extractor that handles direct Facebook video pages, embedded players, watch pages, groups, stories, etc.
+  - FacebookPluginsVideoIE: handles Facebook plugins/video.php href embeds and delegates to FacebookIE.
+
+Key classes and functions
+- FacebookIE (InfoExtractor)
+  - _VALID_URL: regex covering many Facebook video URL patterns (www.facebook.com, onion domain, various video/story/watch endpoints).
+  - _VIDEO_PAGE_TEMPLATE, _VIDEO_PAGE_TAHOE_TEMPLATE: templates for video page URLs used to fetch data.
+  - _LOGIN_URL, _CHECKPOINT_URL, _NETRC_MACHINE, _TESTS: login URLs, credentials handling, and tests.
+  - _extract_urls(webpage): static method to discover video URLs embedded in a page via iframes and Facebook’s embed plugins.
+  - _login(): handles Facebook login using stored credentials, fetches login form tokens (lsd, lgnrnd, fb_dtsg, h), submits login, and handles checkpoint confirmation. Reports warnings on failures; handles network errors gracefully.
+  - _real_initialize(): invokes _login() to perform login before extraction.
+  - _extract_from_url(url, video_id): core extraction logic. Downloads the Facebook page and tries multiple data sources to obtain video metadata and formats:
+    - server_js_data from handleServerJS and s.handle to extract VideoConfig items with videoData.
+    - extract_from_jsmods_instances(...) to pull video data from jsmods.
+    - extract_dash_manifest(...) to parse MPD dash manifests and add formats.
+    - extract_relay_data(...) and extract_relay_prefetched_data(...) to read Relay-prefetched or other Relay data (GraphQL-like structures) for playable URLs.
+    - Fallback path for when video_data is not found:
+      - bigPipe onPageletArrive data to pull video data from on-page JavaScript structures.
+      - watchparty path: if URL is a watchparty, perform a GraphQL-like living_room query to fetch watched content and construct a playlist.
+      - tahoe path: fetch tahoe data via _VIDEO_PAGE_TAHOE_TEMPLATE and parse via Tahoe JS data to obtain video data.
+    - If multiple video entries are found (video_data length > 1), builds a playlist of multiple videos.
+    - If single video data is found, constructs formats by iterating over the available stream sources:
+      - For each source group, collect sd/hd with src/src_no_ratelimit, set format_id like "<type>_<quality>_<src_type>", and assign a small “preference” to identify better sources (hd improves preference; progressive reduces it).
+      - Attempt to parse DASH manifests (via _parse_mpd_formats) and append to formats.
+      - Collect subtitles if subtitles_src is present.
+    - Post-processing:
+      - Ensure at least one format is found; otherwise raise ExtractorError.
+      - _sort_formats after normalizing User-Agent header to “facebookexternalhit/1.1”.
+    - Metadata extraction:
+      - video_title from various HTML anchors or og:title fallbacks; trim to 80 chars.
+      - uploader from fbPhotoPageAuthorName or ownerName or og:title fallback.
+      - timestamp from data-utime attribute in an <abbr> tag.
+      - thumbnail from og:image or twitter:image.
+      - view_count via parsing a numeric value from viewCount in page data.
+    - Returns a dict with id, title, formats, uploader, timestamp, thumbnail, view_count, and subtitles.
+  - _real_extract(self, url): extracts video_id from URL, normalizes real_url (replacing facebook: prefix with the actual video page URL), and calls _extract_from_url.
+- FacebookPluginsVideoIE (InfoExtractor)
+  - _VALID_URL: matches Facebook plugins video URLs: plugins/video.php?href=...
+  - _TESTS: tests for plugin extraction, including adding the FacebookIE as a subordinate extractor.
+  - _real_extract(self, url): extracts the href from the plugin URL, unquotes it, and delegates to FacebookIE via url_result.
+
+Main workflow and implementation details
+- Data sources and resilience
+  - Primary data sources are various Facebook internal data structures loaded in the page or via JSON blobs:
+    - server_js_data from handleServerJS and s.handle calls containing VideoConfig blocks.
+    - jsmods.instances data.
+    - bigPipe onPageletArrive data for certain pagelets (e.g., pagelet_group_mall, permalink_video_pagelet).
+    - Relay-prefetched data caches used to build video formats.
+  - Fallbacks:
+    - tahoe path: uses Tahoe-based endpoint (/video/tahoe/async/...) to fetch video data when primary sources fail.
+    - watchparty: GraphQL-like living_room data via the graphURI in _api_config to enumerate watched content.
+  - If multiple video entries exist (e.g., playlist-like data), builds a playlist of individual video entries.
+  - If login is required or a login-related interstitial is shown, raises login-required behavior or login checkpoints.
+
+- Login handling
+  - _login() retrieves credentials, fetches login page to extract lsd and lgnrnd, submits login form, and checks for login errors.
+  - Also handles fb_dtsg and h tokens for checkpoint confirmation; warns if login cannot be completed and continues if possible.
+  - On network or HTTP errors, logs a warning and exits gracefully.
+
+- Video formats and dash manifests
+  - For each video_data entry, builds formats by combining stream_type with quality (sd/hd) and source type (src/src_no_ratelimit).
+  - Applies a format_id pattern: "<stream_type>_<quality>_<src_type>" and adjusts a numeric “preference” to influence format ordering (hd formats get a small boost).
+  - If a dash_manifest is present, parses MPD to extract additional formats via _parse_mpd_formats.
+  - Subtitles are added if subtitles_src is present.
+
+- Metadata extraction
+  - Title: from HTML h2.uiHeaderTitle, alternative captions, or og:title; trimmed to 80 chars.
+  - Uploader: from fbPhotoPageAuthorName element, ownerName JS variable, or og title fallback.
+  - Timestamp: parsed from data-utime in an <abbr> tag.
+  - Thumbnail: og:image or twitter:image.
+  - View count: parsed with parse_count on a numeric string found in the page.
+  - Returns an info_dict with id, title, formats, uploader, timestamp, thumbnail, view_count, and subtitles.
+
+- Edge cases and error handling
+  - If no video data is found and the page indicates login is required or interstitial content, raises login required or ExtractorError accordingly.
+  - If no formats are discovered, raises ExtractorError("Cannot find video formats").
+  - If data parsing fails at all data sources, raises ExtractorError("Cannot parse data").
+
+- Plugins extractor
+  - FacebookPluginsVideoIE simply extracts the href parameter, unquotes it, and delegates to FacebookIE for extraction, enabling plugin-embedded video extraction.
+
+ Tests
+- The file includes an extensive _TESTS section with numerous scenarios illustrating:
+  - Direct video pages, login-required cases, DASH-enabled videos, various uploader/title combinations.
+  - Embedded plugin URLs and playlist-like edge cases.
+  - Onion-domain URL case.
+  - Cases with missing titles, login requirements, and watchparty scenarios.
+
+In short
+- This module provides robust Facebook video extraction by combining multiple data sources (server JS, jsmods, bigPipe, Relay data, tahoe, GraphQL-like endpoints) and fallback mechanisms (watchparty, tahoe) to obtain video formats and metadata.
+- It handles authentication, login checkpoints, and various embed formats, assembling a coherent info_dict or playlist of videos with proper formats and metadata.
+- A secondary extractor delegates plugin.video.php embeds to the main FacebookIE for consistent handling.

@@ -1,0 +1,77 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/zhihu.py
+
+- Purpose
+  - Implement a YouTube-DL extractor ZhihuIE for Zhihu “zvideo” pages. It fetches video metadata and available streaming formats from Zhihu’s API and returns a structured info dictionary suitable for downloading.
+
+- Key class
+  - ZhihuIE(InfoExtractor)
+    - Inherits standard behavior from InfoExtractor.
+
+- URL handling
+  - _VALID_URL = r'https?://(?:www\.)?zhihu\.com/zvideo/(?P<id>[0-9]+)'
+  - Extracts the numeric video_id from the URL using _match_id.
+
+- Testing
+  - _TEST provides a sample URL and expected information such as:
+    - id, ext (mp4), title, thumbnail, uploader, timestamp, upload_date, uploader_id, duration, and counts (view, like, comment).
+
+- Core logic (_real_extract)
+  - Fetches video metadata:
+    - video_id = self._match_id(url)
+    - zvideo = self._download_json('https://www.zhihu.com/api/v4/zvideos/' + video_id, video_id)
+  - Basic fields:
+    - title = zvideo['title']
+    - video = zvideo.get('video') or {}  # video subobject may be absent
+  - Formats extraction:
+    - Build formats from video.get('playlist') if present.
+    - For each entry (format_id, q):
+      - play_url = q.get('url') or q.get('play_url')
+      - Skip if no URL
+      - Build a format dict with:
+        - 'asr' = sample_rate (int if possible)
+        - 'filesize' = size (int)
+        - 'format_id' = format_id
+        - 'fps' = fps (int)
+        - 'height' = height (int)
+        - 'tbr' = bitrate (float)
+        - 'url' = play_url
+        - 'width' = width (int)
+    - Sort formats with self._sort_formats(formats)
+
+- Metadata and uploader information
+  - author = zvideo.get('author') or {}
+  - url_token = author.get('url_token')
+  - uploader_url = 'https://www.zhihu.com/people/' + url_token if url_token else None
+  - thumbnail = video.get('thumbnail') or zvideo.get('image_url')
+  - uploader = author.get('name')
+  - uploader_id = author.get('id')
+  - timestamp = int_or_none(zvideo.get('published_at'))
+  - duration = float_or_none(video.get('duration'))
+  - Counts:
+    - view_count = int_or_none(zvideo.get('play_count'))
+    - like_count = int_or_none(zvideo.get('liked_count'))
+    - comment_count = int_or_none(zvideo.get('comment_count'))
+
+- Returned information
+  - A dict with:
+    - 'id': video_id
+    - 'title': title
+    - 'formats': formats
+    - 'thumbnail': thumbnail
+    - 'uploader': uploader
+    - 'timestamp': timestamp
+    - 'uploader_id': uploader_id
+    - 'uploader_url': uploader_url
+    - 'duration': duration
+    - 'view_count': view_count
+    - 'like_count': like_count
+    - 'comment_count': comment_count
+
+- Implementation details
+  - Uses helper utils: int_or_none and float_or_none for robust numeric parsing.
+  - Handles absence of playlist gracefully by skipping formats.
+  - Accepts both 'url' and 'play_url' keys inside playlist entries.
+  - Uses _download_json to fetch data from Zhihu API and _sort_formats to prioritize formats.
+  - Constructs uploader URL only when an url_token is available.
+
+Overall, the extractor translates Zhihu zvideo API responses into a comprehensive info dictionary, including multiple video formats, uploader information, thumbnails, and engagement metrics.

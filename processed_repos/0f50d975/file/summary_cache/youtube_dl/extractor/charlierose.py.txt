@@ -1,0 +1,48 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/charlierose.py
+
+- Purpose
+  - Implement a dedicated extractor for Charlie Rose videos/episodes in youtube-dl.
+
+- Key class
+  - CharlieRoseIE (inherits from InfoExtractor)
+
+- URL matching
+  - _VALID_URL: r'https?://(?:www\.)?charlierose\.com/(?:video|episode)(?:s|/player)/(?P<id>\d+)'
+  - Supports URLs like /videos/12345, /video/player/12345, /episodes/12345, /episode/player/12345.
+  - `_TESTS` includes:
+    - A real example with id 27996, validating mp4 ext, title, thumbnail, description, and English VTT subtitles.
+    - A second test using only_matching for the same URL to ensure regex works without extraction.
+    - A third test with an autoplay query to confirm URL matching (only_matching).
+
+- Constants
+  - _PLAYER_BASE = 'https://charlierose.com/video/player/%s'
+  - Used to construct the actual page URL from the video/episode id.
+
+- Main functionality (_real_extract)
+  - Extracts the video/episode content metadata and streaming formats.
+  - Steps:
+    1) video_id = self._match_id(url)
+    2) Download the player page: webpage = self._download_webpage(self._PLAYER_BASE % video_id, video_id)
+    3) Title extraction and cleaning:
+       - title_raw = self._og_search_title(webpage)
+       - title = remove_end(title_raw, ' - Charlie Rose')
+    4) Parse media entries:
+       - info_dict = self._parse_html5_media_entries(self._PLAYER_BASE % video_id, webpage, video_id, m3u8_entry_protocol='m3u8_native')[0]
+       - This returns a dict that includes 'formats' (list) and possibly subtitles.
+    5) Normalize formats:
+       - self._sort_formats(info_dict['formats'])
+       - self._remove_duplicate_formats(info_dict['formats'])
+    6) Enrich info_dict with standard metadata:
+       - id: video_id
+       - title: cleaned title
+       - thumbnail: self._og_search_thumbnail(webpage)
+       - description: self._og_search_description(webpage)
+    7) Return info_dict containing formats and metadata.
+
+- Important implementation details
+  - Uses Open Graph helpers (_og_search_title/thumbnail/description) to extract metadata from the page.
+  - Uses remove_end to strip the trailing " - Charlie Rose" from the title for a cleaner name.
+  - _parse_html5_media_entries is invoked with m3u8_entry_protocol='m3u8_native' to properly handle HLS (M3U8) streams.
+  - The final info_dict includes the video id, title, thumbnail, description, and a curated formats list (sorted and deduplicated).
+
+Overall, this extractor fetches Charlie Rose video pages, derives a clean title and metadata from Open Graph data, extracts HTML5 media entries (including HLS formats), and returns a complete info dictionary suitable for downloading the video.

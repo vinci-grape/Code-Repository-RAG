@@ -1,0 +1,34 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/uktvplay.py
+
+- Purpose: Implement an extractor for UKTV Play pages. Instead of handling the video directly, it delegates extraction to Brightcove by constructing a Brightcove video URL using the numeric video ID found in the UKTV Play page URL.
+
+- Key class:
+  - UKTVPlayIE(InfoExtractor): Main extractor class.
+
+- Important components:
+  - _VALID_URL: Regular expression to recognize UKTV Play URLs and extract the numeric video ID.
+    - Matches URLs like:
+      - https://uktvplay.uktv.co.uk/.../watch-online/?video=1234567890123
+      - https://uktvplay.uktv.co.uk/.../watch-online/1234567890123
+    - Captures the video id as group named 'id'.
+  - _TESTS: Self-tests for the extractor.
+    - Test 1: URL with video param; expects metadata such as id, ext (mp4), title, description, uploader_id, upload_date, and timestamp. Uses skip_download to avoid downloading the actual file and expects a warning about failing to download the MPD manifest.
+    - Test 2: A different URL that should match the extractor’s URL pattern (only_matching: True).
+  - BRIGHTCOVE_URL_TEMPLATE: Template string for constructing the Brightcove player URL with a videoId parameter.
+    - Active template: http://players.brightcove.net/1242911124001/H1xnMOqP_default/index.html?videoId=%s
+    - Commented alternative: https://players.brightcove.net/1242911124001/OrCyvJ2gyL_default/index.html?videoId=%s
+  - _real_extract(self, url):
+    - Extracts video_id via self._match_id(url).
+    - Returns a URL result pointing to BrightcoveNew with the constructed Brightcove URL and the video_id.
+    - Effectively forwards extraction to the Brightcove player using the numeric ID.
+
+- Main behavior:
+  - The extractor does not fetch or parse UKTV’s own video data directly. Instead, it builds a Brightcove URL using the captured video ID and delegates extraction to the BrightcoveNew extractor.
+  - This aligns with UKTV Play using Brightcove as the backend for video delivery.
+
+- Implementation details:
+  - Inherits from InfoExtractor (standard for youtube-dl extractors).
+  - Uses a flexible _VALID_URL to cover UKTV’s domains and path variations.
+  - The _TESTS include expectations for metadata (title, description, uploader_id, upload_date, timestamp) when available from Brightcove data, and acknowledges a possible manifest download warning in tests that skip actual media download.
+
+Overall: This extractor serves as a bridge from UKTV Play page URLs to Brightcove video resources, extracting the numeric video ID from the page URL and constructing a Brightcove URL to let BrightcoveNew handle the actual video extraction.

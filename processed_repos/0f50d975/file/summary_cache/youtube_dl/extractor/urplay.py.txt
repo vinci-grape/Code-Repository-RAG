@@ -1,0 +1,62 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/urplay.py:
+
+- Purpose
+  - Implement an InfoExtractor for UR Play (urplay.se) and UR Skola (urskola.se) video pages. It resolves the video id, fetches metadata, constructs streaming formats, and collects subtitles, thumbnails, and other metadata.
+
+- Key class
+  - URPlayIE(InfoExtractor)
+    - _VALID_URL: Matches UR Play/Skola URLs containing an integer id (program/Produkter paths).
+    - _TESTS: Includes two real tests (one UR Play, one UR Skola) and an additional only_matching test to verify URL pattern handling and basic extraction behavior.
+
+- Main extraction flow (_real_extract)
+  1. Normalize URL and extract video_id from the matched URL.
+     - Rewrites skola URLs to the corresponding play URL: replace 'skola.se/Produkter' with 'play.se/program'.
+  2. Download the page and locate program data
+     - Tries to read JSON inside the __NEXT_DATA__ script tag and navigate to props.pageProps.program.
+     - If that fails, falls back to extracting accessibleEpisodes from a data-react-props blob and selects the one with the matching id.
+  3. Basic episode information
+     - episode: urplayer_data['title']
+     - series: derived from urplayer_data['series']
+     - title: combines series title and episode when available, otherwise uses episode
+     - description, image/thumbnails, published timestamp (unified_timestamp), duration, categories, keywords (tags), episodeNumber, and ageRanges (to compute age_limit)
+  4. Streaming formats
+     - streamingInfo['raw'] contains per-quality entries (e.g., 'sd', 'hd') with a 'location' field.
+     - Retrieves host from an UR load balancer endpoint: http://streaming-loadbalancer.ur.se/loadbalancer.json (field 'redirect').
+     - Builds m3u8 playlist URLs: http://{host}/{location}playlist.m3u8
+     - Uses _extract_wowza_formats to add formats, skipping unsupported protocols (f4m, rtmp, rtsp).
+     - _sort_formats formats by quality/bitrate.
+  5. Subtitles
+     - Extracted from streamingInfo['sweComplete'], matching entries with a valid language and a location (URL).
+     - Language code normalization via parse_lang_code: accepts 3-letter or short/long ISO codes and converts to the standard language tag using ISO639Utils.
+     - Collects subtitles as a dict mapping language to a list of {ext, url} entries.
+  6. Thumbnails
+     - Builds a list of thumbnails from urplayer_data['image'], where keys are like '1280x720'. Each thumbnail has id, url, and optionally width/height parsed from the key.
+  7. Additional metadata
+     - series_title: derived from series['seriesTitle'] or series['title'], or falls back to main title in urplayer_data
+     - season: taken from series['label'] if available
+     - episode_number: int if present
+     - age_limit: computed via parse_age_limit from the minimum 'from' value across ageRanges, with a safe fallback
+  8. Return value
+     - A dictionary containing:
+       - id, title, description, thumbnails, timestamp, series, formats, duration, categories, tags, season, episode, episode_number, age_limit, subtitles
+     - The data structure aligns with YouTube-DL’s standard video information format.
+
+- Important implementation details
+  - Robust data extraction:
+    - Handles both modern URPlay __NEXT_DATA__ data and an older legacy format via accessibleEpisodes.
+  - Remote host discovery:
+    - Uses a separate load balancer endpoint to determine the actual streaming host for building Wowza-based M3U8 formats.
+  - Format construction:
+    - Only processes relevant entries (sd/hd) that contain a dict with a location, building complete streaming URLs.
+    - Uses _extract_wowza_formats to interpret Wowza-based HLS playlists.
+  - Subtitles handling:
+    - Supports multiple languages via sweComplete data, with language code normalization that can map 3-letter and ISO variants to a consistent code.
+  - Metadata extraction:
+    - Carefully parses series/title information to build a clean final video title.
+    - Attempts to extract a descriptive set of metadata: description, categories, tags, thumbnails, and age restrictions.
+
+- Limitations / edge cases
+  - If the page structure changes (e.g., different data layout in __NEXT_DATA__ or absence of accessibleEpisodes), the extractor will try fallback paths but could fail if both structures are altered.
+  - Subtitle availability depends on the SWE streaming data and the presence of valid language/location fields.
+
+In short, URPlayIE is a robust extractor for UR Play and UR Skola videos, combining new and legacy data formats to gather metadata, generate streaming formats via a load-balancer-hosted Wowza stream, and assemble subtitles and thumbnails for comprehensive video info.

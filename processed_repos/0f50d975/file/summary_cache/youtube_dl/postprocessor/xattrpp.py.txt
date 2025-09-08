@@ -1,0 +1,50 @@
+Concise summary of the code in youtube-dl/youtube_dl/postprocessor/xattrpp.py
+
+Purpose
+- Implement a post-processor that writes selected video metadata into the file’s extended attributes (xattrs) after download, if the filesystem supports xattrs.
+
+Key components
+- Class: XAttrMetadataPP(PostProcessor)
+  - Inherits from the generic PostProcessor used by youtube-dl.
+  - run(self, info) is the main entry point, receiving an info dict with download metadata.
+
+Main functionality
+- Logs action: Notifies the user that metadata is being written to the file’s xattrs.
+- Determines target file: Uses info['filepath'] as the filename to annotate.
+- Metadata to xattrs mapping:
+  - user.xdg.referrer.url -> webpage_url
+  - user.dublincore.title -> title
+  - user.dublincore.date -> upload_date (formatted)
+  - user.dublincore.description -> description
+  - user.dublincore.contributor -> uploader
+  - user.dublincore.format -> format
+  - Note: user.xdg.comment mapping is present but commented out.
+- Processing loop:
+  - For each (xattrname, infoname) in the mapping:
+    - Retrieve value = info.get(infoname)
+    - If value exists:
+      - If infoname is 'upload_date', format via hyphenate_date(value)
+      - Encode to UTF-8 bytes
+      - Write to xattr via write_xattr(filename, xattrname, byte_value)
+      - Track number written (num_written)
+- Return: On success, returns [], info.
+
+Error handling
+- XAttrUnavailableError: Report error to user and return.
+- XAttrMetadataError: Branch on reason:
+  - NO_SPACE: Warn about disk space/quota/xattr limit; include “Some” in message if any attributes already written.
+  - VALUE_TOO_LONG: Warn that values are too long for xattrs.
+  - Other: Filesystem may not support xattrs; error message tailored by OS:
+    - If running on Windows (compat_os_name == 'nt'): advise using NTFS.
+    - Else suggest enabling xattrs in /etc/fstab.
+- In all error cases, returns [], info.
+
+Implementation details
+- OS compatibility: Uses compat_os_name to customize error messages for non-NTFS filesystems.
+- Date handling: Uses hyphenate_date for upload_date formatting before storing in xattrs.
+- Logging and user feedback: Uses _downloader.to_screen, report_error, and report_warning for user messages.
+- Extensibility: Includes TODOs to capture additional metadata (e.g., keywords) into xattrs.
+
+Notes
+- The code contains a small TODO block at the top describing possible enhancements and a commented-out mapping for user.xdg.comment.
+- The final line in the snippet shows a stray “Summary:” which appears to be an artifact rather than part of the logic.

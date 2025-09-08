@@ -1,0 +1,32 @@
+Concise summary of the code
+
+- Purpose
+  - Generate a download HTML page by populating a template with the latest version data from versions.json.
+
+- Main functionality
+  - Reads update/versions.json to obtain the latest version and its associated download URLs and SHA256 sums.
+  - Reads the download.html.in template.
+  - Replaces template placeholders with actual values:
+    - @PROGRAM_VERSION@ -> latest version string
+    - @PROGRAM_URL@, @PROGRAM_SHA256SUM@ -> version['bin'][0], version['bin'][1]
+    - @EXE_URL@, @EXE_SHA256SUM@ -> version['exe'][0], version['exe'][1]
+    - @TAR_URL@, @TAR_SHA256SUM@ -> version['tar'][0], version['tar'][1]
+  - Writes the populated content to download.html.
+
+- Key components
+  - sys.path manipulation to import utils from the repository root:
+    - Inserts two levels up from the script’s directory into sys.path.
+  - utils.read_file and utils.write_file for I/O (abstracted file operations).
+  - JSON data structure expectations:
+    - update/versions.json contains:
+      - latest: string
+      - versions: { version: { bin: [url, sha256], exe: [url, sha256], tar: [url, sha256] } }
+
+- Important implementation details
+  - Path handling: reads update/versions.json and download.html.in relative to the script’s execution directory, and writes download.html to the same location.
+  - Data handling: uses json.loads(read_file(...)) and expects a specific structure for bin, exe, and tar entries.
+  - The script is procedural (no classes or functions defined); it runs top-to-bottom when executed.
+  - Unicode compatibility is enabled via from __future__ import unicode_literals.
+
+- Output
+  - Generates a concrete download.html file with the latest version’s program, EXE, and TAR download links and their SHA256 sums.

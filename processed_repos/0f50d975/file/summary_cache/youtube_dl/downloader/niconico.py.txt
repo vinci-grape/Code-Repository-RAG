@@ -1,0 +1,44 @@
+Concise summary:
+
+- This module defines a downloader that handles downloading from niconico Douga via DMC with a heartbeat mechanism to keep the session alive. It delegates the actual download to a suitable underlying downloader while periodically pinging a heartbeat URL.
+
+Key components and functionality:
+
+- NiconicoDmcFD(FileDownloader)
+  - FD_NAME = 'niconico_dmc'
+  - real_download(self, filename, info_dict)
+    - Logs the start of a DMC download.
+    - Uses NiconicoIE to obtain heartbeat-related information via _get_heartbeat_info(info_dict), receiving updated info_dict and heartbeat_info_dict.
+    - Selects an appropriate underlying downloader using get_suitable_downloader(info_dict, params=self.params) and initializes it with (self.ydl, self.params). Attaches progress hooks from self._progress_hooks to the underlying downloader.
+    - If threading is unavailable, logs this and falls back to directly calling the underlying downloader’s real_download(filename, info_dict).
+    - If threading is available, sets up a heartbeat mechanism:
+      - Creates a thread-safe setup with a timer, a heartbeat_lock, and a heartbeat request (heartbeat_url, heartbeat_data) with an interval (heartbeat_interval, default 30 seconds).
+      - Builds a sanitized Request for the heartbeat URL with the required data.
+      - Defines heartbeat() to perform the heartbeat request, log failures, and reschedule itself via threading.Timer if the download is not yet complete.
+      - Calls heartbeat_info_dict['ping']() to indicate a ping has started, and informs the user of the heartbeat interval.
+      - Invokes heartbeat() to start the process. If the chosen downloader is an HLS downloader (type name 'HlsFD'), it updates info_dict with formats extracted from the M3U8 URL via ie._extract_m3u8_formats(info_dict['url'], info_dict['id'])[0].
+      - Delegates the actual download to the underlying downloader via fd.real_download(filename, info_dict).
+      - Ensures cleanup in finally: cancels the heartbeat timer and marks download_complete = True to stop further heartbeats, then returns the success status.
+    - Progress hooks from the outer downloader are propagated to the underlying downloader.
+
+Important implementation details:
+
+- Heartbeat flow:
+  - Heartbeat URL and data come from NiconicoIE._get_heartbeat_info.
+  - A single threading.Timer is used to schedule the next heartbeat; a mutable container (timer[0]) allows re-scheduling from the nested heartbeat() function.
+  - A threading.Lock (heartbeat_lock) protects access to the download_complete flag and timer cancellation to avoid race conditions during cleanup.
+  - If any heartbeat request fails, a user-facing message "[niconico_dmc] Heartbeat failed" is printed, but the code continues trying to keep the session alive.
+
+- Threading considerations:
+  - If threading module is not available, the code provides a non-threaded fallback by directly calling the underlying downloader.
+  - When threading is available, the heartbeat mechanism runs in the main thread and uses Timer-based scheduling for the keep-alive pings.
+
+- Interaction with other components:
+  - NiconicoIE is used to obtain heartbeat parameters and to optionally extract M3U8 formats if the underlying downloader is an HLS downloader.
+  - get_suitable_downloader decides which downloader to use based on info_dict; the chosen downloader is instantiated with the same ydl and params.
+  - The code propagates progress hooks to the underlying downloader to keep progress updates consistent.
+
+- Output and user feedback:
+  - The downloader prints status messages about starting DMC download and the heartbeat interval and heartbeat activity, aiding user awareness during long-running downloads.
+
+Note: The trailing "Summary:" line in the provided snippet appears extraneous and is not part of the functional logic described above.

@@ -1,0 +1,43 @@
+Summary of code: youtube-dl extractor for vshare.io
+
+Purpose
+- Implements a video extractor (VShareIE) to retrieve video formats and metadata from vshare.io pages, including obfuscated/packed embed content.
+
+Key components
+- Class VShareIE(InfoExtractor)
+  - _VALID_URL: Regexp matching vshare.io video pages, capturing the video id. Covers URLs like /d/<id> or /v/<id>/...
+  - _TESTS: Two tests
+    - Test 1: Direct page https://vshare.io/d/0f64ce6 with expected md5 and info_dict (id, title, ext).
+    - Test 2: Accessible via /v/0f64ce6/width-650/height-430/1 with only_matching True to ensure URL pattern matching.
+  - _extract_urls(webpage): Static helper to extract iframe src URLs pointing to vshare.io/v/... from a page.
+  - _extract_packed(self, webpage): Core decoding routine for obfuscated embed code
+    - Finds the packed JavaScript via a regex for eval(function...).
+    - Decodes it with decode_packed_codes.
+    - Extracts a list of digit codes and a key digit from the unpacked string.
+    - Builds the actual string by converting each digit to a character using chr(d - key_digit) (compat_chr for Python 2/3 compatibility).
+    - Returns the reconstructed string (likely an inner HTML snippet containing a video tag).
+  - _real_extract(self, url): Main extraction flow
+    - video_id = self._match_id(url)
+    - Downloads the page at https://vshare.io/v/<video_id>/width-650/height-430/1 with Referer header set to the original URL.
+    - Title extraction: grabs <title>text</title> and trims to part before " - ".
+    - Error check: looks for a div with class xxx-error and raises ExtractorError if present.
+    - Build HTML5 video payload: wraps the decoded content from _extract_packed(webpage) inside <video>...</video>.
+    - Uses _parse_html5_media_entries to parse the video tag content into a list of formats and metadata.
+    - Sorts formats via self._sort_formats(info['formats']).
+    - Returns an info dict augmented with id and title.
+
+Important implementation details
+- Obfuscated/packed embed handling:
+  - The page hides the real video embed inside a packed JavaScript block. The extractor locates this block, unpacks it, and reconstructs the actual HTML snippet containing the video data.
+  - Decoding relies on a digits array and a key digit extracted from the unpacked code, then mapping to characters with a subtraction, using compat_chr for cross-version compatibility.
+- Robust error handling:
+  - If the page contains a specific error block (class xxx-error), extraction stops with a user-facing ExtractorError.
+- HTML5 video parsing:
+  - After unpacking, the code feeds the resulting video tag into _parse_html5_media_entries to extract playable formats (bitrates, resolutions, codecs, etc.), then sorts them for preference.
+- Referer handling:
+  - The initial page request is made with a Referer header set to the original URL, which can be necessary for anti-scraping protections or to fetch the proper embed.
+- URL discovery:
+  - _extract_urls allows finding vshare video URLs embedded as iframes inside a page, aiding in discovering alternate entry points.
+
+Overall functionality
+- The extractor identifies vshare.io video pages, decodes a packed embed to reveal the actual video sources, parses formats from the resulting HTML5 video element, and returns a structured info dictionary (including id, title, and ext/format data). It also provides a test case that validates the expected metadata and video file integrity.

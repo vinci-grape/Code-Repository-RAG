@@ -1,0 +1,45 @@
+Concise yet comprehensive summary of youtube-dl/youtube_dl/downloader/rtsp.py
+
+- Purpose
+  - Implements a downloader for RTSP (and MMS) streams by dumping the live stream to a local file using external media players.
+
+- Key class
+  - RtspFD(FileDownloader): A downloader subclass focused on RTSP/MMS streams.
+
+- Main method
+  - real_download(self, filename, info_dict)
+    - Reads target URL from info_dict['url'].
+    - Prepares destination: reports destination and computes a temporary filename via temp_name(filename).
+    - Tool detection:
+      - If mplayer is available (check_executable('mplayer', ['-h'])), builds a command to dump the stream to a file using mplayer with -dumpstream and -dumpfile.
+      - Else if mpv is available (check_executable('mpv', ['-h'])), builds a command to dump the stream to a file using mpv with --stream-dump.
+      - If neither is available, reports an error and returns False.
+    - Executes the chosen command with subprocess.call.
+    - On success (exit code 0):
+      - Determines the dumped file size using os.path.getsize(encodeFilename(tmpfilename)).
+      - Outputs a status line with the tool name and byte size.
+      - Renames the temporary file to the final filename (try_rename).
+      - Signals progress via _hook_progress with downloaded_bytes, total_bytes, filename, and status 'finished'.
+      - Returns True.
+    - On failure (non-zero exit code):
+      - Outputs an error line and returns False.
+
+- Important implementation details
+  - External tool usage:
+    - mplayer path: mplayer -really-quiet -vo null -vc dummy -dumpstream -dumpfile <tmp> <url>
+    - mpv path: mpv -really-quiet --vo=null --stream-dump=<tmp> <url>
+  - Robustness:
+    - Uses check_executable to ensure either mplayer or mpv can be run (by probing with -h).
+    - If neither tool is available, provides a clear error message and aborts.
+  - File handling:
+    - Writes to a temporary file first, then renames to the final filename upon success.
+    - Uses encodeFilename when obtaining file size to handle potential encoding issues across platforms.
+  - Progress reporting:
+    - On success, updates progress with downloaded_bytes and total_bytes equal to the file size, and status 'finished'.
+
+- Behavior highlights
+  - Returns True only on successful dump and rename; otherwise returns False.
+  - Emits user-facing messages for destination, progress, and errors via the provided reporting utilities from the base class.
+
+- Notes
+  - The code relies on external command-line tools (mplayer or mpv) to actually dump the RTSP stream; it does not implement RTSP handling itself.

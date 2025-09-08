@@ -1,0 +1,27 @@
+This file defines a YouTube-DL extractor for Gazeta.ru video pages and delegates actual video extraction to the EaglePlatform backend.
+
+Main functionality
+- GazetaIE class inherits from InfoExtractor and implements _real_extract to process Gazeta.ru video pages.
+- It detects Gazeta video URLs with a complex _VALID_URL regex and captures a video id.
+- It fetches the embed page of the video (by appending ?p=embed to the original URL) and parses it to find the EaglePlatform video id from a div element with class "eagleplayer" and a data-id attribute.
+- It delegates the actual extraction to the EaglePlatform extractor by returning a URL result pointing to EaglePlatform with a constructed id in the form: eagleplatform:gazeta.media.eagleplatform.com:<video_id>.
+- This means Gazeta.ru videos are served through EaglePlatform; GazetaIE only discovers the EaglePlatform id.
+
+Key components
+- _VALID_URL: Regex that matches Gazeta.ru video URLs and extracts the internal id used as display_id.
+- _TESTS: Three test cases:
+  - A real Gazeta video with expected mp4 output, metadata (title, description, thumbnail), and an md5 check, plus a skip condition if the video is not found.
+  - A test using only_matching to ensure the extractor matches appropriate URLs without running extraction.
+  - A test showing integration with EaglePlatform via add_ie: ['EaglePlatform'].
+- _real_extract(self, url):
+  - Uses the _VALID_URL match to obtain display_id and base URL.
+  - Builds embed_url as base URL + "?p=embed" and downloads the embed page.
+  - Extracts video_id from the embed page using a regex targeting a div with class "eagleplayer" and data-id attribute.
+  - Returns self.url_result('eagleplatform:gazeta.media.eagleplatform.com:%s' % video_id, 'EaglePlatform'), delegating to the EaglePlatform extractor.
+
+Implementation details
+- The code relies on the EaglePlatform backend for actual video retrieval, indicating Gazeta.ru embeds are served via EaglePlatform.
+- If the data-id is not found in the embed page, _search_regex would raise an error (the extractor does not gracefully fallback).
+- The tests demonstrate support for metadata extraction and integration with another extractor (EaglePlatform) rather than extracting the video directly.
+
+Overall, GazetaIE is a thin wrapper that discovers the EaglePlatform video id from Gazeta.ru embeds and defers the heavy lifting to the EaglePlatform extractor.

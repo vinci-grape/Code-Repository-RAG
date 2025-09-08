@@ -1,0 +1,22 @@
+Concise summary of code in ./youtube-dl/devscripts/gh-pages/sign-versions.py
+
+- Purpose: Sign the update/versions.json file with an RSA PKCS#1 v1.5 signature (SHA-256) and store the hex-encoded signature back into the JSON as a signature field.
+
+- Main flow:
+  - Load update/versions.json into versions_info.
+  - If a signature field already exists, remove it to sign the unsigned content.
+  - Prompt the user to enter a PKCS#1 RSA private key (PEM format). The key is read from stdin line by line until a blank line, then loaded via rsa.PrivateKey.load_pkcs1.
+  - Compute a deterministic signature by signing the JSON representation of versions_info with sort_keys=True (json.dumps(..., sort_keys=True)) using SHA-256.
+  - Hex-encode the signature and print it.
+  - Insert the signature into versions_info['signature'] and write the updated JSON back to update/versions.json with pretty formatting (indent=4, sort_keys=True).
+
+- Key implementation details:
+  - Uses the PyPI rsa library (import rsa).
+  - Deterministic signing: signs the canonical JSON string (keys sorted) to ensure consistent signatures.
+  - Signature method: rsa.pkcs1.sign(..., privkey, 'SHA-256') and hexlify for text output.
+  - Private key input: interactive PEM PKCS#1 private key via standard input; reads until an empty line to delimit the key.
+  - Compatibility shim for Python 2/3 input handling (aliases input to raw_input when available).
+
+- Outputs:
+  - Prints the hex signature as "signature: <hex>".
+  - Writes the updated versions.json file with the new signature field appended.

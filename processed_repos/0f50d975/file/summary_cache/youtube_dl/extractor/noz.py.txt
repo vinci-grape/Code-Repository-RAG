@@ -1,0 +1,58 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/noz.py
+
+Purpose
+- Implement NozIE, an information extractor for videos hosted on noz.de. It fetches video metadata (title, description, thumbnail, duration) and compiles a list of available video formats (direct MP4, HDS, and HLS).
+
+Key components
+- Class NozIE(InfoExtractor)
+  - _VALID_URL: Regex identifying noz.de video pages: https?:// (www.)? noz.de/video/<id>/
+  - _TESTS: Includes a sample noz.de video URL with expected id, extension, duration, title, description, and thumbnail.
+
+Main workflow in _real_extract
+1) Extract video_id from URL and download the video page.
+2) Get OpenGraph description from the webpage.
+3) Locate the edge script URL containing a videojs configuration script using a regex:
+   - Pattern looks for a script tag with src ending in /videojs_... (edge URL).
+4) Download the edge/config script content.
+5) Parse the encoded config URL from the edge script content using:
+   - regex: so.addVariable("config_url","...,[capture]")
+   - The captured portion is URL-unquoted to form the actual config URL.
+6) Download and parse the XML video configuration from config_url.
+   - Extracts:
+     - title from //title
+     - thumbnail from //article/thumbnail/url
+     - duration from //article/movie/file/duration (converted to int if possible)
+7) Build formats list by iterating over each quality entry:
+   - Locate the MP4 URL directly via ./html_urls/video_url with an attribute format="video/mp4".
+     - If found, create a format dict with:
+       - url, format_name (from ./name), format_id ("http-<id>"), height, width, tbr (bitrate, scaled by 1000 if provided)
+   - If no direct MP4 URL is found, try fallbacks:
+     - f4m (HDS): use url_hd2 if present; extend formats with _extract_f4m_formats after adding hdcore=3.4.0 to the URL.
+     - m3u8 (HLS): find a URL with format "application/vnd.apple.mpegurl" and extend formats with _extract_m3u8_formats (m3u8_native, m3u8_id='hls'), fatal handled as False.
+8) Sort all gathered formats using _sort_formats.
+9) Return a dict with:
+   - id: video_id
+   - formats: list of gathered formats
+   - title: extracted title
+   - duration: extracted duration (if available)
+   - description: OpenGraph description
+   - thumbnail: extracted thumbnail
+
+Important implementation details
+- Uses InfoExtractor utilities for robust extraction:
+  - _download_webpage, _download_xml
+  - _og_search_description for description
+  - _html_search_regex for edge script URL
+  - _search_regex to extract the encoded config URL from the edge script
+  - compat_urllib_parse_unquote to decode the config URL
+  - compat_xpath and xpath_text, find_xpath_attr for XML parsing
+  - int_or_none for safe numeric parsing
+  - _extract_f4m_formats and _extract_m3u8_formats for non-direct formats
+  - _sort_formats to order formats by quality
+- The XML config provides structured information about formats, including:
+  - Direct MP4 URLs under ./html_urls/video_url with format="video/mp4"
+  - Alternative formats via f4m (HD) or m3u8 (HLS) URLs
+- Fallback behavior ensures that if a direct MP4 link is not available, the extractor can still access streams via HDS or HLS when present.
+- The code is designed to be resilient to missing fields by using int_or_none and conditional extensions to formats lists.
+
+Overall, NozIE systematically traverses the page-to-config pipeline used by noz.de, collecting metadata and multiple streaming formats, with fallbacks to HDS and HLS when necessary.

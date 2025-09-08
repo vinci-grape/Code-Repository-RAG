@@ -1,0 +1,22 @@
+Summary:
+- Purpose: A youtube-dl extractor for the Filmarchiv section of the Deutsches Historisches Museum (DHM). It treats certain DHM film archive pages as playlists and yields video entries with metadata.
+- Key class: DHMIE(InfoExtractor)
+  - IE_DESC: "Filmarchiv - Deutsches Historisches Museum"
+  - _VALID_URL: Matches DHM filmarchive pages and captures an id from the URL.
+- Core functionality (_real_extract):
+  - Derives playlist_id from the URL and downloads the page.
+  - Extracts an XSPF playlist URL from the page using the pattern file: 'URL'.
+  - Parses the XSPF playlist into a list of entries via _extract_xspf_playlist.
+  - Extracts page metadata:
+    - title: tries dc:title="..." first, then <title> &raquo; ...</title>, stripping whitespace.
+    - description: from a <p><strong>Description:</strong>...</p> block, optional.
+    - duration: from a "Length" field on the page; converts to seconds with parse_duration (can be None if not found).
+  - Updates the first playlist entry with the extracted title, description, and duration.
+  - Returns the playlist as a whole with playlist_result(entries, playlist_id).
+- Important implementation details:
+  - Robust title extraction using two regex patterns.
+  - Description and duration extraction are optional (default=None) to avoid hard failures if missing.
+  - Duration is converted to seconds via parse_duration when present.
+  - The extractor assumes the DHM page contains an external XSPF playlist referenced by a file: URL.
+- Tests:
+  - Two _TESTS entries verify behavior, including md5 checksums and expected info_dict fields (id, ext, title, thumbnail, etc.).

@@ -1,0 +1,69 @@
+Summary of ./youtube-dl/youtube_dl/extractor/vrv.py
+
+Overview
+- Implements a VRV (vrv.co) extractor for youtube-dl with support for individual videos, movie listings, and series.
+- Uses a base class VRVBaseIE that handles API access, CMS resource signing, and OAuth-like request signing.
+- Provides three extractors:
+  - VRVIE: extracts a single video (with support for movies, episodes, and listings as playlists).
+  - VRVSeriesIE: extracts a series as a playlist of episode entries.
+  - VRVBaseIE: shared functionality for API/CMS access and signing.
+
+Key classes and functions
+- VRVBaseIE(InfoExtractor)
+  - _API_DOMAIN, _API_PARAMS, _CMS_SIGNING, _TOKEN, _TOKEN_SECRET: store API domain/config, CMS signing keys, and OAuth tokens.
+  - _real_initialize: fetches the VRV homepage to discover API config (cxApiParams) and API domain.
+  - _call_api(path, video_id, note, data=None): makes signed API requests to /core/<path> using OAuth-like signing (consumer key/secret, token if present). Handles JSON encoding for data, content-type, and 401 error handling with helpful messages.
+  - _call_cms(path, video_id, note): fetches CMS signing information (from index endpoint if needed) and then requests CMS resources with the signing parameters.
+  - _get_cms_resource(resource_key, video_id): fetches a CMS resource path for a given resource_key.
+- VRVIE(VRVBaseIE)
+  - IE_NAME = 'vrv'; _VALID_URL matches VRV watch URLs for individual videos.
+  - _real_initialize: authenticates with user credentials if available (token credentials via _call_api('authenticate/by:credentials')) to obtain oauth_token and oauth_token_secret for subsequent requests.
+  - _extract_vrv_formats(url, video_id, stream_format, audio_lang, hardsub_lang): builds format lists for HLS/DASH/adaptive streams. Supports language selection (audio_lang, hardsub_lang) and annotates formats with language if applicable. Returns a list of formats suitable for sorting.
+  - _real_extract(url): main extraction flow
+    - Resolve object, video data, and resource paths via CMS calls.
+    - If video_data represents a movie_listing, optionally creates a playlist of episode entries if multiple items exist; otherwise uses the single item.
+    - Retrieves streams information; iterates through adaptive streams (adaptive_hls, adaptive_dash) and collects formats via _extract_vrv_formats.
+    - Collects subtitles (captions, subtitles) with locale and format.
+    - Collects thumbnails with width/height metadata.
+    - Returns a dict with id, title, formats, subtitles, thumbnails, description, duration, uploader_id, series/season/episode metadata.
+- VRVSeriesIE(VRVBaseIE)
+  - IE_NAME = 'vrv:series'; _VALID_URL matches VRV series URLs.
+  - _real_extract(url): pulls all seasons for a series, then all episodes for each season, building a playlist of episode entries (VRV watch URLs) and returning them as a playlist with the series ID.
+  - Returns a playlist_result containing entries for all episodes in the series.
+
+Important implementation details
+- OAuth-like API signing
+  - _call_api constructs a request signature based on RFC 5849 style parameters: oauth_consumer_key, oauth_nonce, oauth_signature_method, oauth_timestamp, and optionally oauth_token.
+  - Signature base string uses POST if sending data, otherwise GET; HMAC-SHA1 with key (oAuthSecret + '&' + TOKEN_SECRET).
+  - oauth_signature is appended to the request query string.
+  - Headers include geo_verification_headers(); if sending data, Content-Type is application/json.
+  - 401 responses are surfaced with human-readable messages from the server.
+- CMS signing mechanism
+  - _call_cms fetches CMS signing information from the index endpoint if not already loaded, then caches cms_signing values.
+  - If signing info is missing, it traverses signing_policies from the index to derive cms_signing keys.
+  - CMS requests are made to self._API_DOMAIN with the path and query set to the CMS signing data.
+- Initial API discovery
+  - _real_initialize parses the VRV homepage to extract __APP_CONFIG__, which contains cxApiParams, including the API domain (defaulting to https://api.vrv.co).
+- Resource navigation
+  - Uses CMS links (__links__) to navigate from objects to their resource endpoints, streams, movie listings, etc.
+- Formats handling
+  - Supports HLS (adaptive_hls) and DASH (adaptive_dash) streams.
+  - _extract_vrv_formats builds a composite format ID based on stream type and optionally audio/hardsub language to aid sorting and labeling.
+  - If an audio language is specified, non-silent audio formats get their language annotated.
+- Data extraction and output
+  - For videos: returns id, title, formats, subtitles, thumbnails, description, duration (converted from ms to seconds), uploader_id, and episode/season/series metadata when available.
+  - For series: returns a playlist of episode entries with proper titles and IDs.
+- Error handling and edge cases
+  - If streams are not available or login is required, raises appropriate errors (e.g., login_required).
+  - Graceful handling of missing resources and locales for subtitles.
+
+Usage flow (high-level)
+- On initialization, the extractor fetches API config from VRV, setting API domain and keys.
+- When extracting a video:
+  - Logs in if credentials exist to obtain OAuth tokens.
+  - Walks CMS resources to get video data and streams.
+  - Builds a list of formats (HLS/DASH), subtitles, and thumbnails, then returns a structured info dict.
+- When extracting a series:
+  - Collects all seasons and episodes via CMS resources, creates a playlist of individual video entries, and returns as a series playlist.
+
+This module provides robust VRV access by combining API/cms signing, dynamic config loading, and flexible format/subtitle handling to support both single videos and series playlists.

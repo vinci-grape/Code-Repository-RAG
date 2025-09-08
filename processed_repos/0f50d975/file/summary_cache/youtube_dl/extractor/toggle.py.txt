@@ -1,0 +1,72 @@
+Summary:
+- This code provides two YouTube-DL extractors for the Singaporean video service meWatch/Toggle.
+
+Main components:
+- ToggleIE (InfoExtractor)
+  - Purpose: Extract video information and available formats from the Toggle backend API for a given video id.
+  - URL matching: _VALID_URL covers:
+    - meWatch/Toggle pages (www.mewatch.sg, video.toggle.sg) with en/zh paths
+    - A generic toggle:ID pseudo-URL scheme
+  - Data source: Calls the TVP API
+    - Endpoint: http://tvpapi.as.tvinci.com/v2_9/gateways/jsonpostgw.aspx?m=GetMediaInfo
+    - Payload includes a nested initObj with locale/platform details and ApiUser/ApiPass credentials
+    - MediaID is the video_id parsed from the URL
+    - API credentials are defined as _API_USER and _API_PASS
+  - Processing flow:
+    - Parse video_id from URL
+    - Build and POST a JSON payload to the API, receive a JSON info object
+    - Title is info['MediaName']
+    - Build formats by iterating info['Files']:
+      - Each file has URL and Format
+      - Skip if no URL, URL is 'NA', or no Format
+      - ext = determine_ext(video_url)
+      - Normalize vid_format (remove spaces)
+      - If ext is:
+        - m3u8: use _extract_m3u8_formats with ext='mp4', m3u8_id=vid_format, and non-fatal error handling
+          - Filter out Apple FairPlay variants containing '/fpshls/' in the URL
+        - mpd: use _extract_mpd_formats (mpd_id=vid_format), non-fatal
+        - ism: use _extract_ism_formats (ism_id=vid_format), non-fatal
+        - mp4: add a direct format dict with ext, url, format_id
+    - If no formats were found:
+      - Check info.get('Metas'); if any meta has Key 'Encryption' and Value '1', raise an ExtractorError indicating DRM protection
+      - Otherwise raise ExtractorError('No downloadable videos found', expected=True)
+    - Sort the formats
+    - Build thumbnails from info['Pictures'] (list of dicts with 'URL' and 'PicSize')
+      - For each picture dict, extract URL and parse PicSize like "WidthxHeight" to set width/height
+    - Helper function counter(prefix) reads either PrefixCounter or prefix_lower_counter from info for view/like counts
+    - Return metadata dictionary:
+      - id, title, description, duration, timestamp (from CreationDate), average_rating
+      - view_count, like_count, thumbnails, formats
+  - Key implementation details:
+    - Robust handling of multiple format types (m3u8, mpd, ism, mp4)
+    - Graceful fallback when downloadable formats are blocked by geo-restrictions (DRM/m3u8 issues)
+    - DRM detection is explicit when no formats are found
+    - Thumbnails include width/height when PicSize is provided
+
+- MeWatchIE (InfoExtractor)
+  - Purpose: Bridge from meWatch watch pages to Toggle by resolving a custom ID.
+  - URL matching: _VALID_URL matches meWatch watch pages of the form:
+    https://[www|live].mewatch.sg/watch/...-<id>
+  - Data flow:
+    - Extract item_id from URL (the numeric suffix after the dash)
+    - Fetch item details from https://cdn.mewatch.sg/api/items/{item_id} with query segments=all
+    - Retrieve customId from the response (response['customId'])
+    - Return a URL result pointing to ToggleIE with the pseudo-URL 'toggle:' + customId
+      - This causes ToggleIE to be used to fetch the actual video information
+  - Key implementation details:
+    - Two-step extraction: meWatch page -> internal customId -> Toggle back-end
+    - Reuses ToggleIE's logic for actual format extraction
+  - Tests illustrate:
+    - A successful mapping to a Toggle video (id 343115 example)
+    - Several “only_matching” tests to ensure correct URL recognition
+    - DRM and geo-restriction scenarios handled by the underlying ToggleIE
+
+Notes on testing and behavior:
+- Tests include DRM-protected and geo-blocked scenarios to verify proper error handling and fallback behavior.
+- Some test cases set skip_download for m3u8 or DRM-protected variants, reflecting the intended download behavior.
+- The code uses utility helpers (determine_ext, int_or_none, float_or_none, parse_iso8601, strip_or_none) to normalize and sanitize fields.
+
+Overall:
+- The file implements a two-class extractor system for meWatch/Toggle:
+  - ToggleIE fetches and parses media information from the Toggle TVP API, supports multiple streaming formats, handles DRM, builds thumbnails, and returns a structured video info dictionary.
+  - MeWatchIE maps meWatch’s watch pages to Toggle by querying a separate API to obtain a custom Toggle ID, then delegates to ToggleIE for the actual extraction.

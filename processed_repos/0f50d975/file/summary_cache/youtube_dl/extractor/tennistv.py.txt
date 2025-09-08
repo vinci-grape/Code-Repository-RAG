@@ -1,0 +1,53 @@
+- Purpose
+  - YouTube-DL extractor for TennisTV videos. Handles login-based access, entitlement checks, and metadata extraction to produce a standard video info dictionary.
+
+- Key class
+  - TennisTVIE (inherits from InfoExtractor)
+    - _VALID_URL: matches TennisTV video pages as https://www.tennistv.com/videos/{id}
+    - _NETRC_MACHINE: 'tennistv' for netrc-based credentials
+    - _TEST: example test case with expected metadata; marked to skip download and require login
+
+- Authentication flow
+  - _real_initialize calls _login to establish a session before extraction.
+  - _login:
+    - Retrieves username/password via _get_login_info (netrc or user input).
+    - Raises ExtractorError if credentials are missing.
+    - Posts JSON payload to https://www.tennistv.com/api/users/v1/login with headers indicating JSON content, Referer, and Origin.
+    - Parses login_result; raises ExtractorError on errorCode.
+    - Warns if entitlement is not SUBSCRIBED (non-fatal).
+    - Stores session token from login_result['sessionToken'] in self._session_token.
+  - Authorization header for subsequent requests uses 'authorization': 'ATP <session_token>'.
+
+- Video data retrieval and formatting
+  - _real_extract(url):
+    - Extracts video_id from URL using _match_id.
+    - Downloads the video page to obtain internal_id via regex 'video=([0-9]+)'.
+    - Builds headers including Origin, Referer, and the ATP session token for authenticated API calls.
+    - Entitlement check:
+      - Posts JSON payload with videoID and VideoUrlType 'HLSV3' to https://www.tennistv.com/api/users/v1/entitlementchecknondiva.
+      - Uses response contentUrl to create formats via _extract_m3u8_formats(check_result['contentUrl'], video_id, ext='mp4').
+    - Fetches additional video data:
+      - vdata_url = https://www.tennistv.com/api/channels/v1/de/none/video/{video_id}
+      - vdata = _download_json(vdata_url, video_id)
+      - timestamp = unified_timestamp(vdata['timestamp'])
+      - thumbnail = vdata['video']['thumbnailUrl']
+      - description = vdata['displayText']['description']
+      - title = vdata['video']['title']
+      - series = vdata['tour']
+      - venue = vdata['displayText']['venue']
+      - round_str = vdata['seo']['round']
+    - Returns a dict with:
+      - id: video_id
+      - title, description, thumbnail, timestamp
+      - formats: from entitlement check
+      - series, season (set to venue), episode (set to round_str)
+
+- Important implementation details
+  - Uses an authenticated session token obtained via login; subsequent data fetches require this token in the Authorization header.
+  - Entitlement check endpoint (entitlementchecknondiva) determines access and provides contentUrl for formats (HLSV3).
+  - Video metadata comes from a separate API endpoint (channels/v1/de/none/video/{video_id}), including title, description, thumbnail, and series/venue/round metadata.
+  - _REAL behavior handles both access control and metadata assembly, returning the standard info dictionary used by YouTube-DL.
+  - Error handling:
+    - Raises ExtractorError on login failure or missing credentials.
+    - Warns if user is not SUBSCRIBED, but continues if possible.
+  - The _TEST case expects mp4 extension and specific metadata, and is configured to skip actual download due to subscription requirements.

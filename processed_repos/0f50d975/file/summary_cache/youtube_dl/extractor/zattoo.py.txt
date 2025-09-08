@@ -1,0 +1,74 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/zattoo.py
+
+Purpose
+- Implement a family of extractors for Zattoo and partner/affiliate services (e.g., Quickline, NetPlus, MNetTV, etc.). They share a common API to login, fetch channel/video data, and extract streaming formats (DASH, HLS, HDS, ISM, etc.).
+
+Key classes
+- ZattooPlatformBaseIE (InfoExtractor)
+  - Core base for all Zattoo-like extractors.
+  - Handles authentication and session setup, channel/video data retrieval, and format extraction.
+  - Main flow:
+    - _real_initialize: fetch app token and app version from the host page, initialize a session via zapi/v2/session/hello, then login.
+    - _login: authenticate using credentials from netrc (_get_login_info); stores power_guide_hash from the login response for subsequent API calls.
+    - _extract_cid: fetch channel groups and derive the channel id (cid) by either display_alias or cid.
+    - _extract_cid_and_video_info: fetch program details (power_details) and build an info dictionary (title, description, thumbnail, etc.) and return with cid.
+    - _extract_formats: given cid/video_id (and optional record_id or is_live flag), build and fetch available streaming formats for multiple stream types (dash, hls, hls5, hds). For each available watch entry:
+      - Determine the actual stream URL.
+      - Build a format_id from stream_type and optional attributes (maxrate, audio_channel).
+      - Extract formats via appropriate helper (_extract_mpd_formats, _extract_m3u8_formats, _extract_f4m_formats, _extract_ism_formats) depending on stream_type.
+      - Apply a per-format "preference" based on audio channel.
+      - Collect and sort formats.
+    - _extract_video: orchestrates per-video extraction; handles live vs on-demand (live sets is_live and channel title).
+- QuicklineBaseIE (inherits ZattooPlatformBaseIE)
+  - _NETRC_MACHINE = 'quickline'
+  - _HOST = 'mobiltv.quickline.com'
+- QuicklineIE
+  - _VALID_URL pattern for Quickline Video URLs (watch/<channel>/<id>).
+  - _real_extract uses _extract_video with channel and id.
+- QuicklineLiveIE
+  - For Quickline live pages (watch/<id>), forces is_live in extraction.
+  - Suitable check ensures it’s chosen only if QuicklineIE isn’t suitable.
+- ZattooBaseIE
+  - _NETRC_MACHINE = 'zattoo'
+  - _HOST = 'zattoo.com'
+- _make_valid_url helper
+  - Builds a URL template with the given host.
+- ZattooIE
+  - _VALID_URL_TEMPLATE for standard Zattoo on-demand videos (channel, id, optional recid).
+  - _TESTS with only_matching for sample URLs.
+  - _real_extract delegates to _extract_video passing channel, video_id, and optional record_id.
+- ZattooLiveIE
+  - Live extractor for Zattoo; uses is_live and similar flow to ZattooIE.
+  - Suitable() ensures this triggers only when ZattooIE doesn’t match.
+- NetPlusIE, MNetTVIE, WalyTVIE, BBVTVIE, VTXTVIE, MyVisionTVIE, GlattvisionTVIE, SAKTVIE, EWETVIE, QuantumTVIE, OsnatelTVIE, EinsUndEinsTVIE, SaltTVIE
+  - Each defines a specific _NETRC_MACHINE and _HOST, often with _API_HOST for API access.
+  - _VALID_URL built from ZattooIE’s template via _make_valid_url with their host.
+  - Each includes a short _TESTS entry with only_matching URLs.
+  - These share the same core extraction logic from ZattooPlatformBaseIE, leveraging the host-specific endpoints and credentials.
+
+Important implementation details
+- Authentication and session
+  - _real_initialize fetches an app token from the host page and app_version from an HTML comment, then calls /zapi/v2/session/hello to establish a session and cookies.
+  - _login posts credentials to /zapi/v2/account/login and stores the session’s power_guide_hash for subsequent API calls.
+  - Proper error handling: if login returns 400, raises ExtractorError with a helpful message.
+- Data retrieval
+  - _extract_cid fetches channel_groups from /zapi/v2/cached/channels/{power_guide_hash} and flattens channel lists to locate the channel id by display_alias or cid.
+  - _extract_cid_and_video_info fetches program details from /zapi/v2/cached/program/power_details/{power_guide_hash} with program_ids, extracting fields like title, description, thumbnail, channel_name, episode, year, etc.
+- Formats extraction
+  - _extract_formats supports multiple stream types per video: dash, hls, hls5, hds (and some special types like dash_widevine, dash_playready, hls5_fairplay, smooth_playready).
+  - For each stream_type, it posts data to a URL determined by cid/video_id/record_id and is_live, with common postdata including https_watch_urls and other optional fields (timeshift for live).
+  - It processes watch_urls entries (dicts with url, maxrate, audio_channel, etc.), builds a format_id that combines stream_type with maxrate and audio channel when present, and assigns a per-format preference based on audio_channel (A has higher preference).
+  - It uses _extract_mpd_formats for DASH, _extract_m3u8_formats for HLS variants, _extract_f4m_formats for HDS, and _extract_ism_formats for Smooth/ISM formats. Each format is appended to the formats list.
+  - After collecting formats, _sort_formats is called to order them properly.
+- Channel vs live handling
+  - Live videos use _extract_cid to fetch channel information and _live_title to generate a live title, with is_live set to True and id set to the channel name.
+  - Non-live videos obtain cid and video info to populate title, description, etc.
+- URL handling and host variants
+  - The code relies on dynamic host resolution via _HOST or _API_HOST, and uses _make_valid_url to construct host-specific URLs for multiple extractors.
+  - The _NETRC_MACHINE fields indicate which credentials to pull from netrc for each host.
+- Compatibility and utilities
+  - Uses YouTube-DL helper methods: _download_json, _download_webpage, _html_search_regex, _request_webpage, url_or_none, urlencode_postdata, int_or_none, try_get, etc.
+  - Uses compat modules to handle HTTP errors and string conversions.
+
+Overall
+- This module provides a unified extraction framework for Zattoo and many partner services by leveraging a shared API surface (authentication, channel lookup, program details, and multi-format streaming endpoints) and then offering host-specific entry points for various websites. It supports both on-demand and live streams, with robust handling of multiple streaming formats and channel identification, all wrapped in a clean class hierarchy that reuses most logic across hosts.

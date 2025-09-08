@@ -1,0 +1,50 @@
+- Purpose: ChilloutzoneIE is a youtube-dl extractor for chilloutzone.net video pages. It handles direct CDN videos and embeds from YouTube or Vimeo.
+
+- URL pattern:
+  - _VALID_URL matches URLs like http(s)://www.chilloutzone.net/video/{id}.html
+  - The {id} is captured as the video_id (consisting of word chars, underscores, or dashes)
+
+- Tests (_TESTS):
+  - Test 1: Direct CDN MP4 video with title and description extracted.
+  - Test 2: Video hosted on YouTube; expects to delegate to YouTube extractor and fetch standard YouTube metadata (title, uploader, upload_date, etc.).
+  - Test 3: Video hosted on Vimeo; expects to delegate to Vimeo extractor with corresponding id and metadata pattern.
+
+- Main class: ChilloutzoneIE(InfoExtractor)
+  - Key imports:
+    - YoutubeIE for YouTube handling
+    - compat_b64decode to decode base64
+    - clean_html to sanitize descriptions
+    - ExtractorError for error signaling
+
+- Core logic (_real_extract):
+  1) Extract video_id from URL using _VALID_URL.
+  2) Download the page HTML.
+  3) Locate a base64-encoded JSON blob in the page: var cozVidData = "base64...";
+  4) Decode base64 string, then parse JSON to obtain video_info_dict.
+     - Expected keys: mediaUrl (video_url), description, title, nativePlatform, nativeVideoId, sourcePriority.
+  5) Fallback handling if nativePlatform is None:
+     - Attempt to extract a YouTube URL from the page using YoutubeIE._extract_url.
+     - If found, return a url_result pointing to the YouTube extractor (ie=YoutubeIE.ie_key()).
+  6) Source priority handling:
+     - If sourcePriority == 'native':
+       - If nativePlatform == 'youtube': return a YouTube URL result for nativeVideoId.
+       - If nativePlatform == 'vimeo': return a Vimeo URL for the nativeVideoId (http://vimeo.com/{id}).
+  7) If no direct video_url is available (mediaUrl missing), raise ExtractorError('No video found').
+  8) Otherwise, return a video info dict with:
+     - id: video_id
+     - url: video_url
+     - ext: 'mp4'
+     - title: title
+     - description: sanitized description
+
+- Important implementation details:
+  - Descriptions are cleaned via clean_html.
+  - Video data is embedded as a base64-encoded JSON blob in the page (var cozVidData) and decoded with compat_b64decode.
+  - When delegating to YouTube (either via nativePlatform or fallback), uses url_result with the appropriate extractor (YoutubeIE) by passing ie=YoutubeIE.ie_key() or 'Youtube' in certain paths.
+  - Handles multiple sources: native (YouTube/Vimeo) or the CDN-provided video_url.
+  - Robust error handling for missing video data (raises ExtractorError).
+
+- Summary of behavior:
+  - If the page provides a native YouTube or Vimeo source and priority indicates native, the extractor delegates to the respective platform.
+  - If there is a direct video URL from the CDN, it returns a standard mp4 entry with the extracted id, title, and cleaned description.
+  - If only a YouTube embed is present and no direct URL, it will resolve through the YouTube extractor.

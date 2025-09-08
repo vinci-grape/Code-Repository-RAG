@@ -1,0 +1,106 @@
+Summary of ./youtube-dl/youtube_dl/extractor/trovo.py
+
+- Purpose
+  - Provide extractors for Trovo.tv: live streams by username (TrovoIE) and VODs/clips by ID (TrovoVodIE).
+
+- Key classes
+  - TrovoBaseIE(InfoExtractor)
+    - Provides common utilities for Trovo extractors.
+    - _VALID_URL_BASE defines Trovo URL pattern.
+    - _extract_streamer_info(self, data)
+      - Extracts uploader/uploader_id/uploader_url from data['streamerInfo']:
+        - uploader: streamerInfo['nickName']
+        - uploader_id: uid (stringified if present)
+        - uploader_url: https://trovo.live/<userName> if username present
+
+  - TrovoIE(TrovoBaseIE)
+    - Used for live streams (by username).
+    - _VALID_URL = base pattern + not (clip|video)/ followed by an id (the username).
+    - _real_extract(self, url)
+      - Extracts username from URL.
+      - Queries GraphQL endpoint https://gql.trovo.live/ for getLiveInfo(params: {userName: "<username>"}).
+      - Response shape: data.getLiveInfo with isLive, programInfo, streamerInfo.
+      - If isLive == 0: raise ExtractorError("<username> is offline", expected=True).
+      - Build video info:
+        - programInfo.id as id
+        - title via self._live_title(programInfo['title'])
+        - formats: iterate programInfo['streamInfo'] and collect playUrl with:
+          - format_id from streamInfo['desc']
+          - height parsed from format_id (e.g., "720p" -> 720) using int_or_none(format_id[:-1])
+          - url = playUrl
+        - Sort formats with self._sort_formats
+        - thumbnail from programInfo['coverUrl'], is_live = True
+        - Merge streamer info via self._extract_streamer_info(live_info)
+      - Returns the info dict
+
+  - TrovoVodIE(TrovoBaseIE)
+    - Used for VODs and clips (video/clip URLs by ID).
+    - _VALID_URL = base pattern + (?:clip|video)/(?P<id>[^/?&#]+)
+    - _TESTS
+      - Example test for a video URL with expected fields (id, ext mp4, title, uploader, timestamps, counts, comments, categories)
+      - Another test ensures clip URLs are not processed by this extractor (only_matching)
+    - _real_extract(self, url)
+      - vid = self._match_id(url)
+      - Performs a batched GraphQL request to https://gql.trovo.live/ with two queries:
+        - batchGetVodDetailInfo(params: {vids: ["<vid>"]}) -> VodDetailInfos
+        - getCommentList(params: {appInfo: {postID: "<vid>"} , ...}) -> commentList
+      - resp is a JSON array with two items:
+        - resp[0]['data']['batchGetVodDetailInfo']['VodDetailInfos'][vid] -> vod_detail_info
+          - vodInfo contains title, languageName, coverUrl, publishTs, duration, categoryName, and playInfos
+        - resp[1]['data']['getCommentList']['commentList'] -> comments
+      - Build formats from vodInfo['playInfos']:
+        - For each playInfo with playUrl:
+          - ext: mp4
+          - filesize from fileSize
+          - format_id from desc
+          - height from format_id (strip last char, e.g., "720p")
+          - language from languageName
+          - protocol: 'm3u8_native'
+          - tbr from bitrate
+          - url = playUrl
+          - http_headers: Origin: https://trovo.live
+        - Sort formats
+      - Build comments list:
+        - For each comment: author nickName/uid, commentID, content, createdAt, parentID
+        - Map to fields: author, author_id, id, text, timestamp, parent ('root' if parentID == 0 else parentID)
+      - info dict:
+        - id (vid)
+        - title
+        - formats
+        - thumbnail (coverUrl)
+        - timestamp (publishTs)
+        - duration
+        - view_count (watchNum)
+        - like_count (likeNum)
+        - comment_count (commentNum)
+        - comments (constructed list)
+        - categories: [categoryName] if categoryName present
+      - Merge streamer info via self._extract_streamer_info(vod_detail_info)
+      - Return info
+
+- Important implementation details
+  - Data sources
+    - Live: GraphQL getLiveInfo query via https://gql.trovo.live/
+    - VODs: Batched GraphQL queries via https://gql.trovo.live/ to fetch VodDetailInfos and comments
+  - URL matching and separation
+    - TrovoIE handles live streams by username (filters out clip/video IDs)
+    - TrovoVodIE handles VODs and clips (route includes clip or video)
+  - Formats handling
+    - Live: formats built from programInfo.streamInfo entries; uses playUrl and desc as format_id; height derived from desc if present (e.g., "720p")
+    - VODs: formats from vodInfo.playInfos; includes size, bitrate, language, and sets protocol to m3u8_native with Origin header to bypass CORS
+  - Metadata extraction
+    - Titles for live via _live_title
+    - Streamer info combined via _extract_streamer_info
+    - For VODs: include language, category, publish timestamp, duration, and detailed comment list
+  - Utilities used
+    - int_or_none, str_or_none, try_get for safe extraction
+    - _download_json for HTTP requests
+    - _sort_formats to order format quality
+    - ExtractorError for offline/live-check reporting
+
+- Return values
+  - Standard YouTube-dl info dictionaries:
+    - For live: id, title, uploader/uploader_id/uploader_url, is_live, thumbnail, formats
+    - For VODs: id, title, uploader info, formats, thumbnail, timestamp, duration, view_count, like_count, comment_count, comments, categories, etc.
+
+Overall, the file implements two Trovo extractors: TrovoIE for live streams and TrovoVodIE for VODs/clips, using Trovo’s GraphQL endpoints to fetch detailed information and media formats, and assembling comprehensive metadata including streamer info, comments, and categories.

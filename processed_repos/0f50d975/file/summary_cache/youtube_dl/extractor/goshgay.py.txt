@@ -1,0 +1,32 @@
+- Purpose: A youtube-dl extractor for goshgay.com videos, enabling extraction of video metadata and direct video URL from a video page.
+
+- Class and inheritance:
+  - GoshgayIE(InfoExtractor): Implements the extractor logic for goshgay.com.
+
+- URL matching:
+  - _VALID_URL regex matches URLs like http(s)://www.goshgay.com/video<id> with an optional trailing slash.
+  - Captures the numeric video id as the extractor id.
+
+- Test data:
+  - _TEST provides a sample URL, expected MD5 for the video, and an info_dict with id, extension (flv), title, thumbnail pattern, duration, and age_limit.
+
+- Main extraction flow (_real_extract):
+  - Extracts video_id via self._match_id(url) and downloads the page with self._download_webpage.
+  - Title extraction: parses the page for the first <h2>...</h2> content using _html_search_regex.
+  - Duration extraction: finds a span with class "duration" and parses the content using parse_duration; marked fatal=False to make it optional.
+  - Flashvars extraction: locates the embed tag with id="flash-player-embed" and grabs the flashvars attribute; parses this query-string-like content with compat_parse_qs into a dict.
+  - Thumbnail: retrieved from flashvars['url_bigthumb'] if present.
+  - Video URL: retrieved from flashvars['flv_url'][0].
+  - Returns a dict with:
+    - id: video_id
+    - url: video_url
+    - title: title
+    - thumbnail: thumbnail
+    - duration: duration
+    - age_limit: 18
+
+- Important implementation details:
+  - Uses compat_parse_qs to handle the flashvars string as a URL query string and convert it into a dictionary.
+  - Expects specific flashvars fields: flv_url (video URL) and url_bigthumb (thumbnail URL).
+  - Utilizes parse_duration to convert the duration string into seconds; duration is optional (fatal=False) if not found.
+  - Relies on standard youtube-dl utilities: _download_webpage, _html_search_regex, and _match_id.

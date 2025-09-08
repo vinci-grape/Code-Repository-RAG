@@ -1,0 +1,49 @@
+Here's a concise, comprehensive summary of the file:
+
+What it is
+- A YouTube-DL (youtube_dl) extractor for Escapist Magazine video pages.
+- Implemented as EscapistIE, extending InfoExtractor.
+
+Key components
+- _decrypt_config(key, string): decrypts the video config string returned by the Escapist server.
+  - Algorithm: builds a repeating key string a of half the length of the input, hex-decodes the input to an intermediate string i, then XORs corresponding chars of a and i to produce the decrypted JSON string.
+- EscapistIE class:
+  - _VALID_URL: regex matching Escapist video view pages and capturing the numeric video id.
+  - _TESTS: several test cases verifying metadata like id, title, description, duration, uploader, thumbnail, and format mp4 target; includes two “only_matching” tests for non-matching URLs under different host variations.
+
+Main extraction flow (_real_extract)
+1. Extract initial video_id from the URL and download the page.
+2. Find imsVideo configuration in the page via regex imsVideo.play({...}); and parse it as JSON.
+   - Extract videoID and hash (key) from this imsVideo object.
+3. Retrieve video config from http://www.escapistmagazine.com/videos/vidconfig.php
+   - Send Referer header as the original URL.
+   - Send query params: videoID and hash (key).
+4. Decrypt the received config using _decrypt_config(key, config) and parse it as JSON.
+5. Read videoData for title, duration, publisher, show, etc.
+6. Build formats list from data['files']['videos']:
+   - Each format uses video['src'] as the URL.
+   - format_id is constructed as "<extension>-<resolution>p", where extension is determined via determine_ext(video['src']) and resolution from video['res'].
+   - height is int_or_none(video.get('res')).
+   - Collect and sort formats with _sort_formats.
+7. Assemble final result dictionary:
+   - id: video_id (from imsVideo)
+   - formats: list of prepared formats
+   - title: cleaned HTML title from videoData['title']
+   - thumbnail: OG thumbnail if available else data.get('poster')
+   - description: OG description if available
+   - duration: duration converted to seconds via float_or_none(video_data.get('duration'), 1000) (ms to seconds)
+   - uploader: videoData.get('publisher')
+   - series: videoData.get('show')
+
+Important implementation details
+- URL pattern supports both www and v1 subdomains and accepts both http/https.
+- Metadata fallback:
+  - Title is cleaned with clean_html.
+  - Thumbnail/description leveraged from OpenGraph metadata when possible, with data['poster'] as fallback.
+- Duration handling uses a scale of 1000 (milliseconds to seconds) via float_or_none(..., 1000).
+- Formats derive their quality/height from the 'res' field and include a format_id like "mp4-720p".
+- The config fetch uses a Referer header and the necessary query parameters (videoID and hash) to fetch the encrypted config.
+- The decryption routine is tailored to Escapist’s response format, turning a hex-encoded payload into a JSON string, then parsing it to extract video files and metadata.
+
+Overall functionality
+- Given an Escapist video page, the extractor discovers a hidden video config, decrypts it, parses available video formats, and returns structured metadata (id, title, description, thumbnail, duration, uploader, series) along with all available video formats for streaming.

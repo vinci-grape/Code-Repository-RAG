@@ -1,0 +1,36 @@
+concise summary of the code
+
+- Purpose
+  - Implement a YouTube-DL extractor for FootyRoom match pages. It builds a small playlist of available video sources (Playwire and Streamable) found on a match page.
+
+- Key class
+  - FootyRoomIE (inherits from InfoExtractor)
+
+- URL pattern
+  - _VALID_URL = r'https?://footyroom\.com/matches/(?P<id>\d+)' 
+  - Matches FootyRoom match pages like /matches/79922154/...
+
+- Tests
+  - _TESTS defines two sample match pages and expected outcomes:
+    - First test: 79922154 page with 2 playlist items (Playwire and Streamable) and StreamableIE added.
+    - Second test: 75817984 page with 1 playlist item (Playwire only).
+
+- Main method: _real_extract
+  - Extracts playlist_id from URL using _match_id.
+  - Downloads the page HTML via _download_webpage.
+  - Locates a JSON array assigned to DataStore.media using _search_regex with pattern DataStore\.media\s*=\s*([^;]+) and parses it with _parse_json, storing in playlist.
+  - Retrieves playlist_title from the Open Graph title on the page (_og_search_title).
+  - Iterates over each video entry in playlist:
+    - payload = video.get('payload'); skip if missing.
+    - playwire_url: extracts a URL from payload via _html_search_regex looking for data-config="...". If found, append a Playwire entry using an absolute URL created by _proto_relative_url(playwire_url, 'http:').
+    - streamable_url: uses StreamableIE._extract_url(payload) to find a Streamable URL. If found, append a Streamable entry with the appropriate IE key.
+  - Returns a playlist_result(entries, playlist_id, playlist_title).
+
+- Important implementation details
+  - Supports multiple sources per match by appending multiple entries (one Playwire and/or one Streamable) for each video payload.
+  - Robustness: skips entries without payload; only adds sources when URLs can be extracted.
+  - URL normalization: uses _proto_relative_url with 'http:' to ensure Playwire URLs are absolute.
+  - Integration with existing IEs: uses StreamableIE for Streamable sources and marks entries with their respective IE keys (and 'Playwire' for Playwire sources).
+  - The extracted playlist title comes from the page’s Open Graph title.
+
+In short, FootyRoomIE scrapes a FootyRoom match page for a JSON list of videos, then collects available video sources (Playwire and Streamable) from each video payload and returns them as a combined playlist with the match title.

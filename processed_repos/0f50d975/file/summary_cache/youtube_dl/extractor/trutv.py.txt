@@ -1,0 +1,75 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/trutv.py:
+
+- Purpose
+  - Implement an extractor for TruTV video content, integrated with the Turner base extractor (TurnerBaseIE) used by youtube-dl to fetch and parse video data, including streaming formats and metadata.
+
+- Class and inheritance
+  - TruTVIE: Subclass of TurnerBaseIE.
+  - Leverages common Turner/Nielsen NGTV extraction utilities via _extract_ngtv_info.
+
+- URL matching and test data
+  - _VALID_URL regex captures two kinds of TruTV URLs:
+    - Shows or full-episodes pages, with either:
+      - clip slug (videos/<clip_slug>) or
+      - numeric id (episode id).
+  - _TEST dictionary provides a sample URL, expected result fields (id, ext, title, description), and a hint to skip actual download (m3u8) during tests.
+
+- Core logic (_real_extract)
+  - Parses the URL using the _VALID_URL regex to obtain:
+    - series_slug
+    - clip_slug
+    - video_id (may be None)
+  - Determines API path and display_id based on the URL type:
+    - If video_id is present:
+      - path = 'episode'
+      - display_id = video_id
+    - Else (clip/series info):
+      - path = 'series/clip'
+      - display_id = clip_slug
+  - Calls TruTV API:
+    - URL: https://api.trutv.com/v2/web/{path}/{series_slug}/{display_id}
+    - Fetches JSON with _download_json(display_id)
+  - Data selection:
+    - video_data = data['episode'] if a specific episode was requested (video_id present)
+    - otherwise video_data = data['info'] (series/clip info)
+  - Media and title:
+    - media_id = video_data['mediaId']
+    - title = video_data['title'].strip()
+  - NGTV info extraction:
+    - Invokes _extract_ngtv_info with:
+      - media_id
+      - empty metadata dict
+      - extra data: {'url': url, 'site_name': 'truTV', 'auth_required': video_data.get('isAuthRequired')}
+    - This returns an info dict containing at least streaming formats.
+  - Thumbnails:
+    - Iterates over video_data.get('images', []).
+    - For each image with a 'srcUrl', adds a thumbnail dict:
+      - 'url': image_url
+      - 'width': int_or_none(image.get('width'))
+      - 'height': int_or_none(image.get('height'))
+  - Metadata augmentation:
+    - Updates the info dict with:
+      - 'id': media_id
+      - 'display_id': display_id
+      - 'title': title
+      - 'description': video_data.get('description')
+      - 'thumbnails': thumbnails
+      - 'timestamp': parse_iso8601(video_data.get('publicationDate'))
+      - 'series': video_data.get('showTitle')
+      - 'season_number': int_or_none(video_data.get('seasonNum'))
+      - 'episode_number': int_or_none(video_data.get('episodeNum'))
+  - Returns the enriched info dict for downstream processing (formats, direct video URLs, etc.).
+
+- Key implementation details
+  - URL handling supports both episode-specific and series/clip info URLs via a single extractor path.
+  - Uses a centralized API endpoint structure:
+    - /v2/web/episode/{series}/{display_id} or /v2/web/series/clip/{series}/{display_id}
+  - Gracefully handles thumbnails with optional width/height data.
+  - Uses utility helpers:
+    - int_or_none for numeric fields
+    - parse_iso8601 for the publication date
+  - Keeps auth handling flexible via video_data.get('isAuthRequired') passed to NGTV extractor.
+  - Relies on TurnerBaseIE’s _extract_ngtv_info to obtain streaming formats (e.g., m3u8) and common metadata integration.
+
+- Overall behavior
+  - Fetches TruTV video/episode data via their API, derives a media ID and display info, uses NGTV extraction to obtain formats, and compiles a rich metadata dictionary including IDs, titles, descriptions, timestamps, series/season/episode numbers, and thumbnails.

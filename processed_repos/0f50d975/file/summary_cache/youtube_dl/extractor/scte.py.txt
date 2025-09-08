@@ -1,0 +1,73 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/scte.py
+
+Purpose
+- Implement YouTube-DL extractors for SCTE’s learning portal (learning.scte.org), handling SCORM content and courses, with login support.
+
+Key classes
+- SCTEBaseIE (InfoExtractor)
+  - Handles login to SCTE site using a Sign In page.
+  - _LOGIN_URL: the login page URL.
+  - _NETRC_MACHINE: netrc machine name for credentials.
+  - _real_initialize(): triggers login on initialization.
+  - _login(): performs the login flow
+    - Retrieves credentials via _get_login_info().
+    - Downloads login popup page and detects if already logged in.
+    - Builds login form from hidden inputs, fills in username/password and RememberMe.
+    - Posts the login form with urlencode_postdata.
+    - If login fails, tries to extract a specific error message and raises ExtractorError; otherwise raises a generic login error.
+  - Uses helpers from youtube-dl (e.g., _download_webpage, _hidden_inputs, _html_search_regex).
+
+- SCTEIE (SCTE Base + SCORM content extractor)
+  - _VALID_URL: matches SCORM view pages with an id parameter on learning.scte.org.
+  - _TESTS: includes a sample SCORM URL with expected title/id and a note that credentials are required.
+  - _real_extract(url):
+    - video_id: extracted id from URL.
+    - Downloads the SCORM page and extracts the title from an <h1> tag.
+    - Finds context_id via regex on the page (context-(\d+)).
+    - Builds content_base URL using the context_id.
+    - Downloads mobile/data.js, decodes packed codes via decode_packed_codes to obtain context data.
+    - Extracts XML data from within the context using a CreateData(...) entry, then parses XML with _parse_xml.
+    - Iterates through assets in the XML data:
+      - Only keeps assets with .mp4 URLs.
+      - Extracts an asset_id from the URL pattern video_([^_]+)_.
+      - Constructs full video URL as content_base + asset_url.
+      - Collects entries with id, title, and url.
+    - Returns a playlist_result with the collected entries, video_id, and title.
+
+- SCTECourseIE (SCTE Base + Course extractor)
+  - _VALID_URL: matches course view URLs (including mod/sub) with id parameter.
+  - _TESTS: several only_matching tests for different course URL forms.
+  - _real_extract(url):
+    - course_id: extracted from URL.
+    - Downloads the course page and attempts to extract a course title.
+    - Scans the page for links to module/scorm or mod/subcourse view pages:
+      - Uses a regex to find anchors whose href points to:
+        - https://learning.scte.org/mod/scorm/view.php?...id=...
+        - https://learning.scte.org/mod/subcourse/view.php?...id=...
+      - For each found item URL (excluding the current page):
+        - Chooses the appropriate extractor:
+          - SCTEIE.ie_key() if the link is a SCORM item.
+          - SCTECourseIE.ie_key() if the link is another course/subcourse item.
+        - Appends a url_result(item_url, ie=chosen_extractor).
+    - Returns a playlist_result with the collected entries, course_id, and title.
+
+Important implementation details
+- Login flow:
+  - Checks if already logged in by looking for elements like class="welcome" or >Sign Out< in the login page.
+  - Reads login form from hidden inputs to preserve required fields, then injects username/password/RememberMe.
+  - Detects login success either by a redirect signal in the response or by re-checking login state in the response.
+  - Raises ExtractorError with a helpful message if login fails, including any error text found in an AsiError block.
+- Data decoding and parsing:
+  - Uses decode_packed_codes to decode a JavaScript-packed data context (mobile/data.js).
+  - Extracts a CreateData(...) XML string from the decoded context, then parses XML with _parse_xml.
+  - Iterates over asset nodes to gather mp4 video assets and constructs direct URLs from a context-based base URL.
+  - Asset IDs are parsed from the mp4 URLs with a regex on video_([^_]+)_.
+- Integration with youtube-dl framework:
+  - Uses standard helpers: _download_webpage, _hidden_inputs, _search_regex, _parse_xml, _match_id, _real_initialize, url_result, playlist_result, ie_key().
+  - The _NETRC_MACHINE configuration allows credentials to be supplied via netrc for non-interactive login.
+- Tests:
+  - SCTEIE includes a test with a real SCORM URL, expected title/id, and a note that credentials are required (skip if not logged in).
+  - SCTECourseIE tests ensure correct matching behavior for various course URL forms.
+
+Summary
+- This file provides a cohesive set of SCTE extractors capable of logging into SCTE’s site, extracting SCORM video assets from individual SCORM items, and discovering/assembling playlist entries from courses that contain SCORM or subcourse items. It handles login, content decoding, XML data parsing, and dynamic construction of MP4 asset URLs, returning structured playlist results suitable for YouTube-DL.

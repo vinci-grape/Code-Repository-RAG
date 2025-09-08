@@ -1,0 +1,85 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/tvigle.py
+
+Purpose
+- Implements TvigleIE, an information extractor for Tvigle.ru videos (and their cloud.tvigle.ru API).
+- Returns video metadata and a list of available formats for a given Tvigle video URL.
+
+Key classes/functions
+- TvigleIE(InfoExtractor): Main extractor class.
+  - IE_NAME, IE_DESC: Identifiers for the extractor.
+  - _VALID_URL: Regex pattern matching Tvigle video URLs (either tvigle.ru article/series paths with a display_id or cloud.tvigle.ru video IDs).
+  - _GEO_BYPASS, _GEO_COUNTRIES: Geolocation handling; RU only.
+  - _TESTS: Example test cases, including georestricted URLs and a cloud.tvigle.ru URL.
+  - _real_extract(self, url): Core extraction logic.
+
+Main extraction flow
+1. URL parsing
+   - Match URL with _VALID_URL to obtain video_id and display_id.
+   - If video_id is missing (e.g., URL points to a page without a direct ID), fetch the page and search for the video ID via several HTML patterns:
+     - <div class="player" ... id="NUMBER">
+     - cloudId = "NUMBER"
+     - class="video-preview current_playing" id="NUMBER"
+
+2. API data retrieval
+   - Fetch JSON from http://cloud.tvigle.ru/api/play/video/{video_id}/
+   - item = first entry in video_data['playlist']['items']
+
+3. Geo and error handling
+   - If there are no videos and an errorMessage exists:
+     - If isGeoBlocked is True, raise a georestricted error with the message and RU as allowed country.
+     - Otherwise raise a generic ExtractorError with the message.
+
+4. Metadata extraction
+   - title = item['title']
+   - description = item.get('description')
+   - thumbnail = item.get('thumbnail')
+   - duration = float_or_none(item.get('durationMilliseconds'), 1000)  (milliseconds to seconds)
+   - age_limit = parse_age_limit(item.get('ageRestrictions'))
+
+5. Formats construction
+   - Iterate over item['videos'].items():
+     - vcodec is the key (e.g., 'hls', 'dash', or other codecs)
+     - url_or_fmts is the value (could be a URL or a dict of per-format URLs)
+
+   - If vcodec == 'hls':
+     - m3u8_url = url_or_none(url_or_fmts)
+     - Use _extract_m3u8_formats to build formats from the HLS playlist (ext='mp4', entry_protocol='m3u8_native', m3u8_id='hls'), not fatal on failure.
+
+   - If vcodec == 'dash':
+     - mpd_url = url_or_none(url_or_fmts)
+     - Use _extract_mpd_formats to build formats from the DASH manifest (mpd_id='dash'), not fatal on failure.
+
+   - Otherwise (direct formats)
+     - Skip if url_or_fmts is not a dict.
+     - For each format_id, video_url in url_or_fmts.items():
+       - Skip if format_id == 'm3u8'
+       - video_url = url_or_none(video_url)
+       - height: parse from format_id with regex r'^(\d+)[pP]$'
+       - filesize: int_or_none(try_get(item, lambda x: x['video_files_size'][vcodec][format_id]))
+       - Append a format dict:
+         - url: video_url
+         - format_id: '{vcodec}-{format_id}'
+         - vcodec: vcodec
+         - height: parsed height
+         - filesize: parsed filesize
+
+   - After collecting formats, sort them with self._sort_formats(formats).
+
+6. Return
+   - A dict with keys:
+     - 'id': video_id
+     - 'display_id': display_id
+     - 'title', 'description', 'thumbnail', 'duration', 'age_limit'
+     - 'formats': list of collected formats
+
+Implementation details and utilities
+- Uses helper utilities from youtube_dl:
+  - float_or_none, int_or_none, parse_age_limit
+  - try_get, url_or_none
+  - _download_json, _download_webpage, _html_search_regex, _extract_m3u8_formats, _extract_mpd_formats
+- Handles multiple possible HTML structures to obtain the initial video_id if not present in URL.
+- Includes geolocation handling: raises geo-restriction error when isGeoBlocked is true, restricted to RU.
+- Supports multiple format types (HLS, DASH, and direct progressive formats) and attaches additional metadata (height, filesize) when available.
+- Tests reflect georestricted cases and cloud.tvigle.ru variants.
+
+In short, TvigleIE fetches video metadata from Tvigle’s cloud API, handles geoblocking, builds a comprehensive list of formats from HLS, DASH, and direct URLs, enriches with duration and age rating, and returns a structured info dict compatible with youtube-dl.

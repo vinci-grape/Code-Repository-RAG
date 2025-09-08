@@ -1,0 +1,45 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/ketnet.py
+
+- Purpose
+  - Implement KetnetIE, an extractor for Ketnet video pages on ketnet.be. It fetches metadata via a GraphQL API and then delegates to the Canvas content host to obtain the actual media asset.
+
+- Key class
+  - KetnetIE(InfoExtractor)
+    - _VALID_URL: Regex to identify Ketnet article/episode pages. Captures an id/path portion after ketnet.be to be used for lookups.
+    - _TESTS: Two tests
+      - A real example that resolves to an MP4 asset with expected metadata (title, description, thumbnail, duration, timestamp, upload_date, series, season, episode, episode_number) and a couple of expected warnings about unsupported codecs/MIME types.
+      - A second test using only_matching to ensure URL pattern matching works without fetching data.
+
+- Main functionality (_real_extract)
+  - Determine display_id from the URL using _match_id.
+  - Retrieve video metadata via a GraphQL request to https://senior-bff.ketnet.be/graphql with a query:
+    - The query asks for a video by id: content/ketnet/nl/{display_id}.model.json
+    - Fields requested: description, episodeNr, imageUrl, mediaReference, programTitle, publicationDate, seasonTitle, subtitleVideodetail, titleVideodetail
+  - Extract the video object from the GraphQL response: data.video
+  - Decode the media reference (mz_id) with compat_urllib_parse_unquote(video['mediaReference'])
+  - Return a dict representing a url_transparent entry:
+    - _type: 'url_transparent' (defers to another extractor for the actual media)
+    - id: mz_id
+    - title: video['titleVideodetail']
+    - url: https://mediazone.vrt.be/api/v1/ketnet/assets/ + mz_id
+    - thumbnail: video.get('imageUrl')
+    - description: video.get('description')
+    - timestamp: parse_iso8601(video.get('publicationDate'))
+    - series: video.get('programTitle')
+    - season: video.get('seasonTitle')
+    - episode: video.get('subtitleVideodetail')
+    - episode_number: int_or_none(video.get('episodeNr'))
+    - ie_key: CanvasIE.ie_key()  (delegates to the Canvas extractor for the actual media asset)
+
+- Important implementation details
+  - Uses a GraphQL endpoint (senior-bff.ketnet.be) to fetch metadata for the Ketnet content, constructing the GraphQL query with the URL-derived display_id.
+  - The actual media URL is not directly on Ketnet; instead, it resolves to a VRT-hosted asset via the path https://mediazone.vrt.be/api/v1/ketnet/assets/{media_id}. The extractor returns this as a url_transparent object and delegates further processing to CanvasIE.
+  - The mediaReference field from GraphQL is URL-encoded; it is decoded to form the final asset id (mz_id).
+  - Uses helper utilities:
+    - parse_iso8601 to convert publicationDate to a UNIX timestamp.
+    - int_or_none to safely parse episodeNr to an integer.
+    - compat_urllib_parse_unquote to decode the mediaReference.
+  - The metadata populated in the output includes typical video details: title, description, thumbnail, timestamp, series, season, episode, and episode_number, enabling rich information in the player UI.
+
+- Summary of flow
+  - User provides a Ketnet URL → KetnetIE validates and extracts an id → GraphQL query fetches video metadata → mediaReference decoded → final asset URL constructed → return url_transparent with CanvasIE as the handler for the actual media.

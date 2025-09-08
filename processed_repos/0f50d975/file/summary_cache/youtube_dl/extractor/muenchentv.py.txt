@@ -1,0 +1,55 @@
+Summary of ./youtube-dl/youtube_dl/extractor/muenchentv.py
+
+Purpose
+- Implements a YouTube-DL extractor for münchen.tv livestreams.
+
+Main components
+- Class MuenchenTVIE(InfoExtractor)
+  - _VALID_URL: Matches http/https URLs to http://www.muenchen.tv/livestream (with or without www).
+  - IE_DESC: 'münchen.tv'
+  - _TEST: Provides a test case with expected metadata (id, display_id, ext, title pattern, is_live, thumbnail) and skip_download flag.
+
+Key functionality (core logic in _real_extract)
+- Download and prepare:
+  - display_id is set to 'live'.
+  - Downloads the livestream page via _download_webpage.
+  - Derives a human-friendly title using the OpenGraph title and _live_title.
+
+- Extract playlist data:
+  - Locates a JavaScript-like playlist configuration in the page with a regex: (?s)\nplaylist:\s*(\[.*?}\]),.
+  - Converts the extracted JavaScript array-like string to JSON using js_to_json, then parses with json.loads and takes the first element ([0]).
+
+- Metadata extraction:
+  - video_id: data['mediaid']
+  - thumbnail: data.get('image')
+
+- Formats construction:
+  - Iterates over data['sources'] to build a list of format dictionaries.
+  - For each source s:
+    - Determine file extension via determine_ext(s['file'], None). If extension is None, format_id uses the label alone; otherwise format_id is "{ext}-{label}".
+    - label_str: s.get('label'); if missing, defaults to '_<index>'.
+    - tbr: int_or_none(s.get('label')) (interprets the label as bitrate if numeric).
+    - ext: fixed to 'mp4'
+    - url: s['file']
+    - format_id: as computed
+    - 'preference': -100 if '.smil' is in the file URL (to deprioritize SMIL-based URLs), else 0
+  - After building all formats, _sort_formats(formats) is called to order them properly.
+
+Return value
+- A dict with:
+  - 'id': video_id
+  - 'display_id': 'live'
+  - 'title': derived live title
+  - 'formats': list of discovered formats
+  - 'is_live': True
+  - 'thumbnail': thumbnail (if available)
+
+Implementation notes and details
+- Utilities used: determine_ext, int_or_none, js_to_json
+- The code relies on a JS-embedded playlist object with fields:
+  - mediaid (video/stream id)
+  - image (thumbnail)
+  - sources: array of sources with fields 'file' (URL) and 'label' (potentially bitrate)
+- The 'ext' for formats is forced to 'mp4' regardless of source; actual extension is inferred from the file URL when possible.
+- The data structure is parsed from a JavaScript snippet rather than a standard JSON endpoint; this is handled by js_to_json after extracting the playlist text.
+- The test case expects a live stream with a specific ID, title pattern, and thumbnail URL, and uses skip_download to avoid downloading during tests.

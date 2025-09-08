@@ -1,0 +1,80 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/iprima.py
+
+What it does
+- Implements an information extractor (IPrimaIE) for videos on iprima.cz subdomains (e.g., prima.iprima.cz, play.iprima.cz, iprima.cz family).
+- Extracts video metadata (id, title, description, thumbnail) and available video formats (primarily HLS/m3u8, with limited MPD handling).
+
+Key components
+- Class IPrimaIE(InfoExtractor)
+  - _VALID_URL: Regex to match various iprima subdomains and capture a video identifier.
+  - _GEO_BYPASS: False (geo restrictions are handled explicitly in code).
+  - _TESTS: Several test cases to validate ID extraction, format handling, and geo behavior.
+
+Core workflow in _real_extract(self, url)
+1) Identify video
+   - video_id = self._match_id(url)
+   - Sets a cookie on play.iprima.cz: ott_adult_confirmed=1 to bypass adult confirmation prompt when accessing the player.
+
+2) Fetch and parse the page
+   - webpage = self._download_webpage(url, video_id)
+   - title = prefer OpenGraph title, otherwise fallback to extracting from an <h1> tag.
+
+3) Resolve the real video/product id
+   - Tries multiple patterns to extract a concrete id (pNNN or similar) from the page, including:
+     - Embedded iframe src patterns (api.play-backend.iprima.cz/prehravac/embedded or prima.iprima.cz/…)
+     - data-product attribute
+     - id="player-pNNN" or playerId: "player-pNNN"
+     - videos="pNNN"
+   - The resulting video_id is used for subsequent requests.
+
+4) Obtain player data
+   - Downloads the player init page:
+     http://play.iprima.cz/prehravac/init
+     with query parameters:
+     - _infuse=1
+     - _ts=<timestamp>
+     - productId=<video_id>
+     Referer header is set to the original URL.
+   - Initialize an empty formats list.
+
+5) Extract formats (primary mechanism)
+   - Helper function extract_formats(format_url, format_key=None, lang=None)
+     - Determines file extension and, if it’s HLS (m3u8) or explicitly requested as 'hls', uses _extract_m3u8_formats to fetch formats (mp4 container, m3u8_native, id 'hls', fatal=False).
+     - If explicitly 'dash' or mpd extension is encountered, currently skips processing (returns early); MPD formats are not added.
+     - If a language is provided, fills in the language for formats that lack it.
+     - Appends discovered formats to the formats list.
+
+   - Parse player options from the fetched player page
+     - Extracts JSON-like data from either TDIPlayerOptions or playerOptions using a regex and converts via js_to_json.
+     - options.get('tracks', {}) contains per-track information. For each track with a list of entries:
+       - If entry has a 'src', call extract_formats(src, key.lower(), track.get('lang'))
+     - This covers multiple quality tracks or sources supplied by the player configuration.
+
+   - Fallback extraction
+     - If no formats gathered from the options, scans the player page for src values using a regex and calls extract_formats on each found URL.
+
+6) Geo restriction handling
+   - If no formats were found and the player page contains '>GEO_IP_NOT_ALLOWED<', raise a geo-restricted error for CZ.
+
+7) Finalize and return
+   - Sort formats (self._sort_formats(formats)).
+   - Return a dictionary with:
+     - id: video_id
+     - title
+     - thumbnail: extracted via OpenGraph if available
+     - formats: the collected and sorted formats
+     - description: extracted via OpenGraph if available
+
+Important implementation details
+- Cookie handling: sets ott_adult_confirmed=1 on play.iprima.cz to bypass age confirmation in some video players.
+- Robust ID extraction: uses multiple regex patterns to locate the canonical video id in various page structures (iframes, data attributes, HTML IDs).
+- Player data retrieval: accesses the player initialization endpoint with a timestamp and productId to fetch embedded options.
+- Format extraction strategy:
+  - Primarily supports HLS (m3u8) formats via _extract_m3u8_formats.
+  - MPD (dash) formats are recognized but not processed (the code returns early when encountering mpd).
+  - Supports language tagging for formats when provided by track metadata.
+- Fallback mechanism: if no formats discovered from structured options, falls back to scanning raw src values in the player page.
+- Geo handling: explicitly detects geo-restriction indicators in the player page and raises a CZ geo restriction when applicable.
+- Metadata: uses OpenGraph data for title and thumbnail if available, with sensible fallbacks for missing fields.
+
+Overall, the extractor focuses on assembling playable formats from the iprima player configuration, prioritizing HLS streams, while also handling metadata and geo restrictions.

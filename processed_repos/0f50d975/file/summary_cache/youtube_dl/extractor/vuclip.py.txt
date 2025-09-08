@@ -1,0 +1,38 @@
+- Purpose: VuClipIE is a YouTube-DL extractor for VuClip video pages. It fetches the video formats, title, and duration from VuClip pages, handling two different page structures and a potential pre-video ad page.
+
+- Key class:
+  - VuClipIE(InfoExtractor): Main extractor class.
+
+- URL matching:
+  - _VALID_URL = r'https?://(?:m\.)?vuclip\.com/w\?.*?cid=(?P<id>[0-9]+)'
+  - Captures video_id from the cid query parameter. Supports both desktop and mobile subdomains (e.g., m.vuclip.com).
+
+- Test case:
+  - _TEST defines a sample URL and expected info: id, extension (ext) '3gp', title, and duration (in seconds).
+
+- Core workflow in _real_extract:
+  1. Extract video_id with _match_id(url) and download the page via _download_webpage(url, video_id).
+  2. Ad-removal step: looks for a pattern that indicates a post-ad link, using
+     value="No.*?" onClick="location.href='([^"']+)'"
+     If found, reconstruct ad-free URL from the original URL’s scheme/netloc and the captured path, then re-download the ad-free page with note 'Download post-ad page'.
+  3. Error handling: search for an error message in a paragraph <p class="message">. If found, raise ExtractorError with the message.
+  4. Video URL discovery:
+     - First attempt: search for a direct video URL via a link anchor that contains href to a video and an image with src containing /play.gif.
+     - If found, set formats to a single entry with that URL.
+     - If not found, fall back to HTML5 video parsing via _parse_html5_media_entries(url, webpage, video_id)[0]['formats'].
+     The comment indicates the site alternates between two page types, hence the two-tier approach.
+  5. Title extraction: extract from the <title> tag using a pattern that ends with "- Vuclip", strip whitespace, and remove a trailing " - Video" if present.
+  6. Duration extraction: attempt to parse a duration string like 1:23 or similar using a regex that captures a [0-9]+:[0-9]+ inside a tag boundary, then convert with parse_duration. The search allows a trailing <span or ) and is non-fatal if not found (fatal=False).
+  7. Return a dictionary with:
+     - id: video_id
+     - formats: the collected formats
+     - title: parsed title
+     - duration: parsed duration (in seconds, if found)
+
+- Important implementation details:
+  - Uses compat_urllib_parse_urlparse for URL parsing to be Python 2/3 compatible.
+  - Uses helper methods from parent class or utilities: _download_webpage, _html_search_regex, _search_regex, _parse_html5_media_entries, parse_duration, remove_end.
+  - Handles two VuClip page structures to robustly extract video formats.
+  - Provides explicit error handling via ExtractorError when VuClip returns an error message.
+
+Overall, the extractor fetches a VuClip video page, optionally bypasses an interstitial/ad page, detects the video source (either a direct capture or via HTML5 entries), and returns standard video information (id, formats, title, duration).

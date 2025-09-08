@@ -1,0 +1,80 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/manyvids.py
+
+Purpose
+- Implement an information extractor (ManyVidsIE) for video pages on ManyVids.
+- Extract video metadata (title, uploader, description, thumbnail, view/like counts) and all usable video formats (including m3u8/hls and direct file links).
+
+Key components
+- Class ManyVidsIE(InfoExtractor)
+  - _VALID_URL: Regex to match ManyVids video URLs (https://www.manyvids.com/video/<id>).
+  - _TESTS: Two test cases (preview and full video) with expected info_dict structure.
+
+Main extraction flow (_real_extract)
+- Video ID extraction
+  - video_id = self._match_id(url)
+
+- Page retrieval and resilience
+  - Tries to fetch a real URL: https://www.manyvids.com/video/<id>/gtm.js
+  - Falls back to the original URL if the first request fails (likely due to JS-based gating).
+
+- Metadata extraction from HTML
+  - Extracts a <div> with id="pageMetaDetails" and parses its attributes via extract_attributes to get info (data-meta-*)
+  - Extracts a <div> with id="rmpPlayerStream" and parses its attributes to get player (data-video-*)
+  - Builds a list of potential video sources:
+    - info.get('data-meta-video') as 'video'
+    - player.get('data-video-transcoded') as 'transcoded'
+    - player.get('data-video-filepath') as 'filepath'
+    - OG video URL via self._og_search_video_url(webpage, secure=False, default=None) as 'og_video'
+
+- Token/cookie handling
+  - Extracts mv_token from the page (data-mvtoken attribute).
+  - If present, performs a POST request to set cookies via an AJAX endpoint:
+    https://www.manyvids.com/includes/ajax_repository/you_had_me_at_hello.php
+  - Includes mvtoken and vid in POST data, with Referer and X-Requested-With headers.
+  - This step is non-fatal (fatal=False) to avoid breaking extraction if token isn’t usable.
+
+- Title normalization and uploader integration
+  - Helpers:
+    - txt_or_none(s, default=None): returns stripped string or default, only if s is a compat_str.
+    - mung_title(s): removes a leading uploader name followed by a dash/pipe if present from the title.
+  - uploader = txt_or_none(info.get('data-meta-author'))
+  - title is derived from info.get('data-meta-title'), or HTML regex fallbacks, or Twitter meta, then stripped of a trailing “ManyVids” tag and any leading uploader tag via mung_title.
+  - If the page indicates a preview, append " (Preview)" to the title.
+
+- Source URLs and format extraction
+  - For each (v_url, fmt) in video_urls_and_ids:
+    - Normalize URL (url_or_none); skip if missing.
+    - If URL ends with m3u8, extract HLS formats via _extract_m3u8_formats(..., entry_protocol='m3u8_native', m3u8_id='hls').
+    - Otherwise, add a basic format with url and format_id.
+  - Remove duplicates with _remove_duplicate_formats(formats).
+  - Post-process formats:
+    - If height is missing, try to infer from the URL using a regex that looks for _NNN_ where N is height (2-3 digits, ending in even digit 0,2,4,6,8).
+    - If the URL path contains '/preview/', append 'preview' to format_id and set a low preference (-10).
+    - If 'transcoded' appears in the format_id, decrease its preference by 1.
+  - Sort formats with _sort_formats(formats).
+
+- View/like counts extraction
+  - get_likes(): parses the HTML for an element with data-id equal to the video id and extracts data-likes attribute, returning int or None.
+  - get_views(): uses a regex to pull the numeric view count from the page’s views wrapper and converts to int via str_to_int.
+
+- Return data structure
+  - id: video_id
+  - title: finalized title
+  - formats: list of format dictionaries
+  - description: data-meta-description (if available)
+  - uploader: uploader string (if available)
+  - thumbnail: prefers data-meta-image from info, else data-video-screenshot from player
+  - view_count: value from get_views()
+  - like_count: value from get_likes()
+
+Important implementation details
+- Robust HTML extraction: uses data-meta-* attributes from pageMetaDetails and data-video-* attributes from rmpPlayerStream to assemble sources.
+- Multiple source fallbacks: includes video meta URL, transcoded URL, filepath URL, and an OpenGraph video URL if present.
+- mvtoken handling: uses a cookie-setting HTTP call to enable certain format access; the call is non-fatal if mvtoken unavailable.
+- Title handling: strips uploader prefix if present and removes a trailing “ManyVids” tag; appends “ (Preview)” for preview content.
+- Height inference: derives height from the URL pattern when not explicitly provided by the metadata.
+- Format prioritization: preview formats have lower preference; transcoded formats get further lowered to influence chosen default quality.
+- Output compatibility: designed to fit youtube-dl’s InfoExtractor framework, returning a dict suitable for downstream processing (formats, metadata, etc.).
+
+Overall
+- This extractor is tailored to ManyVids’ page structure, extracting both metadata and a comprehensive set of formats (including HLS), while handling access cookies, previews, and multiple URL sources to maximize the ability to download or stream the video.

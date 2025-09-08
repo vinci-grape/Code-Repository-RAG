@@ -1,0 +1,65 @@
+Here is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/voot.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for Voot video pages. It fetches metadata via Voot/Kaltura back-end and builds a list of available video formats (HLS/m3u8) for playback, returning a standard set of metadata fields.
+
+- Main class
+  - VootIE(InfoExtractor): The extractor class handling Voot URLs.
+
+- URL pattern and geo
+  - _VALID_URL: RegEx matching voot.com pages with a numeric id at the end of the path, e.g. https://www.voot.com/.../12345
+  - _GEO_COUNTRIES: ['IN'] restricting extraction to India.
+
+- Tests
+  - _TESTS: Includes a detailed test for a specific Voot episode, validating id, title, description, timestamps, duration, series/season/episode data, view/like counts, and formats. Also includes two other tests with only_matching to ensure URL pattern recognition.
+
+- Core extraction flow (_real_extract)
+  - video_id = self._match_id(url): extract the numeric id from the URL.
+  - Retrieve media info:
+    - Call _download_json with URL https://wapi.voot.com/ws/ott/getMediaInfo.json and query parameters:
+      - platform=Web, pId=2, mediaId=video_id
+    - If media_info['status']['code'] != 0, raise ExtractorError with the provided status message.
+  - Access media metadata:
+    - media = media_info['assets']
+    - entry_id = media['EntryId']
+    - title = media['MediaName']
+  - Build video formats:
+    - Create an HLS format list using Kaltura manifest URL:
+      https://cdnapisec.kaltura.com/p/1982551/playManifest/pt/https/f/applehttp/t/web/e/ + entry_id
+    - Use self._extract_m3u8_formats(..., video_id, 'mp4', m3u8_id='hls')
+    - Sort the formats with self._sort_formats(formats)
+  - Metadata extraction (Metas field):
+    - Initialize description, series, season_number, episode, episode_number to None.
+    - Iterate over media['Metas'] (safely via try_get(..., list) or []).
+    - For each meta dict, map:
+      - Key 'ContentSynopsis' -> description
+      - Key 'RefSeriesTitle' -> series
+      - Key 'RefSeriesSeason' -> season_number (int_or_none)
+      - Key 'EpisodeMainTitle' -> episode
+      - Key 'EpisodeNo' -> episode_number (int_or_none)
+  - Additional fields:
+    - timestamp: unified_timestamp(media.get('CreationDate'))
+    - duration: int_or_none(media.get('Duration'))
+    - view_count: int_or_none(media.get('ViewCounter'))
+    - like_count: int_or_none(media.get('like_counter'))
+  - Return a dictionary with:
+    - extractor_key: 'Kaltura'
+    - id: entry_id
+    - title
+    - description
+    - series
+    - season_number
+    - episode
+    - episode_number
+    - timestamp
+    - duration
+    - view_count
+    - like_count
+    - formats
+
+- Important implementation details
+  - Uses a WAPI endpoint to fetch media info and a Kaltura manifest for actual video formats.
+  - Robust metadata extraction via try_get and int_or_none to handle missing or non-integer values.
+  - _extract_m3u8_formats is used to parse m3u8/HLS streams; if this fails in tests, a warning such as "Failed to download m3u8 information" may be produced (as seen in tests).
+  - The returned metadata aligns with youtube-dl’s common data model, including fields like series, season_number, episode, and timestamp.
+  - The 'extractor_key' is explicitly set to 'Kaltura' to indicate the underlying provider for the formats.

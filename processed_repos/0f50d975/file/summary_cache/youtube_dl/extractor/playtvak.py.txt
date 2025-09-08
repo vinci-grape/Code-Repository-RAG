@@ -1,0 +1,83 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/playtvak.py
+
+What it does
+- Implements an InfoExtractor for Playtvak.cz and related sites (iDNES.cz, Lidovky.cz, Metro.cz).
+- Extracts video information and-compatible formats from pages that embed or host videos on these sites.
+- Handles both on-demand videos and live streams.
+- Retrieves an internal info URL via a small JavaScript snippet on the page, fetches JSON data, and builds a list of downloadable formats with appropriate metadata.
+
+Key class
+- PlaytvakIE(InfoExtractor)
+  - IE_DESC: "Playtvak.cz, iDNES.cz and Lidovky.cz"
+  - _VALID_URL: Regex matching video pages on playtvak.cz, idnes.cz, lidovky.cz, metro.cz with a query parameter c or idvideo, capturing the id.
+  - _TESTS: Multiple test cases demonstrating:
+    - On-demand video from playtvak, idnes, lidovky, metro with expected id, ext, title, duration, timestamp, etc.
+    - Live streams from slowtv.playtvak.cz with live-specific attributes.
+    - An embed URL (embed.aspx) that should only_match.
+
+Main workflow (_real_extract)
+1. Identify video_id from the URL using _match_id.
+2. Download the main webpage.
+3. Extract the info URL embedded in the page via a JavaScript-like call:
+   - Look for a pattern like Misc.video({ data: "URL" ... }).
+   - Grab the URL inside quotes, parse it, and modify its query string:
+     - reklama = 0
+     - type = js
+   - Rebuild the info URL with the updated query string.
+4. Download the JSON data from the info URL (with transform_source to extract a JSON object).
+5. From json_info['items'], pick the first item whose type is 'video' or 'stream'. If none, raise ExtractorError.
+6. Build format list from item['video']:
+   - For each entry, take video_url = fmt['file'] (skip if missing).
+   - Interpret fmt['format']:
+     - mp4, webm → ext = same as format
+     - rtmp → ext = flv
+     - apple → ext = mp4, set preference = -1 (to deprioritize if necessary)
+     - adobe → skip (f4m manifest not used)
+     - others → skip
+   - format_id = "<format>_<quality>"
+   - quality = qualities(('low','middle','high')) applied to fmt['quality']
+   - Include 'preference' if set (e.g., apple gets -1)
+   - Collect dictionaries with url, ext, format_id, quality, and optional preference
+7. Sort formats with _sort_formats.
+8. Metadata:
+   - title = item['title']; if is_live, adjust via _live_title(title)
+   - is_live = (item['type'] == 'stream')
+   - description: first try OpenGraph description, else HTML meta description
+   - thumbnail = item.get('image')
+   - If not live:
+     - duration = int_or_none(item.get('length'))
+     - timestamp = item.get('published'); if present, parse with parse_iso8601 after removing the last 5 characters (strip time zone offset)
+9. Return a dict with:
+   - id: video_id
+   - title
+   - description
+   - thumbnail
+   - duration (if applicable)
+   - timestamp (if applicable)
+   - is_live
+   - formats
+
+Important implementation details
+- URL handling:
+  - Uses compat_urlparse and compat_urllib_parse_urlencode for robust URL manipulation across Py2/Py3.
+  - Rebuilds the info URL with updated query parameters reklama=0 and type=js.
+- JSON handling:
+  - _download_json is given a transform_source to extract the JSON object from a wrapped response.
+  - Selects the stream item from json_info['items'] by checking type == 'video' or 'stream'.
+- Formats:
+  - Maps internal 'format' values to file extensions as described above.
+  - Sets a format_id in the form "<format>_<quality>" for clarity.
+  - Uses a quality selector (low/middle/high) to populate a numeric 'quality' field for sorting.
+  - Special handling for:
+    - apple: ext = mp4, preference = -1 (avoid if possible)
+    - adobe: skipped (f4m manifest not used reliably)
+  - Skips any formats without a usable file URL or unsupported formats.
+- Live vs VOD:
+  - Live streams set is_live = True and title is adjusted with _live_title.
+  - For non-live videos, duration and timestamp are parsed from item with length and published fields.
+- Descriptions:
+  - Prefer OpenGraph description, with a fallback to the page meta description.
+- Embeds:
+  - Includes a test for an embed URL that should only_match, illustrating it doesn’t require full extraction.
+
+This extractor is designed to work across several Czech sites that embed Playtvak content, leveraging a common JS-based info endpoint to fetch stream metadata and then assembling a viewer-friendly list of formats and metadata.

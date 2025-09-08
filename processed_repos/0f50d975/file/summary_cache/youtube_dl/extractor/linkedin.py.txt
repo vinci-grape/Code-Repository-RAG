@@ -1,0 +1,86 @@
+Summary:
+
+- Purpose
+  - A YouTube-DL (youtube-dl) extractor module for LinkedIn Learning. It handles both individual video extraction and course playlist extraction by calling LinkedIn Learning APIs and assembling media formats.
+
+- Key classes
+  - LinkedInLearningBaseIE
+    - Base extractor with login support and common API helper.
+    - _NETRC_MACHINE and _LOGIN_URL for credentials.
+    - _call_api(course_slug, fields, video_slug=None, resolution=None)
+      - Builds a query for https://www.linkedin.com/learning-api/detailedCourses.
+      - If video_slug is provided, includes videoSlug and resolution (as _{height}) in the query.
+      - Retrieves CSRF token from cookies (JSESSIONID) and passes it as Csrf-Token header.
+      - Returns the first element of the elements array from the JSON response.
+    - _get_urn_id(video_data)
+      - Extracts a numeric ID from video_data['urn'] using pattern urn:li:lyndaCourse:<digits>,<id>.
+    - _get_video_id(video_data, course_slug, video_slug)
+      - Uses urn-derived ID if available, otherwise falls back to "course_slug/video_slug".
+    - _real_initialize()
+      - Performs login if credentials are provided via _get_login_info().
+      - Scrapes login page, finds form action URL, collects hidden inputs, submits credentials.
+      - Checks for login errors and raises ExtractorError if login fails.
+
+  - LinkedInLearningIE
+    - Extractor for a single LinkedIn Learning video within a course.
+    - IE_NAME = 'linkedin:learning'
+    - _VALID_URL pattern: http(s)://.../learning/<course_slug>/<id>
+    - _TEST: example URL with expected video metadata (id, title, timestamp, duration, etc.).
+    - _real_extract(url)
+      - Parses course_slug and video_slug from URL.
+      - Iterates over three resolutions: 640x360, 960x540, 1280x720.
+      - For each resolution:
+        - Calls _call_api(course_slug, 'selectedVideo', video_slug, height) to fetch video data.
+        - If progressiveUrl available, adds a format with format_id 'progressive-{height}p', proper width/height, and source_preference.
+      - If audio progressiveUrl exists, adds an audio-only format (abr=64, ext=m4a, vcodec='none').
+      - If streamingUrl exists, adds HLS formats via _extract_m3u8_formats.
+      - Sorts formats with priority order (width, height, source_preference, tbr, abr).
+      - Returns a dict with id, title, formats, thumbnail, timestamp, duration.
+
+  - LinkedInLearningCourseIE
+    - Extractor for a LinkedIn Learning course page (playlist of videos).
+    - IE_NAME = 'linkedin:learning:course'
+    - _VALID_URL pattern: http(s)://.../learning/<course_slug>
+    - _TEST: example playlist with id, title, and description.
+    - suitable(cls, url)
+      - Prefers LinkedInLearningIE if it matches; otherwise falls back to this if LinkedInLearningIE is not suitable.
+    - _real_extract(url)
+      - Extracts course_slug from URL.
+      - Calls _call_api(course_slug, 'chapters,description,title') to fetch course metadata.
+      - Iterates chapters and their videos:
+        - For each video with a slug, creates a url_transparent entry:
+          - id: _get_video_id(video, course_slug, video_slug)
+          - url: https://www.linkedin.com/learning/<course_slug>/<video_slug>
+          - title: video title
+          - chapter/title/number/id metadata attached for playlist structure
+          - ie_key set to LinkedInLearningIE.ie_key() so the actual video will be processed by the video extractor
+      - Returns playlist_result(entries, course_slug, course title, course description).
+
+Important implementation details
+
+- API and authentication
+  - The API used is https://www.linkedin.com/learning-api/detailedCourses.
+  - CSRF protection is handled by sending Csrf-Token: value of the JSESSIONID cookie in requests.
+  - _real_initialize() implements a login routine that navigates LinkedIn’s login form, submits credentials, and checks for errors.
+
+- Video data extraction
+  - Video data is obtained via _call_api with fields like 'selectedVideo'.
+  - Support for multiple video qualities via progressive URLs (progressiveUrl) for 360/540/720p.
+  - Audio support via a separate progressiveUrl for audio (added as an audio-only format with vcodec='none').
+  - Streaming/HLS support via streamingUrl using _extract_m3u8_formats.
+
+- URN handling and IDs
+  - _get_urn_id(video_data) extracts a numeric ID from the video’s urn if present.
+  - If urn-based ID is unavailable, _get_video_id falls back to a slug-based ID: "courseSlug/videoSlug".
+
+- Playlist creation
+  - LinkedInLearningCourseIE builds a playlist by enumerating chapters and their videos, creating url_transparent entries that point to the individual video URLs, and attaching chapter metadata (title, number, id) to each entry. This lets the main video extractor (LinkedInLearningIE) handle the actual media extraction while preserving course structure.
+
+- Error handling
+  - Login failures raise ExtractorError with the error message returned by LinkedIn’s login page.
+  - If a video lacks a slug, it is skipped during playlist construction.
+
+- Design considerations
+  - The course extractor (.CourseIE) uses the video extractor (.IE) for individual videos by setting ie_key to LinkedInLearningIE.ie_key(), enabling code reuse and consistent handling of per-video formats.
+
+Overall, the module provides both per-video and per-course extraction for LinkedIn Learning, including authentication, API-based data retrieval, multi-quality video support, audio tracks, and proper playlist/captioning of course structure.

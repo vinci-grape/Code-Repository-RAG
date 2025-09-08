@@ -1,0 +1,64 @@
+Concise summary of youtube-dl extractor file: YapFilesIE (./youtube-dl/youtube_dl/extractor/yapfiles.py)
+
+Purpose
+- Extract video information and playable formats from YapFiles.ru player pages.
+
+Key components
+- Class YapFilesIE(InfoExtractor): main extractor class.
+- _YAPFILES_URL: regex fragment for YapFiles player URLs, capturing video id via the v= parameter.
+- _VALID_URL: full URL pattern using http/https with the YapFiles URL fragment.
+- _TESTS: two tests:
+  - First test: URL with hd available; checks id, title, thumbnail, duration, and mp4 format.
+  - Second test: URL that should match but is used for testing URL matching only (only_matching).
+
+Static utility
+- _extract_urls(webpage): static method that scans a webpage for iframes whose src points to YapFiles’ get_player URL and extracts the embedded URL, unescaping HTML entities.
+
+Main extraction flow (_real_extract)
+- video_id = self._match_id(url): extract the video id from the URL using _VALID_URL pattern.
+- webpage = self._download_webpage(url, video_id, fatal=False): fetch the page; may be missing.
+- Attempt to derive player_url from the page by locating a JavaScript snippet: player.init("URL"). Uses a regex to capture the embedded URL if present.
+- If no embedded player URL found, fall back to API: http://api.yapfiles.ru/load/{video_id}/ with query:
+  - md5: ded5f369be61b8ae5f88e2eeb2f3caff
+  - type: json
+  - ref: original url
+- Download the JSON from player_url and read the 'player' object.
+  - playlist_url = player['playlist']
+  - title = player['title']
+  - thumbnail = player.get('poster')
+- If the video is removed (title == 'Ролик удален' or thumbnail contains 'deleted.jpg'), raise ExtractorError (video removed).
+
+Playlist and formats
+- Download playlist JSON from playlist_url and read player['main'] to access formats.
+- hd_height = int_or_none(player.get('hd')): possible height value for HD.
+- Supported qualities: ('sd', 'hd').
+- quality_key = qualities(('sd','hd')): helper to assign numeric quality for sorting.
+- Build formats by iterating format_id in ('sd','hd'):
+  - For each, determine format_url = url_or_none(playlist.get('file_hd' if hd else 'file_sd')).
+  - If a format URL exists, append a dict with:
+    - 'url': format_url
+    - 'format_id': format_id
+    - 'quality': quality_key(format_id)
+    - 'height': hd_height if format_id == 'hd' else None
+- self._sort_formats(formats): order formats by quality/height.
+
+Returned info
+- id: video_id
+- title: title
+- thumbnail: thumbnail
+- duration: int_or_none(player.get('length'))
+- formats: list of prepared formats
+
+Important implementation details
+- Uses _download_webpage, _download_json, and _search_regex from InfoExtractor to fetch and parse content.
+- Robust for missing explicit player URL in the page (fallback to API endpoint).
+- Validates removal state to raise a user-friendly ExtractorError when appropriate.
+- Extracts alternative iframe URLs via _extract_urls for potential secondary sources.
+- hd support is optional; formats without hd are included as sd if available.
+- Duration is parsed via int_or_none to gracefully handle missing or non-integer values.
+
+Overall, the extractor handles:
+- locating the YapFiles player URL from the page or via API
+- retrieving the video metadata and a playlist of available formats
+- constructing a clean list of formats with proper metadata for youtube-dl's sorting and selection
+- returning a structured info dict suitable for downstream processing.

@@ -1,0 +1,52 @@
+- Purpose: A YouTube-DL extractor for n-tv.de mediathek videos. It parses article metadata and builds video formats from multiple sources (RTMP/Flash, MP4, and HLS).
+
+- Key class:
+  - NTVDeIE(InfoExtractor)
+    - IE_NAME: 'n-tv.de'
+    - _VALID_URL: Matches NTV article video pages and captures the article id from URLs like ...-article<id>.html
+    - _TESTS: Example test with expected id, title, description, alt_title, duration, timestamp, thumbnail, and MP4 format details.
+
+- Main functionality (_real_extract):
+  - video_id = _match_id(url): extracts the article id from the URL.
+  - webpage = _download_webpage(url, video_id): fetches the page content.
+  - info = _parse_json(_search_regex(r'(?s)ntv\.pageInfo\.article\s*=\s*(\{.*?\});', ...), ..., transform_source=js_to_json):
+    - Extracts article metadata as JSON and converts it to Python data.
+  - timestamp = int_or_none(info.get('publishedDateAsUnixTimeStamp')): publication time.
+  - vdata = _parse_json(_search_regex(r'(?s)\$\(\s*"\#player"\s*\)\s*\.data\(\s*"player",\s*(\{.*?\})\);', ...), ..., transform_source=lambda s: js_to_json(re.sub(r'advertising:\s*{[^}]+},', '', s))):
+    - Extracts player-specific data (URLs for different formats). The transform_source step strips out an advertising block before JSON conversion.
+  - duration = parse_duration(vdata.get('duration')): duration in seconds (from nested vdata).
+
+- Formats construction:
+  - If vdata['video'] exists: add RTMP/Flash format with id 'flash' and URL rtmp://fms.n-tv.de/<video>
+  - If vdata['videoMp4'] exists: add HTTP MP4 format with id 'mobile', URL resolved against http://video.n-tv.de, and an estimated bitrate tbr=400
+  - If vdata['videoM3u8'] exists: add HLS formats by constructing the full URL against http://video.n-tv.de and extending formats via _extract_m3u8_formats with:
+    - ext='mp4', entry_protocol='m3u8_native', preference not explicitly set (default), m3u8_id='hls', fatal=False
+  - self._sort_formats(formats): sorts formats by quality/preference
+
+- Returned info dictionary:
+  - id: video_id
+  - title: info['headline']
+  - description: info.get('intro')
+  - alt_title: info.get('kicker')
+  - timestamp: timestamp
+  - thumbnail: vdata.get('html5VideoPoster')
+  - duration: duration
+  - formats: list of constructed formats
+
+- Implementation details:
+  - Uses multiple data sources on the page: article metadata (ntv.pageInfo.article) and a player data block ($("#player").data("player", {...})).
+  - Converts embedded JavaScript objects to JSON with js_to_json for robust parsing.
+  - Cleans the player JSON by removing advertising: {...} blocks before parsing.
+  - Builds formats with fallbacks and tolerates missing sources (fatal=False for m3u8 extraction).
+  - Uses compat_urlparse.urljoin to ensure absolute URLs for MP4 and HLS sources.
+
+- Example outcome (as per _TESTS):
+  - id: '14438086'
+  - ext: 'mp4' (derived from the MP4/hls content)
+  - thumbnail matches a jpg URL pattern
+  - title: 'Schnee und Glätte führen zu zahlreichen Unfällen und Staus'
+  - alt_title: 'Winterchaos auf deutschen Straßen'
+  - description: long intro text
+  - duration: 4020 seconds
+  - timestamp: 1422892797
+  - upload_date (derived by test from timestamp, ~2015-02-02)

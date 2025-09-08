@@ -1,0 +1,37 @@
+Concise but comprehensive summary of ./youtube-dl/devscripts/make_issue_template.py
+
+Overview
+- A small command-line utility that generates an issue template by injecting the current version into a template file.
+
+Main functionality
+- Reads a template file (infile), substitutes a version placeholder with the actual version string, and writes the result to an output file (outfile).
+
+Key components
+- main(): Entry point for the script. Uses optparse to parse two positional arguments: INFILE and OUTFILE.
+- Template processing: Reads the template content from infile and performs a single old-style Python string formatting operation:
+  - out = issue_template_tmpl % {'version': read_version()}
+  - read_version() is imported from utils and supplies the version string.
+- Output: Writes the resulting string to outfile using write_file from utils.
+
+Implementation details
+- Argument handling:
+  - Expects exactly two arguments; otherwise, prints an error via parser.error('Expected an input and an output filename').
+- I/O helpers:
+  - read_file(infile): loads the template content as a string.
+  - read_version(): obtains the current version string to substitute.
+  - write_file(outfile, out): writes the processed content to the target file.
+- Template mechanism:
+  - Uses Python’s old-style string formatting (% operator) with a dict containing {'version': ...} to replace a version placeholder in the template.
+- Compatibility and style:
+  - Shebang: #!/usr/bin/env python
+  - from __future__ import unicode_literals to ensure Unicode literals by default (historical Py2/3 compatibility).
+- Execution:
+  - Runs as a script when invoked directly: if __name__ == '__main__': main()
+
+Usage
+- Command: python make_issue_template.py INFILE OUTFILE
+- INFILE: Path to the template file containing a placeholder for {version} (used via % formatting).
+- OUTFILE: Path where the populated issue template should be written.
+
+Dependencies
+- Relies on utilities in the utils module: read_file, read_version, write_file.

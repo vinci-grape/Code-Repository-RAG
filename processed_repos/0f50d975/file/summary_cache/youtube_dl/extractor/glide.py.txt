@@ -1,0 +1,41 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/glide.py
+
+- Purpose
+  - Implements an information extractor (GlideIE) for Glide mobile video messages (share.glide.me URLs) to obtain video metadata and the direct video URL.
+
+- Key components
+  - GlideIE: A subclass of InfoExtractor.
+  - Constants:
+    - IE_DESC: Description indicating Glide mobile video messages.
+    - _VALID_URL: Regular expression matching Glide share URLs, capturing the video id.
+    - _TEST: Test case with a sample Glide URL, expected MD5 of the video, and expected info_dict (id, ext, title, thumbnail).
+  - _real_extract(url): Core extraction logic
+    - video_id = _match_id(url): Extracts the ID from the URL using _VALID_URL.
+    - webpage = _download_webpage(url, video_id): Downloads the page content.
+    - title:
+      - Tries to extract from the HTML <title> tag via _html_search_regex.
+      - If not found, falls back to OpenGraph title via _og_search_title.
+    - video_url:
+      - Attempts to find a <source> tag with a src attribute using _search_regex, capturing the URL as group 'url'.
+      - Converts protocol-relative URLs to absolute with _proto_relative_url.
+      - If not found, falls back to the OpenGraph video URL via _og_search_video_url.
+    - thumbnail:
+      - Attempts to find an <img> tag with id="video-thumbnail" and a src attribute using _search_regex, capturing the URL as group 'url'.
+      - Converts protocol-relative URLs to absolute with _proto_relative_url.
+      - If not found, falls back to the OpenGraph thumbnail via _og_search_thumbnail.
+    - Returns a dictionary with:
+      - 'id': video_id
+      - 'title': title
+      - 'url': video_url
+      - 'thumbnail': thumbnail
+
+- Important implementation details
+  - Uses targeted regular expressions to locate the video source and thumbnail in the Glide page:
+    - Video source via a <source> tag: <source ... src="...">
+    - Thumbnail via an <img> tag with id="video-thumbnail" and a src attribute
+  - Provides robust fallbacks:
+    - If local HTML parsing fails to yield title/video URL/thumbnail, it uses OpenGraph metadata as a fallback.
+  - _proto_relative_url usage ensures compatibility with protocol-relative URLs (e.g., //example.com/video.mp4).
+  - Returns data suitable for youtube-dl’s downstream processing; the extension is inferred from the video URL (as reflected in the _TEST's ext: mp4).
+
+In short, GlideIE extracts the Glide video ID, title, direct video URL, and thumbnail from a Glide share page, with sensible fallbacks to OpenGraph metadata.

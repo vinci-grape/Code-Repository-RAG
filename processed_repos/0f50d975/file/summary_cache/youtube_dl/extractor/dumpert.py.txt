@@ -1,0 +1,61 @@
+Here’s a concise yet comprehensive summary of the code in youtube-dl/youtube_dl/extractor/dumpert.py.
+
+Overview
+- Implements a dedicated extractor for Dumpert (dumpert.nl) videos by extending InfoExtractor.
+- Fetches video metadata from Dumpert’s mobile API and constructs downloadable formats, thumbnails, and metadata for youtube-dl.
+
+Key class and methods
+- DumpertIE (InfoExtractor)
+  - _VALID_URL: Regular expression that matches Dumpert URLs for item, embed, and mediabase pages, capturing a video id of the form digits + separator (+ alphanumeric tail). It supports http/https and optional www or legacy subdomains.
+  - _TESTS: Includes test cases for direct item URL (with expected metadata and md5), and several embedded/legacy URLs (marked only_matching for URL pattern testing).
+  - _real_extract(url):
+    - Extracts video_id from the URL and converts underscores to slashes to obtain a path-like identifier (e.g., "6646981_951bc60f" -> "6646981/951bc60f").
+    - Calls Dumpert’s API: http://api-live.dumpert.nl/mobile_api/json/info/{video_id_with_underscores}
+      - The API response is expected to contain an items list; the first item is used.
+    - Extracts:
+      - title from item['title']
+      - media entry where mediatype == 'VIDEO'
+      - stills/thumbnails from item['stills']
+      - stats (likes, views) from item['stats']
+      - duration from media['duration']
+    - Formats construction:
+      - Defines quality tiers: ['flv', 'mobile', 'tablet', '720p'] via qualities(...)
+      - Iterates over media['variants'] to collect available video formats:
+        - Each variant provides a 'uri' and a 'version'
+        - Adds a format with fields: url (uri), format_id (version), quality (quality(version))
+      - Sorts formats with self._sort_formats(...)
+    - Thumbnails construction:
+      - Uses item.get('stills') and builds a list of thumbnail entries for keys 'thumb' and 'still' with suffixes '', '-medium', '-large' if present.
+    - Returns a dict containing:
+      - id: video_id
+      - title
+      - description (item.get('description'))
+      - thumbnails
+      - formats
+      - duration (int via int_or_none(media.get('duration')))
+      - like_count (int via int_or_none(stats.get('kudos_total')))
+      - view_count (int via int_or_none(stats.get('views_total')))
+
+Important implementation details
+- URL parsing and id handling:
+  - Uses _match_id to extract id, then converts '_' to '/' to form a path-like video_id used for API calls.
+  - Reconstructs the API path by replacing '/' with '_' for the query parameter.
+- Data source:
+  - Primary data source is Dumpert’s mobile API: http://api-live.dumpert.nl/mobile_api/json/info/{video_id}
+  - Expects item['media'] to contain a VIDEO mediatype and a list of variants with downloadable URIs.
+- Formats:
+  - Formats are derived from media['variants'], with each variant providing a version (used as format_id) and a URI.
+  - Quality ordering helps youtube-dl pick higher-quality streams when multiple formats exist.
+- Thumbnails:
+  - Builds a list of thumbnails from item['stills'], accommodating multiple sizes via keys like 'thumb', 'still' and suffix variants ('', '-medium', '-large').
+- Robustness:
+  - Uses int_or_none for numeric fields (duration, like_count, view_count) to gracefully handle missing or non-integer values.
+  - Skips variants without URI.
+  - If no VIDEO mediatype or expected fields are missing, the code may raise exceptions (e.g., next(...) assumes a matching VIDEO entry exists).
+
+Return value format
+- A dictionary compatible with youtube-dl’s standard video info, including:
+  - id, title, description, thumbnails, formats, duration, like_count, view_count
+
+In short
+- This extractor targets Dumpert video pages, fetches detailed video info from the mobile API, builds a list of available video formats with quality hints, gathers thumbnails, and returns a structured metadata dictionary suitable for downloading via youtube-dl.

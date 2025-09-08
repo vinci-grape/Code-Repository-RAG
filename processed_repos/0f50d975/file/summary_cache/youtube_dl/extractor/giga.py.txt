@@ -1,0 +1,58 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/giga.py
+
+Purpose:
+- Implement a YouTube-DL extractor for videos hosted on giga.de. It parses a video page, discovers a video_id, fetches a playlist of video formats from giga.de API, and returns a structured info dict with metadata and formats.
+
+Main components:
+- Class GigaIE(InfoExtractor)
+  - _VALID_URL: Regex that matches giga.de video URLs and captures a slug as id/display_id.
+  - _TESTS: Test cases to validate extraction, including a real video page and some “only_matching” examples for other giga.de pages.
+
+Key methods and workflow:
+- _real_extract(self, url)
+  - display_id = self._match_id(url): derives the slug for display_id from the URL using _VALID_URL.
+  - webpage = self._download_webpage(url, display_id): downloads HTML content of the page.
+  - video_id extraction:
+    - Tries two patterns via _search_regex:
+      - data-video-id="(\d+)"
+      - /api/video/jwplayer/#v=(\d+)
+    - The video_id is used to locate the actual video data.
+  - Fetch playlist/format data:
+    - playlist = self._download_json('http://www.giga.de/api/syndication/video/video_id/{video_id}/playlist.json?...', video_id)[0]
+      - This calls the giga.de API to obtain a JSON playlist and selects the first item ([0]).
+    - Formats extraction:
+      - quality = qualities(['normal', 'hd720'])
+      - Iterates format_id from 0 upwards (format indices) and builds a list of formats from playlist[format_id] entries.
+      - For each format:
+        - url: fmt['src']
+        - format_id: '{quality}-{type_suffix}' where type_suffix is fmt['type'].split('/')[-1] (e.g., 'mp4')
+        - quality: numeric value from quality(fmt['quality'])
+      - Stops when a format_id is not found.
+      - self._sort_formats(formats) to order formats by quality/preference.
+
+Metadata extraction:
+- title: self._html_search_meta('title', webpage, 'title', fatal=True)
+- description: self._html_search_meta('description', webpage, 'description')
+- thumbnail: self._og_search_thumbnail(webpage)
+- duration: parsed from a complex regex that locates the duration text within the page and uses parse_duration(...)
+- timestamp: parsed from a datetime attribute via parse_iso8601(...)
+- uploader: extracted from a pattern like class="author">Name</a> (optional)
+- view_count: extracted from a span with class "views" and converted to int using str_to_int(…)
+
+Return value:
+- A dict containing:
+  - id: video_id
+  - display_id: display_id (slug from URL)
+  - title, description, thumbnail
+  - duration, timestamp, uploader, view_count
+  - formats: list of available video formats with url, format_id, and quality
+
+Implementation details and notable aspects:
+- Uses standard youtube-dl helper methods: _download_webpage, _download_json, _search_regex, _html_search_meta, _og_search_thumbnail, parse_duration, parse_iso8601, str_to_int, qualities, and compat_str.
+- The playlist.json endpoint is specific to giga.de and includes a content parameter with a fixed syndication key, which is used to fetch the available formats.
+- Formats are discovered dynamically by indexing starting at 0 in the JSON playlist, allowing any number of available formats.
+- format_id combines the human-readable quality label and the file type (from MIME type), e.g., “normal-mp4”.
+- The extractor tolerates missing optional metadata fields (fatal=False) to continue extraction even if some pieces aren’t present.
+- The _TESTS include a real video example (with expected metadata like id, title, duration, timestamp, uploader, etc.) and several other giga.de pages marked as only_matching to ensure URL matching works without requiring actual video data.
+
+Overall, this extractor retrieves a giga.de video’s id from the page, fetches a playlist of available formats from giga.de’s API, converts that into youtube-dl-compatible format entries, and gathers comprehensive metadata about the video.

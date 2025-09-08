@@ -1,0 +1,62 @@
+- Purpose
+  - A YouTube-dl extractor for XVideos that parses video pages and builds available video formats and metadata.
+
+- Class and inheritance
+  - XVideosIE(InfoExtractor)
+
+- URL matching (_VALID_URL)
+  - Supports multiple XVideos entry points, including:
+    - xvideos2.com/video<id> (and variants)
+    - xvideos.es/video<id>
+    - flashservice.xvideos.com/embedframe/<id>
+    - static-hw.xvideos.com/swf/xv-player.swf?... id_video=<id>
+  - Captures the video id as the group named "id".
+
+- Tests (_TESTS)
+  - Includes a real page test for video4588838 with expected id, ext, title, duration, age_limit.
+  - Includes several only_matching tests for alternate XVideos URLs (embed/frame, SWF, various country subdomains).
+
+- Main extraction flow (_real_extract)
+  - Extract video_id via _match_id(url).
+  - Download main page using https://www.xvideos.com/video<id>/0.
+  - Inline error handling:
+    - If an <h1 class="inlineError"> exists, raise ExtractorError with the error text.
+  - Title extraction:
+    - Try patterns in <title> and setVideoTitle(...) first.
+    - If not found, fall back to Open Graph title via _og_search_title.
+  - Thumbnails:
+    - Collect from two potential thumbnail sources: setThumbUrl("", ...) and setThumbUrl("169", ...).
+    - Build a list of dicts with 'url' and 'preference' (0 for '', 1 for '169').
+  - Duration:
+    - First try og:duration via _og_search_property('duration').
+    - If not available, try a regex for a span with class "duration" and parse with parse_duration.
+  - Formats:
+    - Initialize empty formats list.
+    - Direct FLV URL:
+      - Extract flv_url parameter from page, unquote it, add as a format with format_id 'flv'.
+    - Other formats from setVideoX(...) blocks:
+      - Find all occurrences of setVideo(<name>)((" or ') (http...?) \2).
+      - Normalize format_id = lowercased <name>.
+      - If format is 'hls':
+        - Extend formats with HLS entries via _extract_m3u8_formats using m3u8_native, id 'hls', fatal=False.
+      - If format_id is 'urllow' or 'urlhigh':
+        - Add a simple URL format with:
+          - 'url': format_url
+          - 'format_id': <extension or 'mp4'>-low/high (determined via determine_ext)
+          - 'quality': -2 for low variants
+  - Sort formats with _sort_formats.
+  - Return a result dict containing:
+    - 'id': video_id
+    - 'formats': formats
+    - 'title': title
+    - 'duration': duration
+    - 'thumbnails': thumbnails
+    - 'age_limit': 18
+
+- Important implementation details
+  - Uses compat_urllib_parse_unquote to decode the flv URL.
+  - Robust title extraction with fallback to og:title.
+  - Graceful error handling for XVideos inline errors.
+  - Supports multiple download formats, including direct FLV, HLS (via m3u8), and URL-based low/high variants.
+  - Metadata fields: id, title, duration, thumbnails, age_limit.
+  - Video page URL used for extraction: https://www.xvideos.com/video<id>/0.

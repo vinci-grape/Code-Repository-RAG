@@ -1,0 +1,52 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/unistra.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (UnistraIE) for video content on the University of Strasbourg UTV site (utv.unistra.fr).
+
+- Key class
+  - UnistraIE(InfoExtractor): Subclasses the generic InfoExtractor to provide site-specific logic.
+
+- URL matching
+  - _VALID_URL = r'https?://utv\.unistra\.fr/(?:index|video)\.php\?id_video\=(?P<id>\d+)'
+  - Extracts video_id from URLs like http://utv.unistra.fr/video.php?id_video=123 or index.php?id_video=123.
+
+- Tests
+  - _TESTS includes two sample URLs with expected metadata:
+    - id, ext (mp4), title, and description (provided as md5 placeholder).
+  - Used by the test suite to verify extraction logic.
+
+- Main extraction flow (_real_extract)
+  - Parse video_id from the URL using _VALID_URL.
+  - Download the page: self._download_webpage(url, video_id).
+  - Find available video files on the page with regex: re.findall(r'file\s*:\s*"(/[^"]+)"', webpage).
+    - Collects unique file paths using a set.
+  - Prepare formats:
+    - quality ranking: qualities(['SD', 'HD']).
+    - For each file_path:
+      - Determine format_id: 'HD' if file_path ends with '-HD.mp4', else 'SD'.
+      - Build full URL: 'http://vod-flash.u-strasbg.fr:8080' + file_path.
+      - Create format dict with:
+        - 'url': full URL
+        - 'format_id': 'SD' or 'HD'
+        - 'quality': quality(format_id)
+  - Sort formats using self._sort_formats(formats).
+
+- Metadata extraction
+  - title: _html_search_regex(r'<title>UTV - (.*?)</', webpage, 'title')
+  - description: _html_search_regex(r'<meta name="Description" content="(.*?)"', webpage, 'description', flags=re.DOTALL)
+  - thumbnail: _search_regex(r'image: "(.*?)"', webpage, 'thumbnail')
+
+- Return value
+  - A dict with:
+    - 'id': video_id
+    - 'title': title
+    - 'description': description
+    - 'thumbnail': thumbnail
+    - 'formats': formats
+
+- Implementation details and notes
+  - Uses the standard InfoExtractor utility methods for downloading pages and extracting data.
+  - Builds actual video URLs from relative file paths found in the page, prefixing with http://vod-flash.u-strasbg.fr:8080.
+  - Supports two quality levels (SD and HD) inferred from file naming convention (HD indicated by suffix -HD.mp4).
+  - Deduplicates file entries via a set before formatting.
+  - Robustness relies on regexes to locate title, description, and thumbnail; may depend on page structure remaining stable.

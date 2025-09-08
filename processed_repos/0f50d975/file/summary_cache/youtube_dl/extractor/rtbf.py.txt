@@ -1,0 +1,74 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/rtbf.py
+
+What it does
+- Implements RTBF video extractor (RTBFIE) for youtube-dl.
+- Given an RTBF video URL, it fetches an embed page, reads a JSON payload from a data-media attribute, and builds a list of available video/audio formats, plus optional subtitles and metadata.
+- Supports on-demand and live content, geo-restricted handling, and external providers (YouTube, Dailymotion, Vimeo) via direct URL delegation when indicated by the payload.
+- Returns a dictionary with id, formats, title, description, thumbnail, duration, timestamp, series, subtitles, and is_live.
+
+Key components
+- Class RTBFIE(InfoExtractor)
+  - _VALID_URL: Regex to match RTBF URLs for video, ouftivi, and auvio with an id parameter and optional live flag.
+  - _TESTS: Examples used for testing, including geo-restricted and live/audio cases.
+  - _IMAGE_HOST: Image host constant (not directly used in extraction logic here).
+  - _PROVIDERS: Mapping of external providers to internal display names (Youtube, Dailymotion, Vimeo).
+  - _QUALITIES: Order and labeling for non-HLS sources: mobile/SD, web/MD, high/HD.
+  - _real_extract(self, url): Core extraction routine.
+
+How formats are extracted
+- Determine live vs. non-live from URL groups; fetch embed page at:
+  https://www.rtbf.be/auvio/embed/direct (live) or .../embed/media (non-live)
+  with the video id as a query parameter.
+- Parse the embedded JSON data from the attribute data-media using _parse_json.
+- Error handling: If data contains an error message, raise ExtractorError.
+- Provider redirection: If data['provider'] is in _PROVIDERS, return a direct URL result using the external provider (no further processing).
+- Metadata:
+  - title = data['title']; if isLive, title is adjusted via _live_title.
+  - description, thumbnail, realDuration, liveFrom, programLabel, tracks, etc. are read from the payload.
+
+Format construction details
+- HLS formats:
+  - m3u8_url = data.get('urlHlsAes128') or data.get('urlHls')
+  - If present, append formats via _extract_m3u8_formats(m3u8_url, media_id, 'mp4', m3u8_id='hls', fatal=False)
+- HTTP (non-HLS) variants derived from HLS or separate http URLs:
+  - A helper fix_url adjusts domains for geo/drm cases: replace //rtbf-vod. with //rtbf. when '/geo/drm/' is in the URL.
+  - If there are already formats from HLS and there is an http_url (data['url']) that matches a height pattern (r'-(\d+)p\.'):
+    - For each HLS format that has a height, create a corresponding HTTP format by:
+      - Copying the HLS format, removing the 'protocol' key
+      - Changing format_id from something like 'hls-...' to 'http-...'
+      - Replacing the height suffix in the http_url with the specific height (e.g., -720p.)
+  - If no HLS-derived combination is applicable, fall back to data['sources'] which contains quality-based URLs keyed by mobile/web/high:
+    - For each (format_id, key) in _QUALITIES, if a URL exists, extract height from the URL using the height regex and append a format with the URL (passed through fix_url) and height.
+- DASH (MPD) formats:
+  - mpd_url = data.get('urlDash')
+  - If not DRM-protected (not data.get('drm')) and mpd_url exists, add formats via _extract_mpd_formats(mpd_url, media_id, mpd_id='dash', fatal=False)
+- Audio-only format:
+  - If data.get('urlAudio') exists, add a format with format_id 'audio', the URL, and vcodec set to 'none' (audio-only stream).
+- Finalization:
+  - _sort_formats(formats) to order by highest quality and preference.
+
+Subtitles
+- Subtitles are built from data.get('tracks') (if present) and are keyed by language (default 'fr' if language missing).
+- Each subtitle entry uses the track's URL.
+
+Return payload
+- id: media_id
+- formats: list of prepared formats
+- title: possibly modified live title
+- description: stripped description
+- thumbnail: data.get('thumbnail')
+- duration: float from data.get('realDuration')
+- timestamp: int from data.get('liveFrom')
+- series: data.get('programLabel')
+- subtitles: subtitles dict
+- is_live: is_live flag determined earlier
+
+Important implementation details
+- Data source: The extractor relies on a JSON payload embedded in the RTBF embed page (data-media attribute) rather than parsing the video page directly.
+- Geo and DRM handling: It includes a domain-fix for non-geo paths and conditional handling for DRM-protected paths, with fallbacks to multiple formats.
+- External providers: If the payload specifies a known provider, the extractor defers to that provider’s player via url_result.
+- Height extraction: Uses a height pattern -(\d+)p. in URLs to infer video resolutions and to generate HTTP variants from HLS data.
+- Format prioritization: Combines HLS, HTTP variants, direct sources, and MPD/DASH formats, then sorts for final selection.
+- Robustness: Supports live, on-demand, audio-only, and subtitle tracks, with defaults and fallbacks to ensure usable output even when some fields are missing.
+
+Overall, RTBFIE is a multi-source, format-robust extractor that adapts RTBF’s embed data to produce a comprehensive set of playable formats and metadata for both live and VOD content, including support for external providers and subtitles.

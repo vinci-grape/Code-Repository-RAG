@@ -1,0 +1,71 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/fc2.py
+
+- Purpose
+  - Implement two extractors for FC2 video content: FC2IE for regular FC2 videos and FC2EmbedIE for embedding URLs via flv2.swf.
+
+- Key classes
+  - FC2IE (InfoExtractor)
+    - _VALID_URL
+      - Matches FC2 content pages and the fc2: URL scheme. Captures video id as 'id'.
+    - _NETRC_MACHINE
+      - 'fc2' for netrc-based login when credentials are provided.
+    - _login(self)
+      - Logs in to FC2 using user-provided credentials.
+      - Sends login form to https://secure.id.fc2.com/index.php?mode=login&switch_language=en with fields: email, password, done, Submit.
+      - Checks for redirect confirmation ('mode=redirect&login=done'); on failure warns and returns False.
+      - Performs a login redirect by requesting http://id.fc2.com/?mode=redirect&login=done.
+      - Clears/refreshes session by returning True after successful login.
+    - _real_extract(self, url)
+      - Extracts video_id from URL using _match_id.
+      - Performs login (via _login). If URL is not a fc2: URL, downloads page content and then clears session cookies and logs in again to ensure authenticated access.
+      - Derives title and thumbnail:
+        - Default title: "FC2 video {video_id}"
+        - If a page was downloaded, try to read OpenGraph title and thumbnail.
+      - Builds referer URL:
+        - If URL contains '/a/content/', use it as reference; otherwise replace '/content/' with '/a/content/'.
+      - Computes mimi token:
+        - MD5(video_id + '_gGddgPfeaf_gzyr')
+      - Constructs info_url for metadata:
+        - http://video.fc2.com/ginfo.php?mimi={mimi}&href={refer encoded}&v={video_id}&fversion=WIN%2011%2C6%2C602%2C180&from=2&otag=0&upid={video_id}&tk=null&
+        - href parameter is referer URL, URL-quoted (safe='') and with '.' encoded as %2E.
+      - Downloads and parses the info page (a query-string format) into info.
+      - If 'err_code' present, logs a warning but continues.
+      - Requires 'filepath' in info; otherwise raises ExtractorError suggesting login is needed.
+      - Builds final video URL: info['filepath'][0] + '?mid=' + info['mid'][0]
+      - If a 'title' is present in info, use it to override the previous title.
+      - Returns dict with:
+        - id: video_id
+        - title: resolved title
+        - url: video_url
+        - ext: 'flv'
+        - thumbnail: (open graph thumbnail if found)
+  - FC2EmbedIE (InfoExtractor)
+    - _VALID_URL
+      - Matches embedded FC2 SWF URLs: https://video.fc2.com/flv2.swf?{query}
+    - IE_NAME
+      - 'fc2:embed'
+    - _real_extract(self, url)
+      - Parses query string from the SWF URL with compat_parse_qs.
+      - video_id is taken from the last element of the 'i' parameter.
+      - title is from 'tl' parameter or defaults to 'FC2 video {video_id}'.
+      - Optionally constructs a thumbnail if 'sj' parameter is present:
+        - Thumbnail URL: http://video{sj}-thumbnail.fc2.com/up/pic/{path}.jpg
+        - Path is built from segments of the video_id: first 6 chars, next 2, last 2, last 2, and a concatenation of all pieces.
+      - Returns a transparent wrapper:
+        - _type: 'url_transparent'
+        - ie_key: FC2IE (delegate to FC2IE for actual extraction)
+        - url: fc2:{video_id}
+        - title: extracted title
+        - thumbnail: derived thumbnail (if any)
+
+- Important implementation details
+  - Login flow uses two steps: initial login to secure.id.fc2.com and a login redirect to id.fc2.com to ensure an authenticated session.
+  - After attempting to fetch the content page, the code clears session cookies and re-logs in to ensure fresh authentication for the subsequent info fetch.
+  - The info page (ginfo.php) is fetched with a constructed, encoded href referer and a mimi token derived from video_id, which is required by FC2 to authorize metadata access.
+  - The code gracefully handles certain error codes in the info response (warns but continues) but requires 'filepath' to proceed with video URL extraction.
+  - FC2EmbedIE uses url_transparent to hand off extraction to FC2IE, enabling reuse of the main logic for the actual video retrieval.
+  - Tests cover both publicly accessible FC2 content, login-required content (with provided credentials), and an embed URL path.
+
+- Output
+  - For FC2IE: dict with id, title, url, ext='flv', and optional thumbnail.
+  - For FC2EmbedIE: a transparent wrapper pointing to fc2:{video_id}, with title and optional thumbnail; actual extraction is delegated to FC2IE.

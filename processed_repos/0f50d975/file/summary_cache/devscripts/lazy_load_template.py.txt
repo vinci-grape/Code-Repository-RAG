@@ -1,0 +1,25 @@
+Concise summary of the file:
+
+- Purpose
+  - Implement a lazy-loading wrapper for extractor classes (as used in youtube-dl) so heavy modules are not imported until the extractor is actually instantiated.
+
+- Main class
+  - LazyLoadExtractor
+    - _module: class attribute (default None) that should be overridden in subclasses to specify the import path of the real extractor module.
+    - ie_key(cls): classmethod that returns the extractor key by stripping the last two characters from the class name (e.g., SomethingIE -> "Something"). This mirrors how youtube-dl derives keys from extractor class names.
+    - __new__(cls, *args, **kwargs): overridden to perform lazy loading.
+      - Dynamically imports the module specified by cls._module using __import__(..., fromlist=(cls.__name__,)).
+      - Retrieves the real class from that module with the same name as the wrapper class via getattr(mod, cls.__name__).
+      - Creates an instance of the real class by calling real_cls.__new__(real_cls) and then initializes it with real_cls.__init__(*args, **kwargs).
+      - Returns the real instance, so the object you get is actually an instance of the real extractor, not the wrapper.
+
+- Implementation details
+  - Dynamic import approach: uses __import__ with fromlist to ensure the module object is obtained and the class can be looked up with getattr.
+  - The wrapper’s __new__ effectively bypasses Python’s normal instantiation path to instantiate the actual class transparently to the caller.
+  - Subclasses must set _module to the correct module path where the real extractor class resides.
+  - The re import at the top is unused in this snippet (likely leftover or intended for future use).
+
+- Behavior caveats
+  - If _module is not set or incorrect, instantiation will raise ImportError or AttributeError.
+  - The returned object is an instance of the real extractor class; isinstance checks will reflect the real class.
+  - This lazy-loading mechanism defers importing heavy extractor modules until instantiation time.

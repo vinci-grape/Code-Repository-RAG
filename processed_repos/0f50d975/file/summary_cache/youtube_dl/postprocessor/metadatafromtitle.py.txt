@@ -1,0 +1,37 @@
+Concise summary:
+
+Purpose
+- A Youtube-DL postprocessor that extracts metadata fields from a video title using a user-supplied title format string (e.g., "%(title)s - %(artist)s").
+
+Key class
+- MetadataFromTitlePP(PostProcessor)
+  - __init__(downloader, titleformat)
+    - Stores the title format.
+    - Builds a regular expression to parse titles:
+      - If the format contains placeholders like %(name)s, it is converted to a regex via format_to_regex.
+      - Otherwise, the provided titleformat is treated as the regex itself.
+  - format_to_regex(fmt)
+    - Converts a format string with %(name)s tokens into a regex with named capture groups (?P<name>.+).
+    - Escapes all literal parts of the format and replaces each token with a corresponding named group.
+    - Handles trailing literal parts after the last token.
+  - run(info)
+    - Reads info['title'] and attempts to match it against the prepared regex.
+    - If no match, logs a failure message and returns ([], info).
+    - If a match, iterates over captured groups and for each non-None value:
+      - Adds/overwrites info[attribute] = value.
+      - Logs the parsed attribute and value.
+    - Returns ([], info) with the new metadata injected into the info dictionary.
+
+Implementation details
+- Inherits from PostProcessor and uses the downloader's to_screen for logging.
+- Uses re.finditer to locate placeholders in the format string and builds the regex by escaping non-placeholder parts and inserting named groups (?P<name>.+).
+- The run method only updates info for non-None captured values.
+- Unicode support is ensured via from __future__ import unicode_literals.
+- Relies on Python’s re.match (anchored at start) and the constructed regex to align with the title format.
+
+Usage notes
+- Typical title format: "%(title)s - %(artist)s", which will populate info['title'] and info['artist'] from the video title.
+- If the title doesn’t match the format, the postprocessor logs a message and leaves info unchanged besides the failure notice.
+
+Output behavior
+- Returns ([], info) after processing, allowing continuation with other postprocessors and updated metadata in the info dict.

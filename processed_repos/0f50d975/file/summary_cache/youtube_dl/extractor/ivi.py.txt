@@ -1,0 +1,89 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/ivi.py
+
+Overview
+- Provides two extractors for ivi.ru:
+  - IviIE: extracts individual videos from ivi.ru
+  - IviCompilationIE: extracts compilations/playlists and their seasons/episodes
+- Handles geo-restriction (Russia), DRM/light API access, and building video formats from ivi’s JSON data.
+- Includes tests demonstrating typical outcomes and edge cases.
+
+Key classes and main functionality
+- IviIE (Video extractor)
+  - Metadata
+    - IE_DESC: 'ivi.ru'
+    - IE_NAME: 'ivi'
+    - _VALID_URL: matches ivi.ru/watch/<id> or ivi.ru/video/player?videoId=<id>
+    - _GEO_COUNTRIES: ['RU']
+    - _KNOWN_FORMATS: list of supported formats ordered by quality
+  - Access mechanism
+    - Builds a JSON-RPC like payload for method 'da.content.get' with the video id and site/referrer details.
+    - Uses a light API endpoint (https://api.ivi.ru/light/) to fetch video data.
+    - Tries two site identifiers (353 and 183) to obtain video data:
+      - For site 353 (the preferred path): attempts to obtain a timestamp via 'da.timestamp.get', then signs the request using Blowfish + CMAC from pycryptodomex with a fixed key (_LIGHT_KEY). Requires PyCryptodomex to compute the CMAC signature.
+      - If running in a bundled executable, some paths raise a helpful ExtractorError explaining limitations.
+      - If pycryptodomex is unavailable, raises a helpful error instructing to install it.
+      - If the API returns an error, handles several error origins (geo restriction, non-existent data, etc.) and may retry with the other site or raise a descriptive error.
+      - For site 183 (fallback): sends the request without the signature.
+  - Data processing
+    - On success, processes video_json['result']:
+      - title, duration, compilation flag, preview thumbnails, and available files.
+      - Builds formats list from result['files'], skipping entries with missing URLs or DRM/FPS content formats (filters out DRM/FPS via content_format checks).
+      - Each format includes: url, format_id (content_format), quality (via qualities function and _KNOWN_FORMATS), and filesize (from size_in_bytes when available).
+      - Sorts formats with _sort_formats.
+      - If compilation is present, uses compilation as the series/collection; episode logic adjusted accordingly; title becomes "compilation - title" if applicable.
+      - Thumbnails built from result['preview'].
+      - Additional metadata: description (OG or meta tag), duration, and a variety of identifiers (id, title, series, season/episode data).
+      - Attempts to enrich season/episode metadata by parsing the HTML page (webpage) for season/season_number and episode_number via regex, and description via OG/meta tags.
+  - Output
+    - Returns a dictionary with id, title, series, season, season_number, episode, episode_number, thumbnails, description, duration, and formats.
+
+- IviCompilationIE (Compilation/playlist extractor)
+  - Metadata
+    - IE_DESC: 'ivi.ru compilations'
+    - IE_NAME: 'ivi:compilation'
+    - _VALID_URL: matches ivi.ru/watch/<compilationid> for compilations and optional /season<id> for a season page
+  - Behavior
+    - _extract_entries(html, compilation_id): helper to gather video entries (video links) from a compilation page by finding links to /watch/<compilation_id>/<id> and creating video URL results using IviIE.ie_key().
+  - _real_extract
+    - Parses compilation_id and optional seasonid from the URL.
+    - If seasonid is present (season page):
+      - Downloads the season page.
+      - playlist_id = 'compilationid/seasonN'
+      - playlist_title from HTML meta title
+      - entries = _extract_entries(season_page, compilation_id)
+    - If no seasonid (compilation page):
+      - Downloads compilation page.
+      - playlist_id = compilation_id
+      - playlist_title from HTML meta title
+      - Detects seasons by looking for season links on the page:
+        - If no seasons found: entries = _extract_entries(compilation_page, compilation_id)
+        - If seasons found: iterates over each season, downloads each season page, and aggregates their entries via _extract_entries
+    - Returns playlist_result(entries, playlist_id, playlist_title)
+
+Notable implementation details
+- HTTP/data handling
+  - Uses _download_json to fetch JSON data from the light API.
+  - Uses _download_webpage to fetch HTML pages for metadata extraction (season/episode data, titles, descriptions).
+- Authentication/signature flow
+  - The code attempts to authenticate to the light API by generating a CMAC signature using Blowfish with a static key (_LIGHT_KEY) and a timestamp. This is performed only if the environment has the pycryptodomex library.
+  - It first fetches a timestamp via 'da.timestamp.get', then computes sign = CMAC.new(key, timestamp + content_data, Blowfish).hexdigest() and includes it as a query parameter along with ts.
+  - It also encodes the content data payload and uses timestamp-based signing for site 353; site 183 is used as a fallback without additional signing.
+- Error handling
+  - Handles geo restrictions: raises geo restricted error with a helpful message when origin is NotAllowedForLocation.
+  - Handles missing data: "Video <id> does not exist" for NoRedisValidData.
+  - Behavior differs between sites: if the first site (353) yields an error, it may fall back to the second; if bundled, raises a guidance error; if pycryptodomex is missing, instructs installation.
+  - If errors persist, propagates an ExtractorError with messages tailored to the failure.
+- Formats and quality
+  - Formats are derived from result['files'], filtering out DRM/FPS and missing URLs.
+  - Uses the known format ordering to assign quality via the qualities function.
+  - thumnails are built from result['preview'].
+- Metadata extraction
+  - Title can reflect compilation/season context.
+  - Season and episode data are attempted to be extracted from the video HTML page via regex looking for season list items and data-season attributes, and episode numbers via itemprop/metadata snippets.
+  - Description is sourced from OG tags on the page or the HTML meta tag.
+- Tests
+  - _TESTS sections show sample URLs, expected info_dict, and skip conditions (notably “Only works from Russia” for some URLs).
+  - Demonstrates handling of single videos and serials with season/episode structures.
+
+Summary of purpose
+- This module enables youtube-dl to fetch and parse video streams from ivi.ru, including individual videos and compilations/season pages, handling the site’s light API login flow, DRM filtering, geo restrictions, and rich metadata extraction. It provides robust error handling and supports extracting nested playlist structures for compilations.

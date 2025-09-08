@@ -1,0 +1,93 @@
+Summary of the file: ./youtube-dl/youtube_dl/extractor/tunein.py
+
+What it does
+- Provides a set of extractors for TuneIn content within youtube-dl. It fetches metadata and audio streams via TuneIn’s API, builds a list of available formats, handles live content, and returns standard youtube-dl info dictionaries.
+
+Main components
+
+1) TuneInBaseIE (base extractor)
+- Inherits from InfoExtractor.
+- _API_BASE_URL: Base API endpoint for TuneIn metadata.
+- _extract_urls(webpage): Static helper that finds TuneIn embed player iframe URLs in a page via a regex. Targets embed/player/[pst]\d+ iframes.
+- _real_extract(url):
+  - Derives content_id from the URL.
+  - Downloads JSON metadata from API_BASE_URL + content-specific query (defined by _API_URL_QUERY in subclasses).
+  - Extracts Title, Logo (thumbnail), Location, and StreamUrl.
+  - If no StreamUrl is provided, raises ExtractorError.
+  - If StreamUrl is relative, resolves to absolute with urljoin.
+  - Downloads stream data from streams_url (JSONP-like wrapper cleaned via a transform to strip surrounding parentheses).
+  - Iterates over Streams to build per-stream format dictionaries:
+    - is_live: set True if any stream has Type == 'Live'.
+    - reliability: used to generate a format_note and to set a priority (preference 0 if reliability is None or > 90, else 1).
+    - format fields:
+      - abr: Bandwidth
+      - ext: MediaType lowercased
+      - acodec: MediaType
+      - vcodec: 'none' (audio-only)
+      - url: stream URL
+      - source_preference: reliability
+      - format_note: "Reliability: X%" if reliability available
+  - Sorts formats with _sort_formats.
+  - Returns an info dict with:
+    - id: content_id
+    - title: uses _live_title(title) if is_live is True
+    - formats: list of formats
+    - thumbnail: Logo
+    - location: Location
+    - is_live: boolean flag
+
+2) TuneInClipIE (clip content)
+- IE_NAME: 'tunein:clip'
+- _VALID_URL matches TuneIn audio clips: .../station/...audioClipId=<id>
+- _API_URL_QUERY: '?tuneType=AudioClip&audioclipId=%s'
+- _TESTS: example clip with id 816, expecting mp3.
+
+3) TuneInStationIE (station content)
+- IE_NAME: 'tunein:station'
+- _VALID_URL matches various station/embed URLs that include a StationId.
+- _API_URL_QUERY: '?tuneType=Station&stationId=%s'
+- suitable(cls, url): ensures Clip tests are preferred first; returns False if URL matches TuneInClipIE.suitable(url), otherwise uses base suitability.
+- _TESTS: examples for a live station (skip_download) and an embed/player URL (only_matching).
+
+4) TuneInProgramIE (program content)
+- IE_NAME: 'tunein:program'
+- _VALID_URL matches program-related URLs including embed player
+- _API_URL_QUERY: '?tuneType=Program&programId=%s'
+- _TESTS: examples for a live program and an embed/player URL (only_matching).
+
+5) TuneInTopicIE (topic content)
+- IE_NAME: 'tunein:topic'
+- _VALID_URL matches topic URLs and embed player URLs with TopicId
+- _API_URL_QUERY: '?tuneType=Topic&topicId=%s'
+- _TESTS: example topic and an embed/player URL (only_matching).
+
+6) TuneInShortenerIE (URL shortener)
+- IE_NAME: 'tunein:shortener'
+- IE_DESC: False (not listed)
+- _VALID_URL matches tun.in short URLs
+- _TEST: redirect example (short URL resolving to an actual TuneIn page)
+- _real_extract(url):
+  - Extracts the short path id via _match_id.
+  - Performs a request to follow the redirect (no HEAD support on server).
+  - Reads final URL from the redirect response.
+  - Logs the redirected URL and returns self.url_result(final_url) to allow subsequent extraction by other extractors.
+
+Key implementation details
+- Content retrieval:
+  - Uses _download_json to fetch content metadata and stream data.
+  - Streams data may come wrapped (e.g., JSONP-like) and is cleaned with a transform_source function that strips surrounding parentheses.
+- URL handling:
+  - Relative stream URLs are resolved against the original content URL with urljoin.
+- Formats:
+  - Built as a list of dictionaries with fields: url, ext, abr, acodec, vcodec, format_note, source_preference, and a user-facing preference to influence sorting.
+  - live streams are detected by a stream with Type == 'Live' and reflected in the final title via _live_title.
+- Prioritization:
+  - Preference is 0 for high reliability (reliability > 90) or unknown; otherwise 1.
+  - _sort_formats is called to order formats logically (e.g., higher quality first when available).
+- Live handling:
+  - If any stream is live, is_live is True and the title may be modified with _live_title.
+- Shortener:
+  - Short URLs are resolved to their final destination before extraction.
+
+Overall purpose
+- The module provides a set of extractors for different TuneIn content types (clips, stations, programs, topics) and a short URL resolver. It centralizes the logic to fetch TuneIn metadata and stream URLs, construct compatible youtube-dl format entries, handle live content, and return standard, rich information for downstream processing.

@@ -1,0 +1,44 @@
+- Purpose
+  - Implement a YouTube-dl extractor for Rockstar Games video pages. It fetches video metadata from Rockstar’s API and builds a list of available MP4 formats, along with basic info like title, description, thumbnail, and upload date. If no MP4 formats are available but a YouTube ID is provided, it falls back to the YouTube extractor.
+
+- Class and URL pattern
+  - Class: RockstarGamesIE(InfoExtractor)
+  - URL regex (_VALID_URL): matches rockstargames.com/videos pages that contain either /video/<id> or a query parameter video=<id>, capturing the numeric id as 'id'.
+
+- Main workflow (_real_extract)
+  - Extract video_id from URL using _match_id.
+  - Call the Rockstar endpoint to fetch video data in JSON:
+    - URL: https://www.rockstargames.com/videoplayer/videos/get-video.json
+    - Query: id=video_id, locale=en_us
+  - Extract video data from the response as video = response['video'].
+  - Title: video['title'].
+  - Build formats:
+    - Iterate over video['files_processed']['video/mp4'].
+    - For each item with a 'src', create a format dict:
+      - url: protocol-relative URL converted to absolute via _proto_relative_url(video['src']).
+      - format_id: the value of video['resolution'].
+      - height: parsed integer height by extracting a number before 'p' in the resolution string (via regex on resolution like "1080p"), using int_or_none for safety.
+  - If no MP4 formats found:
+    - Check video.get('youtube_id'). If present, return a YouTube URL result using self.url_result(youtube_id, 'Youtube').
+  - Sort formats using self._sort_formats(formats).
+  - Return a result dict with:
+    - id: video_id
+    - title: title
+    - description: video.get('description')
+    - thumbnail: protocol-relative screencap URL converted via _proto_relative_url(video.get('screencap'))
+    - timestamp: parse_iso8601(video.get('created'))
+    - formats: the list of constructed formats
+
+- Key implementation details
+  - Uses _download_json to fetch JSON data from Rockstar’s API and accesses the 'video' object.
+  - Formats are built only from the mp4 entries in video/mp4; each format stores URL, format_id (the resolution string like "1080p" or similar), and height inferred from the resolution.
+  - Falls back to YouTube if the MP4 list is empty but a youtube_id exists.
+  - Helper utilities:
+    - _proto_relative_url to handle protocol-relative URLs.
+    - int_or_none and parse_iso8601 to robustly parse numeric heights and timestamps.
+  - Test cases (_TESTS) include:
+    - A full successful extraction with MP4 formats, including expected id, extension, title, description hash, thumbnail pattern, timestamp, and upload date.
+    - A scenario with only the URL anchor parameter (only_matching test) to ensure URL matching works as intended.
+
+- Summary
+  - The extractor focuses on Rockstar’s video API, handles multiple mp4 format entries, extracts metadata, derives video height from the resolution, and gracefully falls back to YouTube if needed. It adheres to the standard YouTube-dl extractor patterns and utilities.

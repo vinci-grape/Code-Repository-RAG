@@ -1,0 +1,50 @@
+- Purpose
+  - A youtube-dl extractor for camwithher.tv that scrapes a video page to build an RTMP FLV stream URL and metadata.
+
+- Class and URL pattern
+  - Class: CamWithHerIE(InfoExtractor)
+  - _VALID_URL: Matches camwithher.tv/view_video.php with a viewkey parameter and captures the viewkey as id.
+
+- Tests
+  - _TESTS include:
+    - A full page test that extracts id, title, description, duration, view/comment counts, uploader, upload_date, and age_limit, with skip_download.
+    - Several only_matching tests to ensure URL patterns are recognized.
+
+- Extraction flow (_real_extract)
+  1. video_id = self._match_id(url) from the viewkey in the URL.
+  2. webpage = self._download_webpage(url, video_id)
+  3. flv_id = self._html_search_regex(r'<a[^>]+href=["\']/download/\?v=(\d+)', webpage, 'video id')
+     - This pulls the numeric video id used by the download URL.
+  4. RTMP URL construction
+     - If flv_id > 2010, rtmp_url = 'rtmp://camwithher.tv/clipshare/mp4:%s.mp4' % flv_id
+     - Else, rtmp_url = 'rtmp://camwithher.tv/clipshare/%s' % flv_id
+     - Notes: The logic mirrors reverse-engineering of the player, enabling RTMP streaming of the video.
+  5. Title extraction
+     - title = content of the h2 tag inside a div with float:left styling.
+  6. Description
+     - description = text following "Description:" in the page; default=None if not found.
+  7. Duration
+     - runtime = text matching 'Runtime : ... |'
+     - Cleans up runtime by removing spaces and hyphens, then duration = parse_duration(runtime)
+  8. View and comment counts
+     - view_count = int_or_none(self._search_regex(r'Views\s*:\s*(\d+)', ...))
+     - comment_count = int_or_none(self._search_regex(r'Comments\s*:\s*(\d+)', ...))
+  9. Uploader and upload date
+     - uploader = text inside the anchor after 'Added by :'
+     - upload_date = unified_strdate(self._search_regex(r'Added on\s*:\s*([\d-]+)', ...))
+  10. Return payload
+     - id: flv_id
+     - url: rtmp_url
+     - ext: 'flv'
+     - no_resume: True
+     - title, description, duration, view_count, comment_count, uploader, upload_date
+     - age_limit: 18
+
+- Key implementation details
+  - Uses _download_webpage, _html_search_regex, _search_regex, int_or_none, parse_duration, and unified_strdate utility helpers.
+  - The final video id in the output is the flv_id from the page, not the viewkey from the URL.
+  - The extractor returns an RTMP URL with ext 'flv' and sets no_resume to True, indicating streaming should not attempt to resume downloads.
+  - Handles optional fields gracefully (description, duration, view/comment counts) with defaults.
+
+- Summary
+  - CamWithHerIE retrieves a CamWithHer video by parsing the page for a download video id, constructs an RTMP/FLV URL using a reverse-engineered naming scheme, and extracts rich metadata (title, description, duration, counts, uploader, upload date) to return a structured info dict suitable for youtube-dl's downstream processing.

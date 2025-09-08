@@ -1,0 +1,63 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/netzkino.py
+
+What it does
+- Implements a YouTube-dL extractor for Netzkino (netzkino.de) videos. It pulls video formats, metadata, comments, and playlist information from Netzkino’s API and embedded player data.
+
+Key components
+- Class NetzkinoIE(InfoExtractor)
+  - _VALID_URL: Regex that matches Netzkino hashbang URLs: http(s)://www.netzkino.de/#!/<category>/<id>
+  - _TEST: Example test case with expected id, title, formats, and metadata to validate extraction.
+  - _real_extract(url): Core extraction logic.
+
+Main workflow in _real_extract
+1. Parse URL
+   - Extract category_id and video_id from the URL using _VALID_URL.
+
+2. Fetch category/posts metadata
+   - Build API URL: http://api.netzkino.de.simplecache.net/capi-2.0a/categories/<category>.json?d=www
+   - Download JSON via _download_json and locate the specific video entry by matching slug == video_id within api_info['posts'].
+   - Access custom fields from the video entry (info['custom_fields']).
+
+3. Retrieve embedded URL templates from player code
+   - Download production JS: http://www.netzkino.de/beta/dist/production.min.js
+   - Extract a JavaScript object string containing URL templates using a regex: var urlTemplate=(\{.*?"\})
+   - Convert the extracted string to JSON-friendly format using _parse_json with transform_source=js_to_json
+   - Resulting templates map format keys (e.g., hds, hls, pmd) to URL templates containing a {} placeholder to be replaced with the actual film filename.
+
+4. Build video formats
+   - film_fn = custom_fields['Streaming'][0] (the actual filename to substitute)
+   - suffix map for formats:
+     - hds -> .mp4/manifest.f4m
+     - hls -> .mp4/master.m3u8
+     - pmd -> .mp4
+   - For each template, replace {} with film_fn and append the corresponding suffix.
+   - Create formats list with fields: format_id, ext ('mp4'), and constructed URL.
+   - Sort formats with self._sort_formats(formats).
+
+5. Build comments
+   - Convert Netzkino video comments into a structured list:
+     - timestamp: parsed from c['date'] using parse_iso8601 with delimiter ' '
+     - id, author, html (content), and parent (root if parent == 0, else use parent)
+
+6. Assemble and return metadata
+   - id: video_id
+   - formats: constructed formats list
+   - comments: built comment list
+   - title: info['title']
+   - age_limit: int parsed from custom_fields.get('FSK')[0] via int_or_none
+   - timestamp: parse_iso8601(info.get('date'), delimiter=' ')
+   - description: clean_html(info.get('content'))
+   - thumbnail: info.get('thumbnail')
+   - playlist_title: api_info.get('title')
+   - playlist_id: category_id
+
+Important implementation details
+- URL construction relies on a dynamic templates object discovered in the Netzkino production.min.js file. The code locates a JavaScript object literal assigned to urlTemplate, converts it to JSON, and then uses that to build actual video URLs.
+- Uses js_to_json to safely transform the JavaScript object literal into JSON for parsing.
+- Uses int_or_none to safely convert the age restriction (FSK) to an integer.
+- Uses parse_iso8601 with a space delimiter to parse dates found in the API data and comments.
+- Uses clean_html to sanitize descriptions.
+- Returns a playlist_id and playlist_title to reflect category-based grouping for the video.
+- The _TEST includes a skip_download param indicating that actual video download may be restricted to Germany, which is handled by youtube-dl’s test framework.
+
+Overall, this extractor handles Netzkino videos by combining category/post API data with dynamic URL templates embedded in the site’s JavaScript to produce a set of playable formats plus rich metadata and user comments.

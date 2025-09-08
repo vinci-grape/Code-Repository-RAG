@@ -1,0 +1,69 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/cpac.py
+
+What this file does
+- Implements two extractors for CPAC (cpac.ca):
+  - CPACIE: extracts a single CPAC episode/video.
+  - CPACPlaylistIE: extracts a CPAC playlist, which can be a program, search results, or emission/rechercher listings.
+- Uses CPAC’s JSON API (contentModel.json) to fetch metadata and streaming URLs, supports English and French variants, and handles HLS video formats.
+
+Key classes and main functionality
+1) CPACIE (InfoExtractor)
+- Purpose: Extract information and direct video formats for a single CPAC episode.
+- URL pattern: _VALID_URL matches CPAC episode URLs with an id parameter (hex UUID-like), optionally prefixed for French.
+- _real_extract(url):
+  - video_id: extracted from URL via _match_id.
+  - url_lang: 'fr' if URL contains /l-episode? else 'en'.
+  - Fetch content via API:
+    - Request: https://www.cpac.ca/api/1/services/contentModel.json?url=/site/website/episode/index.xml&crafterSite=cpacca&id=<video_id>
+  - video_url: extracted from content['page']['details']['videoUrl'] if present.
+  - If video_url exists:
+    - content = content['page'].
+    - title: content['details']['title_<lang>_t'].
+    - formats: extracted with _extract_m3u8_formats(video_url, video_id, m3u8_id='hls', ext='mp4').
+    - Language preference for each format:
+      - If format language equals url_lang: set language_preference = 10.
+      - If no language: language_preference = -1.
+      - Otherwise: language_preference = -10.
+    - Sort formats with _sort_formats(formats).
+  - category: content['details']['category_<lang>_t'].
+  - is_live: derived from content['details']['type'] == 'live'.
+  - thumbnail: built from image_<lang>_s using urljoin with the episode page URL.
+  - timestamp: unified_timestamp(content['details']['liveDateTime']).
+  - description: content['details'].get('description_<lang>_t').
+  - Returns a dict with:
+    - id, formats, title, description, timestamp, category (as a list if present), thumbnail, is_live.
+
+2) CPACPlaylistIE (InfoExtractor)
+- Purpose: Extract a CPAC playlist by program, search, emission, or rechercher pages.
+- URL pattern: _VALID_URL matches various CPAC listing pages (program, search, emission, rechercher) with an id-like query parameter (id=, programId=, key=, etc.). Case-insensitive.
+- _real_extract(url):
+  - video_id: extracted from URL via _match_id.
+  - url_lang: 'fr' if URL contains '/emission?' or '/rechercher?' else 'en'.
+  - pl_type/list_type: 
+    - If URL includes '/program?' or '/emission?': pl_type='program', list_type='itemList'
+    - Else (search-like URLs): pl_type='search', list_type='searchResult'
+  - api_url: https://www.cpac.ca/api/1/services/contentModel.json?url=/site/website/<pl_type>/index.xml&crafterSite=cpacca&<video_id>
+  - Download initial content via _download_json(api_url, video_id).
+  - Pagination:
+    - total_pages = int_or_none(try_get(content, lambda x: x['page'][list_type]['totalPages']), default=1)
+    - Iterate pages 1..total_pages:
+      - If page > 1, update api_url with page parameter and fetch next content (fatal=False).
+      - For each item in content['page'][list_type]['item'] (or empty list if missing):
+        - episode_url = urljoin(url, item['url_<lang>_s'])
+        - If episode_url present, append to entries.
+  - Build and return playlist:
+    - playlist_result over self.url_result(entry) for all collected entry URLs.
+    - playlist_id: video_id.
+    - playlist_title: content['page']['program']['title_<lang>_t'] or last segment after '=' as fallback.
+    - playlist_description: content['page']['program']['description_<lang>_t'].
+
+Important implementation details and behavior
+- Language handling: Determines French vs English by URL structure; uses title, description, and image fields suffixed with _<lang>_t/_s to fetch language-specific metadata.
+- Video formats: Uses m3u8 (HLS) formats via _extract_m3u8_formats on videoUrl; uses language_preference to prioritize formats matching the page language.
+- Live information: is_live is derived from page details; liveDateTime is parsed into a timestamp if present.
+- Thumbnails: Constructs thumbnail URLs by joining the page URL with image_<lang>_s.
+- Robustness: For playlists, handles pagination and optional fields gracefully, using try_get and default values where appropriate.
+- API usage: All data for both extractors is retrieved from CPAC’s contentModel.json API endpoint, with the episode or program identifier passed as a parameter.
+- Tests: Includes _TEST for CPACIE and multiple _TESTS in CPACPlaylistIE to exercise program, search, and language handling.
+
+Overall, the file provides two extractors to fetch CPAC video data and playlists by leveraging CPAC’s JSON API, with careful handling of language variants, formats extraction, live status, and playlist pagination.

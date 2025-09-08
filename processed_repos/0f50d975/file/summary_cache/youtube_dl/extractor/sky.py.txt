@@ -1,0 +1,64 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/sky.py
+
+Overview
+- This module implements YouTube-DL extractors for Sky-related video pages (Sky Sports, Sky News, Sky Sports News).
+- It handles embedded video players from Ooyala and Brightcove by discovering a data-driven “sdc” element in Sky pages and delegating to the appropriate downstream extractor.
+- SkySportsNewsIE special-cases to build a playlist from multiple SDC elements on a page.
+
+Main functionality
+- SkyBaseIE
+  - Core helper to map Sky’s SDC (video data) element to a real video URL and corresponding extractor.
+  - _SDC_EL_REGEX: locates the div that contains data-provider and video data (data-provider, data-sdc-video-id, data-video-id, etc.).
+  - _process_ooyala_element(webpage, sdc_el, url):
+    - Reads attributes from the SDC element to determine provider and video details.
+    - If provider is "ooyala":
+      - video_id from data-sdc-video-id.
+      - video_url initially "ooyala:<id>" with ie_key "Ooyala".
+      - Tries to locate an Ooyala media element to check for token protection (data-token-required).
+      - If a token is required, fetches token options, downloads the embed token JSON, and smuggles the token into the video URL for Ooyala.
+    - If provider is "brightcove":
+      - Reads data-video-id, data-account-id, data-player-id (with sensible defaults if missing).
+      - Builds a Brightcove URL using BRIGHTCOVE_URL_TEMPLATE and sets ie_key to "BrightcoveNew".
+    - Returns a transparent URL entry: {'_type': 'url_transparent', 'id': video_id, 'url': video_url, 'ie_key': ie_key}
+  - _real_extract(url):
+    - Extracts the Sky page, finds the first SDC element, and passes it to _process_ooyala_element.
+    - Populates title and description from OpenGraph meta tags.
+    - Returns the resulting info dictionary (which is usually a url_transparent pointing to Ooyala or Brightcove).
+
+Concrete extractors
+- SkySportsIE
+  - IE_NAME: 'sky:sports'
+  - _VALID_URL: matches Sky Sports video pages
+  - _TESTS: includes an actual Sky Sports video test (expects Ooyala), plus two more entries with only_matching: True
+
+- SkyNewsIE
+  - IE_NAME: 'sky:news'
+  - _VALID_URL: matches Sky News video pages
+  - _TEST: example Sky News video; expects BrightcoveNew as the downstream extractor; includes metadata like id, title, description, uploader_id, timestamp, upload_date
+
+- SkySportsNewsIE
+  - IE_NAME: 'sky:sports:news'
+  - _VALID_URL: matches Sky Sports News pages (news section)
+  - _TEST: playlist example (playlist_count: 2)
+  - _real_extract(url):
+    - Downloads the page, collects all SDC elements via _SDC_EL_REGEX, and for each one calls _process_ooyala_element to build a list of entries.
+    - Returns a playlist_result with entries, article_id, page title, and description (from OG/meta tags).
+
+Key implementation details
+- Downstream handling:
+  - Transparent URLs delegate to either Ooyala or Brightcove (via ie_key in returned dict).
+  - For Ooyala with token protection, the code fetches the token and smuggles it into the video URL to satisfy protected embeds.
+- Data extraction:
+  - Uses extract_attributes to parse HTML tag data- attributes into a dict for provider, ids, tokens, etc.
+  - Uses _og_search_title/_og_search_description and _html_search_meta to fill metadata.
+- Robustness and defaults:
+  - Brightcove account-id default: '6058004172001'
+  - Brightcove player-id default: 'RC9PQUaJ6'
+  - Handles missing token fetch options gracefully (fatal=False).
+- Regex and parsing:
+  - _SDC_EL_REGEX targets Sky’s SDC video element by looking for data-component-name or data-fn with values like "sdc-article-video" or "sdc-site-video".
+  - For Ooyala, the code also tries to locate the nested Ooyala media element to check for token requirements.
+
+In short
+- The file provides a shared SkyBaseIE to interpret Sky video pages, identify the embedded video provider (Ooyala or Brightcove), possibly fetch tokens for Ooyala-protected videos, and produce a URL that hands off to the correct downstream extractor.
+- It defines three concrete IEs (SkySportsIE, SkyNewsIE, SkySportsNewsIE) handling individual site sections, with SkySportsNewsIE aggregating multiple video entries into a playlist.

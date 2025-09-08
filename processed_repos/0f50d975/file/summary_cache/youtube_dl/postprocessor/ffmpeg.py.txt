@@ -1,0 +1,161 @@
+Here is a concise but comprehensive summary of the code in youtube-dl/youtube_dl/postprocessor/ffmpeg.py.
+
+What it does (high level)
+- Provides a set of post-processors that use FFmpeg/avconv and related tools to transform downloaded media:
+  - Audio extraction/conversion
+  - Video format conversion
+  - Subtitle embedding and conversion
+  - Metadata tagging
+  - Merging multiple files into one
+  - Various fixups (aspect ratio, container corrections, AAC bitstream fixes)
+- Works with both FFmpeg and avconv, preferring one based on availability and user options.
+- Carefully builds and executes FFmpeg command lines, handling encoding/quoting, verbose logging, and errors.
+- Manages file timestamps (utime) after post-processing when info provides filetime.
+
+Key classes and main functionality
+
+1) FFmpegPostProcessor (base class)
+- Determines available executables (ffmpeg/avconv) and their versions.
+- _determine_executables:
+  - Searches for ffmpeg/avconv and ffprobe/avprobe, possibly honoring downloader-specified ffmpeg_location and prefer_ffmpeg flag.
+  - Builds paths and version info; selects a primary basename (self.basename) and a probe basename (self.probe_basename).
+  - Handles various edge cases (missing paths, non-existent locations, invalid basenames).
+- check_version:
+  - Warns if the selected encoder is outdated (compatible thresholds differ for avconv vs ffmpeg).
+- get_audio_codec(path):
+  - Determines the audio codec using ffprobe/avprobe if available; supports both probe-based and ffmpeg-based approaches.
+  - Returns the audio codec name or None if it cannot determine it.
+- run_ffmpeg_multiple_files(input_paths, out_path, opts):
+  - Builds and runs an ffmpeg/avconv command that combines multiple inputs into a single output.
+  - Computes oldest input mtime for utime handling after processing.
+  - Handles verbose logging and raises FFmpegPostProcessorError on failure.
+- run_ffmpeg(path, out_path, opts):
+  - Convenience wrapper for single-file processing (delegates to run_ffmpeg_multiple_files with one input).
+- _ffmpeg_filename_argument(fn):
+  - Uses file: prefix for safety (avoids issues with colon, leading dashes, etc.); preserves '-' for stdout streaming.
+
+2) FFmpegExtractAudioPP
+- Purpose: extract audio from a video and encode it with a chosen codec/quality.
+- Constructor takes preferredcodec, preferredquality, nopostoverwrites.
+- run_ffmpeg(path, out_path, codec, more_opts) handles actual ffmpeg run for audio extraction, respecting -vn and -acodec choices.
+- run(information):
+  - Determines input file's audio codec via get_audio_codec.
+  - Based on preferredcodec and actual codec, decides:
+    - Copy vs re-encode
+    - Output extension (e.g., m4a, mp3, aac, etc.)
+    - Additional ffmpeg options (e.g., -bsf:a aac_adtstoasc for aac, -f adts for aac in ADTS streams, etc.)
+    - If lossy conversion is used, selects appropriate libmp3lame or other encoder with quality/bitrate options.
+  - Updates information with new filepath and extension.
+  - Performs utime adjustment if filetime is provided.
+  - Returns list of old file plus updated info, or in case of skip returns [] and info.
+- Error handling converts FFmpeg errors into AudioConversionError or PostProcessingError as appropriate.
+
+3) FFmpegVideoConvertorPP
+- Converts video to a user-specified target format (self._preferedformat).
+- If already in target format, skips.
+- Special-case: if target is "avi", uses libxvid and XVID tag.
+- Updates information to reflect new format/filepath/ext.
+- Returns processed file list and info.
+
+4) FFmpegEmbedSubtitlePP
+- Embeds subtitles into mp4, webm, or mkv containers.
+- Requires requested_subtitles; logs if none.
+- Builds an embedding plan:
+  - Copies all streams, then maps subtitles as needed.
+  - For mp4: uses -c:s mov_text; for webm/mkv subtitles are mapped appropriately.
+  - Adds language metadata for each embedded subtitle track.
+- Creates a temp file (to allow second-pass processing), runs embedding via run_ffmpeg_multiple_files, then replaces the original file with the temp file.
+- Returns the list of subtitle files embedded and updated info.
+
+5) FFmpegMetadataPP
+- Adds metadata fields to the media file (title, date, description, artist, album, etc.).
+- Metadata mapping is flexible via a helper add(meta_list, info_list=None) that maps multiple possible source fields to a single target metadata field.
+- If chapters are present, writes a temporary metadata file (FFMETADATA1 format) including chapters and optional chapter titles; passes it with -map_metadata 1.
+- Uses -c copy for non-metadata tracks, or -vn/-acodec copy for m4a as appropriate.
+- Runs through run_ffmpeg_multiple_files to apply metadata (and the optional metadata file); cleans up temporary files afterwards.
+- Returns no new files to process and updated info.
+
+6) FFmpegMergerPP
+- Merges multiple input files into a single output file.
+- Uses -c copy and maps: -map 0:v:0 and -map 1:a:0 as defaults (video from first input, audio from second).
+- Checks can_merge() to determine if merging is supported (avconv older versions cause issues with muxing):
+  - If avconv is too old (version < 10-0), warns and disables merging (falls back to single-file download behavior).
+- After merging, replaces target with temp file and returns the list of files merged, along with info.
+
+7) FFmpegFixupStretchedPP
+- If stretched_ratio is provided and not equal to 1, uses -aspect to fix aspect ratio by re-muxing.
+- Writes to a temp file, then replaces the original.
+- Returns updated info.
+
+8) FFmpegFixupM4aPP
+- If container is m4a_dash, remuxes to mp4 with -c copy -f mp4 to fix the container, then replaces the original.
+
+9) FFmpegFixupM3u8PP
+- If audio codec in a .m3u8 (HLS) stream is aac, fixes malformed AAC bitstream by remuxing with -c copy -f mp4 -bsf:a aac_adtstoasc.
+
+10) FFmpegSubtitlesConvertorPP
+- Converts subtitles to a specified format (self.format) (e.g., srt, vtt, webvtt, etc.).
+- If requested, converts dfxp/ttml/tt to srt with dfxp2srt, applying a warning about style loss, and updates the subtitles data in info.
+- For each subtitle track:
+  - If already in target format, skips.
+  - Otherwise uses ffmpeg to convert: runs FFmpeg on existing subtitle file to a new file in the requested format.
+  - Updates the in-memory subtitles data (lang -> {ext, data}) with converted content.
+- Returns a list of new/derived subtitle files and updated info.
+
+Auxiliary data and behavior
+
+- Constants:
+  - EXT_TO_OUT_FORMATS maps output formats for various extensions (e.g., 'aac' -> 'adts', 'mkv' -> 'matroska').
+  - ACODECS maps high-level target audio formats to specific encoders (e.g., 'mp3' -> 'libmp3lame', 'wav' -> None).
+- Error types:
+  - FFmpegPostProcessorError: specific error for FFmpeg post-processing steps.
+  - AudioConversionError, PostProcessingError: used to surface issues to higher layers.
+- Interaction with downloader:
+  - Uses downloader to log messages, print debug info, and warn about issues (e.g., outdated ffmpeg/avconv, invalid paths).
+  - Honors verbosity setting to print debugging commands and step traces.
+- File handling details:
+  - Path handling uses a custom _ffmpeg_filename_argument to ensure safe handling of arbitrary filenames (prefix with file:, except for '-' which means stdout).
+  - Uses a combination of temporary files (prepend_extension with 'temp') and renaming to apply changes atomically-ish.
+  - Utimes (modification times) are preserved or updated when appropriate.
+
+Important implementation details
+
+- Version handling:
+  - Basing on self.basename (ffmpeg or avconv), with thresholds: '1.0' for ffmpeg, '10-0' for avconv.
+  - get_versions returns a dict of discovered versions; check_version issues warnings if outdated.
+- Audio codec detection:
+  - get_audio_codec uses ffprobe/avprobe when available to parse stream info; supports both probe-based and regular ffmpeg output parsing.
+- Command construction:
+  - Commands built with encoded/quoted arguments via encodeArgument and encodeFilename to ensure shell-safety.
+  - Logging of the exact command line when verbose is enabled.
+  - Distinguishes avconv’s lack of a “repeat” loglevel support (adjusts ffmpeg loglevel handling accordingly).
+- Subtitles and metadata:
+  - Subtitles embedding uses map options, language metadata, and supports mp4-specific mov_text encoding.
+  - Metadata mapping supports multiple source fields per metadata target (e.g., title can come from track or title).
+  - Chapters support is implemented by writing a temporary FFmpeg metadata file and using -map_metadata to attach it.
+  - Subtitles format conversion handles WebVTT limitations for WebM and warns when a format is not compatible.
+- Robustness and errors:
+  - Many operations wrap FFmpeg calls and convert failures into PostProcessingError or specific errors (AudioConversionError).
+  - Edge-cases around existing target files and nopostoverwrites control whether to skip or re-create outputs.
+
+Files and functions summary
+
+- Constants: EXT_TO_OUT_FORMATS, ACODECS
+- Classes:
+  - FFmpegPostProcessorError (error type)
+  - FFmpegPostProcessor
+    - __init__, check_version, get_versions, _determine_executables
+    - available, executable, probe_available, probe_executable
+    - get_audio_codec, run_ffmpeg_multiple_files, run_ffmpeg, _ffmpeg_filename_argument
+  - FFmpegExtractAudioPP
+    - __init__, run_ffmpeg, run
+  - FFmpegVideoConvertorPP
+  - FFmpegEmbedSubtitlePP
+  - FFmpegMetadataPP
+  - FFmpegMergerPP
+  - FFmpegFixupStretchedPP
+  - FFmpegFixupM4aPP
+  - FFmpegFixupM3u8PP
+  - FFmpegSubtitlesConvertorPP
+
+Overall, this module provides a comprehensive FFmpeg/avconv-based post-processing toolkit for youtube-dl, covering audio extraction/conversion, video format conversions, subtitle embedding and conversion, metadata tagging (including chapters), file merging, and a set of practical fixups, all with robust version/availability checks and careful command construction.

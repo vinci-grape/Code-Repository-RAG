@@ -1,0 +1,40 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/huajiao.py
+
+- Purpose
+  - Implement an InfoExtractor for Huajiao (花椒直播) videos. It fetches a Huajiao live page, extracts metadata and video formats (via an m3u8 URL) and returns a standard video info dictionary for youtube-dl.
+
+- Main class
+  - HuajiaoIE inherits from InfoExtractor.
+  - IE_DESC: "花椒直播" (Huajiao Live)
+  - _VALID_URL: Matches URLs like http(s)://www.huajiao.com/l/<id> and captures the numeric id.
+  - _TEST: Includes a sample URL with expected metadata (id, ext, title, description, duration, thumbnail, timestamp, upload_date, uploader, uploader_id) to validate extraction logic.
+
+- Core functionality (_real_extract)
+  - Extracts video_id using _match_id(url).
+  - Downloads the webpage content with _download_webpage(url, video_id).
+  - Extracts a JSON-like string assigned to a JavaScript variable feed via regex: var feed = ({.+}).
+  - Parses the extracted JSON with _parse_json(feed_json, video_id) into a Python dict named feed.
+  - Retrieves a non-fatal description from the HTML meta tag using _html_search_meta('description', webpage, 'description', fatal=False).
+  - Provides a small helper function get(section, field) that safely fetches nested values from feed.
+  - Returns a dict with these fields:
+    - id: video_id
+    - title: feed['feed']['formated_title']
+    - description: value from meta description (if found)
+    - duration: parse_duration(get('feed', 'duration'))
+    - thumbnail: get('feed', 'image')
+    - timestamp: parse_iso8601(feed.get('creatime'), ' ')
+    - uploader: get('author', 'nickname')
+    - uploader_id: get('author', 'uid')
+    - formats: extracted via self._extract_m3u8_formats(feed['feed']['m3u8'], video_id, 'mp4', 'm3u8_native')
+      - Uses the m3u8 URL found in feed['feed']['m3u8'] to generate native m3u8 formats.
+
+- Important implementation details
+  - The code relies on a JavaScript feed object embedded in the page (var feed = { ... }) to obtain all metadata and the m3u8 stream URL.
+  - The title comes from feed['feed']['formated_title']; this is a specific field expected by Huajiao’s JSON structure.
+  - The duration, timestamp, and uploader information are parsed from nested feed fields using a small helper for safe access.
+  - The video formats are gathered from an m3u8 URL with the standard _extract_m3u8_formats routine, enabling support for streaming formats described by the m3u8 manifest.
+  - The description is optional (non-fatal retrieval from the HTML meta tag).
+
+- Notes
+  - The code snippet contains a small formatting/detail: the code ends with a stray “Summary:” label in the prompt, which is not part of the actual implementation. The extractor itself ends after building and returning the info dict.
+  - The test expectations include an upload_date; the implemented code provides timestamp (and youtube-dl can derive upload_date from it in tests).

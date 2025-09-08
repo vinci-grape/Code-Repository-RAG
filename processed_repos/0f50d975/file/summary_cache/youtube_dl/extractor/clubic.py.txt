@@ -1,0 +1,42 @@
+- Purpose: ClubicIE is a youtube-dl extractor that retrieves video metadata and direct video URLs from Clubic video pages by using the embedded M6 player configuration.
+
+- Class and inheritance:
+  - ClubicIE(InfoExtractor): main extractor class.
+
+- URL pattern:
+  - _VALID_URL matches Clubic video pages and captures the numeric video id at the end of the URL: https://.../video/...-<id>.html
+
+- Tests:
+  - _TESTS includes two tests:
+    - A real example with expected id, title, description, and thumbnail format. Also checks the MD5 of the downloaded video.
+    - A second example used with only_matching to ensure the URL is recognized by the regex.
+
+- Core logic (_real_extract):
+  - Extracts video_id from the URL via _match_id.
+  - Builds a player URL: http://player.m6web.fr/v1/player/clubic/<video_id>.html
+  - Downloads the player page (_download_webpage).
+  - Extracts a JSON configuration with _search_regex looking for a JavaScript assignment like: M6.Player.config = { ... };
+  - Parses the extracted JSON into config with _parse_json.
+  - Reads video_info = config['videoInfo'] (contains title and description) and sources = config['sources'] (list of available streams).
+  - Defines a quality order: qualities(['sd', 'hq']).
+  - Builds a list of formats from sources:
+    - format_id = src['streamQuality']
+    - url = src['src']
+    - quality = quality_order(src['streamQuality'])
+  - Sorts formats with _sort_formats to order by quality.
+  - Returns a dict with:
+    - id: video_id
+    - title: videoInfo['title']
+    - formats: the constructed formats list
+    - description: cleaned via clean_html(videoInfo.get('description'))
+    - thumbnail: config.get('poster')
+
+- Important implementation details:
+  - The extractor relies on the M6 player config embedded in the Clubic page, fetched from a separate player URL.
+  - It uses a regex to capture the JSON object assigned to M6.Player.config and then parses it.
+  - Formats are derived from the 'sources' array, with each source providing a direct video URL and a streamQuality label (e.g., 'sd', 'hq').
+  - The description is sanitized with clean_html to remove HTML artifacts.
+  - The thumbnail is taken from the 'poster' field inside the config.
+
+- Summary of main functionality:
+  - Given a Clubic video page, fetch the corresponding M6 player config, extract available video sources, construct downloadable formats with proper quality ordering, and return a metadata bundle (id, title, description, thumbnail) along with the video formats.

@@ -1,0 +1,64 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/ntvru.py
+
+What it is:
+- A YouTube-DL extractor for ntv.ru video pages, implemented as NTVRuIE (inherits from InfoExtractor).
+
+Main functionality:
+- Extracts video metadata and available formats from ntv.ru pages and their corresponding XML metadata.
+- Supports multiple page formats (video pages, news pages, serials) and can fall back to alternative id extraction methods if needed.
+- Builds a list of available video formats (with URLs and sizes) and returns a standard info dictionary: id, title, description, thumbnail, duration, view_count, and formats.
+
+Key components:
+- Class: NTVRuIE(InfoExtractor)
+  - IE_NAME = 'ntv.ru'
+  - _VALID_URL: regex to match ntv.ru URLs and capture the video id
+  - _TESTS: several test cases validating parsing of different page layouts and an additional “schemeless” URL
+  - _VIDEO_ID_REGEXES: list of regexes used to extract a video id from HTML if the primary methods don’t yield one
+
+- _real_extract(self, url)
+  - video_id = self._match_id(url): initial id extraction based on _VALID_URL
+  - Downloads the page: webpage = self._download_webpage(url, video_id)
+  - Attempts to locate a direct video URL via Open Graph or iframe:
+    - video_url = self._og_search_property(('video', 'video:iframe'), webpage, default=None)
+    - If found, derive video_id from video_url using regex: r'https?://(?:www\.)?ntv\.ru/video/(?:embed/)?(\d+)'
+  - If video_id still not found, tries alternative extraction from the page using _VIDEO_ID_REGEXES with _html_search_regex
+  - Downloads the XML metadata for the video: player = self._download_xml('http://www.ntv.ru/vi%s/' % video_id, video_id, 'Downloading video XML')
+  - Extracts the title: title = strip_or_none(unescapeHTML(xpath_text(player, './data/title', 'title', fatal=True)))
+  - Finds the video node: video = player.find('./data/video')
+
+  Formats extraction:
+  - Iterates over format_id in ['', 'hi', 'webm'] to support multiple representations
+  - For each, reads the file URL: file_ = xpath_text(video, './%sfile' % format_id)
+  - If present, normalizes the URL:
+    - If starts with '//', convert to absolute with _proto_relative_url
+    - If it doesn’t start with http, prefix with 'http://media.ntv.ru/vod/' + file_
+  - Adds a format dict: {'url': file_, 'filesize': int_or_none(xpath_text(video, './%ssize' % format_id))}
+  - Sorts formats with self._sort_formats(formats)
+
+  Return values:
+  - id: from video XML: xpath_text(video, './id')
+  - title: as extracted above
+  - description: strip_or_none(unescapeHTML(xpath_text(player, './data/description')))
+  - thumbnail: xpath_text(video, './splash')
+  - duration: int_or_none(xpath_text(video, './totaltime'))
+  - view_count: int_or_none(xpath_text(video, './views'))
+  - formats: list of collected formats
+
+Important implementation details:
+- Uses utility helpers:
+  - int_or_none, strip_or_none, unescapeHTML, xpath_text to safely extract and clean fields from XML/HTML
+  - _og_search_property to fetch Open Graph properties
+  - _download_webpage and _download_xml for network operations
+  - _proto_relative_url to handle protocol-relative URLs
+  - _html_search_regex and _search_regex for flexible ID extraction
+  - _sort_formats to order formats by quality/bitrate
+- Robust to multiple page layouts:
+  - Video id can be in different places; first tries og:video/iframe, then video url, then several HTML patterns.
+  - Supports schemeless URLs via test case; designed to handle both direct video pages and embedded/alternate article pages.
+- Formats handling:
+  - Considers three potential format nodes: '', 'hi', and 'webm'
+  - Builds absolute URLs for relative paths and handles legacy ntv media path prefixes
+  - Retrieves file sizes for formats when available
+
+Overall:
+- The extractor fetches an ntv.ru page, determines the video id through several fallbacks, downloads an XML metadata file, retrieves title/description/thumbnail/duration/view_count, builds a set of available video formats with proper URL normalization, and returns a structured info dictionary compatible with youtube-dl’s standard format.

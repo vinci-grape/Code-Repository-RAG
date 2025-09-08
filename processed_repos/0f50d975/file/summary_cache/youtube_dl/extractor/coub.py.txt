@@ -1,0 +1,73 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/coub.py
+
+- Purpose
+  - Implement an InfoExtractor for Coub videos, enabling youtube-dl to download metadata and video formats from coub.com.
+
+- Main class
+  - CoubIE(InfoExtractor): Defines how to recognize Coub URLs and how to extract video information and formats.
+
+- URL matching
+  - _VALID_URL covers:
+    - http(s)://coub.com/view/..., /embed/..., /coubs/...
+    - A legacy SWF/FB-player URL containing coub ID parameters
+  - _TESTS includes examples for standard URLs, a SWF URL (only_matching), a shorthand coub:ID, and a longer ID variant (only_matching).
+
+- Core extraction (_real_extract)
+  - video_id extraction: uses self._match_id(url).
+  - Data fetch: downloads JSON from http://coub.com/api/v2/coubs/{id}.json.
+  - Error handling: if the API response contains an "error", raises ExtractorError with a message including the extractor name.
+
+- Metadata extracted
+  - title: from coub['title']
+  - thumbnail: from coub['picture']
+  - duration: parsed as float from coub['duration']
+  - timestamp: parsed from coub['published_at'] or coub['created_at'] using parse_iso8601
+  - uploader: from coub['channel']['title']
+  - uploader_id: from coub['channel']['permalink']
+  - view_count: int from coub['views_count'] or coub['views_increase_count']
+  - like_count: int from coub['likes_count']
+  - repost_count: int from coub['recoubs_count']
+  - age_limit: derived from age_restricted or age_restricted_by_admin:
+    - True => 18
+    - False => 0
+    - None/absent => None
+
+- Formats construction
+  - The code builds a list of formats from file_versions in HTML5, plus separate entries for iPhone and mobile audio.
+  - Quality/order handling:
+    - QUALITIES = ('low', 'med', 'high')
+    - SOURCE_PREFERENCE = ('mobile', 'iphone', 'html5')
+    - Uses qualities(...) to create two key functions: quality_key and preference_key.
+  - HTML5 formats:
+    - Iterates through file_versions['html5'] for kinds in ('video', 'audio').
+    - Each item must be a dict with a 'url'; for each quality entry, creates a format dict with:
+      - url: item URL
+      - format_id: "html5-<video|audio>-<quality>"
+      - filesize: int_or_none(item.get('size'))
+      - vcodec: 'none' if kind == 'audio', else None
+      - quality: quality_key(quality)
+      - preference: preference_key('html5')
+  - iPhone formats:
+    - If file_versions['iphone'] contains a 'url', adds a format with:
+      - format_id: 'iphone'
+      - preference: preference_key('iphone')
+  - Mobile formats:
+    - If file_versions['mobile'] contains an 'audio_url', adds a format with:
+      - format_id: 'mobile-audio'
+      - preference: preference_key('mobile')
+  - Sorting: self._sort_formats(formats)
+
+- Return data
+  - A dict with:
+    - id, title, thumbnail, duration, timestamp, uploader, uploader_id
+    - view_count, like_count, repost_count, age_limit
+    - formats (list of formats)
+
+- Important implementation details
+  - Uses a robust approach to gather multiple format sources (HTML5 video/audio, iPhone, mobile) with a consistent format structure.
+  - Metadata extraction relies on the structure of the API response (coub['channel'], coub['file_versions'], etc.).
+  - Graceful handling of missing data with int_or_none/float_or_none/parse_iso8601 utilities.
+  - Age restriction logic maps boolean flags to appropriate age_limits (0 or 18) when available.
+
+- Overall functionality
+  - This extractor enables youtube-dl to fetch a Coub video’s details and multiple download formats, prioritizing HTML5 sources but also supporting iPhone and mobile variants, and returns a complete metadata set suitable for downloading.

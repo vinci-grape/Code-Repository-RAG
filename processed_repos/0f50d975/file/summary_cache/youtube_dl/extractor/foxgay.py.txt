@@ -1,0 +1,52 @@
+Concise summary of foxgay.py
+
+Overview
+- Implements a youtube-dl extractor FoxgayIE for Foxgay video pages.
+- Extracts video metadata and direct video formats by parsing the page, locating an iframe containing the video data, and constructing formats from the iframe payload.
+
+Key components
+- Class: FoxgayIE (subclass of InfoExtractor)
+- URL pattern: _VALID_URL matches http(s)://(www.)?foxgay.com/videos/(optional slug-)?<id>.shtml
+- _TEST: Provides a representative URL, expected md5, and info_dict (id, ext, title, description, age_limit, thumbnail)
+
+Main extraction flow (_real_extract)
+1) Identify video_id from URL using _match_id.
+2) Download the main video page.
+3) Extract title using an HTML regex for the <title> tag and remove the trailing " - Foxgay.com" with remove_end.
+4) Extract description via element with id inf_tit using get_element_by_id.
+5) Workaround cookies issue: clear cookies for the .foxgay.com domain from the downloader’s cookie jar.
+6) Find the iframe URL that contains the actual video using a regex on the page.
+7) Download the iframe content with a custom User-Agent ('curl/7.50.1') and label "Downloading video frame".
+8) Parse a JavaScript variable video_data from the iframe content (JSON object) using _search_regex and _parse_json.
+   - video_data contains:
+     - 'sources': list of video URLs
+     - 'resolutions': list of heights (optional)
+     - 'act_vid' with 'thumb' for the thumbnail
+9) Build format entries:
+   - For each pair (source, resolution) from zip(video_data['sources'], video_data.get('resolutions', itertools.repeat(None)))
+   - Each format dict has:
+     - 'url': the video URL
+     - 'height': int_or_none(resolution)
+10) Sort formats with _sort_formats.
+11) Return a result dict with:
+    - id: video_id
+    - title: extracted title
+    - formats: the prepared formats list
+    - description: extracted description
+    - thumbnail: video_data.get('act_vid', {}).get('thumb')
+    - age_limit: 18
+
+Implementation details
+- Utilities used: get_element_by_id, int_or_none, remove_end
+- Robustness for missing data: uses int_or_none for height conversion and itertools.repeat(None) to handle missing resolutions gracefully.
+- Video data extraction: relies on a JavaScript variable video_data in the iframe content, parsed with _search_regex and _parse_json.
+- Formatting: formats are constructed as a list of dictionaries with url and height (if available), then sorted for best-effort playback selection.
+- Caching workaround: clears cookies for foxgay.com to avoid pages without videos when using the default user agent.
+
+Output structure
+- Returns a standard youtube-dl info dictionary:
+  - id, title, formats, description, thumbnail, age_limit
+
+Notes
+- The _TEST example includes an expected mp4 extension and an md5 for the description, indicating the extractor validates these fields during testing.
+- The approach hinges on the iframe containing a video_data JSON structure; if Foxgay changes page structure, the extraction may require updates.

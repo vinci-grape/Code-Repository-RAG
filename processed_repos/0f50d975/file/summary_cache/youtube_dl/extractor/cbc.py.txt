@@ -1,0 +1,119 @@
+Here is a concise but comprehensive summary of the code in youtube-dl/youtube_dl/extractor/cbc.py.
+
+Purpose
+- Implement multiple CBC-related extractors to fetch video metadata and formats from various CBC services (cbc.ca, CBC Watch, CBC Olympics) and to route playback through CBC’s players (CBCPlayer, CBCWatchVideo) or ThePlatform.
+
+Key classes and main responsibilities
+- CBCIE (CBC Important/General CBC Content)
+  - IE_NAME: 'cbc.ca'
+  - _VALID_URL matches CBC article/clip pages (excluding the player path).
+  - Main flow:
+    - Downloads the page and derives a display_title.
+    - Finds CBC player initializations via CBC.APP.Caffeine.initInstance(...) in the page.
+    - For each initInstance, calls _extract_player_init to obtain a media_id. If mediaId is missing but clipId exists, fetches feed IDs from CBC endpoints (tpfeed.cbc.ca and feed.theplatform.com) to resolve a media_id.
+    - Returns a playlist of entries pointing to CBCPlayer (via url_result('cbcplayer:<media_id>', 'CBCPlayer', media_id)).
+    - Also scans the page for other media identifiers (iframe mediaId, div id, or GUIDs) and adds CBCPlayer entries for those media_ids (deduplicated with orderedSet).
+    - Title/description/other metadata are extracted from the page (OpenGraph, Twitter meta, or title tag).
+  - Important details:
+    - _extract_player_init handles multiple ways CBC publishes media (mediaId vs clipId) and uses external feeds to resolve a media_id when needed.
+    - Combines multiple potential sources into a single playlist (could include both CBCPlayer and direct CBCPlayer entries from embedded media).
+
+- CBCPlayerIE (CBC Player)
+  - IE_NAME: 'cbc.ca:player'
+  - _VALID_URL matches either 'cbcplayer:<id>' or CBC’s caffeine syndicate playback URLs.
+  - Real extraction returns a transparent URL to ThePlatform:
+    - Builds a ThePlatform URL using the media GUID (video_id) and forces SMIL URL retrieval.
+    - Returns a URL_transparent pointing to ThePlatform with id set to video_id.
+  - Purpose: delegate actual media retrieval to ThePlatform (ThePlatform extractor handles formats, etc.).
+
+- CBCWatchBaseIE (Base for CBC Watch)
+  - Handles CBC Watch (Clearleap) authentication, device management, and RSS parsing.
+  - Core responsibilities:
+    - Device management and login:
+      - _real_initialize loads cached device credentials, or registers a new device via /device/register.
+      - If login credentials are provided (via netrc), signs in to obtain a signature from CBCWatch’s API and stores a device token.
+      - Caches device_id and device_token for reuse.
+    - _call_api executes Clearleap API calls, attaching device headers; auto-refreshes the device token on 401 errors by re-registering the device.
+    - _parse_rss_feed parses an RSS feed (MRSS with media:content, media:thumbnail, etc.) to build a list of entries:
+      - Each entry is a url_transparent to a video URL (content_url) with metadata including id (guid), title, description, timestamp, duration, age_limit, episode/series/season information, and thumbnails.
+      - The entries use ie_key 'CBCWatchVideo' to route to CBCWatchVideoIE for actual video extraction.
+    - Returns a playlist result from the RSS channel, with channel GUID as id and channel title/description.
+  - Important details:
+    - Supports geo-restricted CBC Watch feeds; communicates via Clearleap XML/RSS.
+    - Uses a nested namespace map for MRSS and Clearleap specifics.
+
+- CBCWatchVideoIE (CBC Watch Video)
+  - Extends CBCWatchBaseIE.
+  - _VALID_URL matches api-cbc.cloud.clearleap.com web play URLs containing a contentId GUID.
+  - Real extraction:
+    - Calls the Clearleap API for the given URL to obtain an XML response.
+    - Extracts an m3u8 (or alternative) URL from the response.
+    - Generates formats:
+      - If a content has an IIS source, uses _extract_ism_formats.
+      - Otherwise uses _extract_m3u8_formats with m3u8 (or m3u8_native) depending on live status.
+    - Adjusts audio codecs based on format_id (AAC -> aac, AC3 -> ac-3).
+    - If an RSS feed is present in the response, merges metadata from the RSS feed into the video info (and discards duplicate fields like url/type/ie_key from the RSS-derived data).
+  - Returns an info dict with id and title (and the collected formats). Also includes metadata from the RSS feed when available.
+
+- CBCWatchIE (CBC Watch List)
+  - IE_NAME: 'cbc.ca:watch'
+  - _VALID_URL matches watch.cbc.ca pages that list/watch CBC content.
+  - _real_extract:
+    - Extracts an RSS feed by calling _call_api('web/browse/' + video_id, video_id).
+    - Returns the parsed RSS feed via _parse_rss_feed, producing a playlist of CBCWatchVideo entries (via the url_transparent route to CBCWatchVideoIE).
+
+- CBCOlympicsIE (CBC Olympics)
+  - IE_NAME: 'cbc.ca:olympics'
+  - _VALID_URL matches olympics.cbc.ca video paths.
+  - _real_extract:
+    - Gets display_id, downloads the page, extracts videoId from hidden inputs.
+    - Fetches an XML document at https://olympics.cbc.ca/videodata/<video_id>.xml and parses:
+      - Title, kind (Live or On-Demand), and is_live flag.
+      - For live, adjusts title with _live_title.
+    - For each videoSource in videoSources:
+      - Reads uri; if missing, skip.
+      - Tokenizes by calling https://olympics.cbc.ca/api/api-akamai/tokenize with VideoSource parameter. Includes a specific Akamai cookie to bypass restrictions.
+      - If tokenization succeeds, uses ContentUrl to fetch formats:
+        - If video_source_format == 'IIS', uses _extract_ism_formats.
+        - Otherwise uses _extract_m3u8_formats for m3u8, with m3u8_id and appropriate m3u8 type depending on live status.
+    - Sorts formats and returns a dict with id, display_id, title, description, thumbnail, duration, formats, and is_live flag.
+  - Important details:
+    - Handles Akamai tokenization for Olympic videos.
+    - Supports both IIS and HLS formats, including live streams.
+
+Helper utilities and patterns used
+- Inheritance and composition:
+  - CBCIE is a separate entry point for CBC content outside of the watch/player ecosystems.
+  - CBCPlayerIE is a thin wrapper that delegates to ThePlatform for actual playback.
+  - CBCWatchBaseIE provides shared device/authentication/RSS parsing for CBC Watch-related extractors.
+  - CBCWatchVideoIE and CBCWatchIE implement specific watch video and watch list extraction using the Clearleap API.
+  - CBCOlympicsIE uses a dedicated flow with Akamai tokenization for Olympics videos.
+- Robust parsing helpers:
+  - _download_webpage, _download_xml, _download_json for fetching resources.
+  - _og_search_title, _html_search_meta, _html_search_regex for title/description extraction.
+  - _extract_m3u8_formats and _extract_ism_formats to build formats from m3u8 and IIS sources.
+  - _sort_formats to order formats by quality.
+  - xpath_* helpers for XML parsing in CBCWatch RSS flows.
+  - parse_iso8601, parse_duration, parse_age_limit for metadata parsing.
+  - strip_or_none, int_or_none for safe data extraction.
+- Caching and netrc support:
+  - CBCWatchBaseIE uses cached device tokens per user (based on a hashed email key) and can load credentials from a netrc machine (CBCWatch) for automatic login.
+- Geo-restrictions:
+  - Tests and doc strings note geo-restricted to Canada; code paths include bypasses for some content (where allowed) with careful handling of tokens and feeds.
+
+Notable implementation details
+- CBCIE aggregates media IDs from:
+  - CBC.APP.Caffeine.initInstance blocks
+  - If frame/iframe references with mediaId
+  - Certain GUID patterns
+  - It then builds a playlist where each item is a CBCPlayer entry, enabling CBCPlayer-based playback via ThePlatform.
+- The CBCPlayerIE approach focuses playback routing to ThePlatform, keeping CBC’s own player logic decoupled from actual format extraction.
+- CBCWatchBaseIE uses a two-step token mechanism (login to get access token, then exchange for a device signature) to authorize Clearleap API calls and OS device management, essential for accessing CBC Watch feeds.
+- The Olympics extractor demonstrates a tokenizer-based approach for Akamai content delivery, which is common in streaming pipelines requiring time-limited tokens.
+
+Overall
+- The file provides a comprehensive set of CBC content extractors covering:
+  - Regular CBC site media (via CBCIE and CBCPlayerIE)
+  - CBC Watch (with Clearleap-based RSS feeds) via CBCWatchBaseIE, CBCWatchVideoIE, and CBCWatchIE
+  - CBC Olympics with Akamai-tokenized video sources
+- Each extractor focuses on building reliable metadata (title, description, timestamps) and accurate formats (HLS, IIS, AAC/AC3 audio, live vs VOD), with careful handling of geo restrictions, device authentication, and external feed lookups.

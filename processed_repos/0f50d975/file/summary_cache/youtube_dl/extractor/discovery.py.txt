@@ -1,0 +1,45 @@
+- Purpose
+  - A youtube-dl extractor (DiscoveryIE) for Discovery Network sites (go.discovery.com and related Investigation Discovery, Science Channel, HGTV family, and others under discovery.com/watch subdomains).
+  - Fetches video metadata and streaming information via Discovery’s API and returns a standardized video info object.
+
+- Core class and setup
+  - Class: DiscoveryIE(DiscoveryGoBaseIE)
+  - Key constants:
+    - _VALID_URL: Regex to match Discovery video pages across multiple domains and paths like /tv-shows/{show_slug}/videos/{id} or /full-episodes/{id}.
+    - _GEO_COUNTRIES = ['US']; _GEO_BYPASS = False
+    - _API_BASE_URL = 'https://api.discovery.com/v1/'
+  - _TESTS: Examples of matching URLs and expected extracted data (title, id, ext, duration, description via MD5, etc.). Some tests are only_matching to ensure URL matching behavior.
+
+- Main flow (_real_extract)
+  - Parse URL to obtain site, show_slug, display_id using the _VALID_URL regex.
+  - Retrieve cookies for the URL and try to obtain an access token:
+    - Prefer affiliate/anonymous auth token from eosAf or eosAn cookies.
+    - If cookie-based token not available, fetch an anonymous token from https://<site>.com/anonymous with specific query parameters (authRel, client_id, nonce, redirectUri). The nonce is a random 32-letter string.
+    - When cookie-based token is present, the code extracts a JSON blob from the cookie value (double unquoting) and reads 'a' or 'access_token'.
+  - Build Authorization header: "Bearer <access_token>" and merge with geo_verification_headers.
+
+- API calls (Discovery API)
+  - Fetch video metadata:
+    - Endpoint: https://api.discovery.com/v1/content/videos
+    - Query params: embed=show.name, fields=authenticated,description.detailed,duration,episodeNumber,id,name,parental.rating,season.number,show,tags, slug=<display_id>, show_slug=<show_slug>
+    - Expect a list; select the first item as video and get video_id = video['id'].
+  - Fetch streaming metadata:
+    - Endpoint: https://api.discovery.com/v1/streaming/video/<video_id>
+    - Uses the same headers as above.
+  - Return value is produced by _extract_video_info(video, stream, display_id) (method provided by the base class), which converts the raw API data into youtube-dl’s standard info dictionary.
+
+- Error handling
+  - If an ExtractorError occurs and the underlying cause is an HTTP error with code 401 or 403:
+    - Read the JSON body and inspect 'description'.
+    - If description contains 'resource not available for country', raise geo restriction (countries = ['US']).
+    - If description contains 'Authorized Networks', raise a user-friendly ExtractorError explaining this requires a cable service subscription and suggesting cookies as a workaround.
+    - Otherwise, raise ExtractorError with the description.
+  - Re-raise any non-HTTP errors.
+
+- Notable details
+  - Token handling prioritizes existing cookies before requesting a new token.
+  - The anonymous token request uses a random nonce to comply with the endpoint’s requirements.
+  - The extractor relies on the DiscoveryGoBaseIE for common video info processing via _extract_video_info.
+  - Geographic restrictions are explicitly handled to surface a geo-limit or provider subscription message.
+
+In short: DiscoveryIE authenticates (via cookies or anonymous flow), calls Discovery’s v1 API to fetch video and streaming data for a given show slug and video id, handles geo/copyright related errors, and outputs a standard video info dict using the base extractor.

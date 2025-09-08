@@ -1,0 +1,87 @@
+- Purpose
+  - Implement Rutube extractors for youtube-dl: fetch video metadata, formats, and playlist/channel/movie/person data from Rutube APIs and embedded pages.
+
+- Core architecture
+  - RutubeBaseIE
+    - Shared utilities for all Rutube extractors.
+    - _download_api_info(video_id, query): fetches JSON metadata from /api/video/{video_id}/ with format=json.
+    - _extract_info(video, video_id=None, require_title=True): converts Rutube video JSON into a standardized info dict (id, title, description, thumbnail, duration, uploader/uploader_id, timestamp, category, age_limit, view_count, comment_count, is_live). Handles missing title, converts timestamps, and maps adult flag to age_limit (True -> 18, False/None -> 0/None).
+    - _download_and_extract_info(video_id, query=None): downloads video JSON and extracts info.
+    - _download_api_options(video_id, query): fetches options JSON from /api/play/options/{video_id}/ (headers include geo_verification_headers()).
+    - _extract_formats(options, video_id): builds a list of formats from options['video_balancer']:
+      - m3u8 URLs are expanded via _extract_m3u8_formats.
+      - f4m URLs are expanded via _extract_f4m_formats.
+      - other URLs are kept as direct entries with format_id.
+      - sorts formats before returning.
+    - _download_and_extract_formats(video_id, query=None): convenience wrapper to fetch options and extract formats.
+
+  - RutubeIE (standard video)
+    - Extracts single Rutube videos (not playlists).
+    - _VALID_URL matches Rutube video or embedded URLs with a 32-character id.
+    - _extract_urls(webpage): scans a page forIframe embeds to Rutube and returns found embed URLs.
+    - _real_extract(url): gets video_id, downloads metadata and formats via the base methods, and returns the info dict.
+
+  - RutubeEmbedIE
+    - Extracts Rutube videos embedded via a page.
+    - _VALID_URL matches /video/embed/ or /play/embed/ with numeric embed id.
+    - _real_extract(url):
+      - embed_id = matched id
+      - Parses URL query for possible private-video tokens and passes them as query to API calls.
+      - options = _download_api_options(embed_id, query)
+      - video_id = options['effective_video']
+      - formats = _extract_formats(options, video_id)
+      - info = _download_and_extract_info(video_id, query)
+      - Adds extractor_key and formats to info and returns it.
+
+  - RutubePlaylistBaseIE
+    - Base for paginated Rutube lists (channels, movies, people, playlists).
+    - _entries(playlist_id, ...):
+      - Iterates pages starting at 1, downloading JSON pages from a template URL.
+      - Each page has 'results' with video_url and metadata.
+      - Yields entries as dicts with _type 'url', url, and ie_key 'Rutube' (RutubeIE).
+      - Stops when there are no more pages (based on next/has_next).
+    - _extract_playlist(playlist_id, ...): builds a playlist result from the generator of entries.
+    - _real_extract(url): delegates to _extract_playlist using the matched playlist id.
+
+  - RutubeChannelIE
+    - Channel listing extractor.
+    - _VALID_URL matches /tags/video/{id}/
+    - _PAGE_TEMPLATE = http://rutube.ru/api/tags/video/%s/?page=%s&format=json
+
+  - RutubeMovieIE
+    - Movie listing extractor.
+    - _VALID_URL matches /metainfo/tv/{id}
+    - _MOVIE_TEMPLATE and _PAGE_TEMPLATE for movie data and per-video pages.
+    - _real_extract(url): downloads movie JSON, then returns a playlist built from movie’s data (name used as playlist_name).
+
+  - RutubePersonIE
+    - Person video listings.
+    - _VALID_URL matches /video/person/{id}
+    - _PAGE_TEMPLATE for person page results.
+
+  - RutubePlaylistIE
+    - General playlist extractor (requires pl_type and pl_id in query string).
+    - _VALID_URL matches Rutube video/embed URLs containing pl_id and pl_type.
+    - _PAGE_TEMPLATE = http://rutube.ru/api/playlist/%s/%s/?page=%s&format=json
+    - suitable(url): ensures the URL has pl_type and pl_id parameters; otherwise not suitable.
+    - _next_page_url(page_num, playlist_id, item_kind): fills in item_kind (pl_type) into template.
+    - _real_extract(url): parses pl_type and pl_id from query and returns the corresponding playlist.
+
+- Important implementation details
+  - Formats discovery: ring-fenced in RutubeBaseIE._extract_formats using options['video_balancer']. Supports HLS (m3u8), F4M, and direct URLs; uses determine_ext to choose handling.
+  - Metadata shaping: _extract_info maps Rutube API fields to commonly used keys:
+    - id: video['id'] or passed video_id
+    - title: required (unless allow_title=False in playlists)
+    - description, thumbnail_url, duration (int), uploader/uploader_id, timestamp (normalized via unified_timestamp), category (as a single-item list), age_limit (18 for adult, else 0/None), view_count, comment_count, is_live.
+  - Private videos: RutubeEmbedIE passes query string tokens to option retrieval and to metadata fetch, allowing access to private videos.
+  - Playlist pagination: RutubePlaylistBaseIE._entries iterates until has_next is false or next URL is missing; yields entries with video_url and RutubeIE as the embedded video extractor.
+  - Geo/privacy headers: When fetching options for embedded embeds, the code uses geo_verification_headers() to comply with Rutube’s geolocation checks.
+  - Compatibility helpers: uses compat_parse_qs, compat_urllib_parse_urlparse for robust URL/query handling; uses compat_str for uploader_id normalization.
+  - Tests: Several _TESTS sections verify typical Rutube video extraction, embedded URLs, and playlist URL patterns.
+
+- Summary
+  - This file provides a full set of extractors for Rutube in youtube-dl, including:
+    - RutubeIE for standard videos
+    - RutubeEmbedIE for embedded videos (with token handling)
+    - RutubeChannelIE, RutubeMovieIE, RutubePersonIE, RutubePlaylistIE for various paginated/listing endpoints
+  - All extractors rely on a common RutubeBaseIE to fetch JSON metadata and to build a consistent info dict and formats list from Rutube API responses.

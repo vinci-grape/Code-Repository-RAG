@@ -1,0 +1,91 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/zype.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Zype video embeds, handling both direct outputs (array of formats) and indirect sources via m3u8 or verizon/content Uplynk sources.
+  - Produce a standard YouTube-DL info_dict with id, title, formats, subtitles, thumbnails, and metadata.
+
+- Key class
+  - ZypeIE(InfoExtractor): Main extractor class.
+
+- URL patterns and tests
+  - _ID_RE: hexadecimal ID pattern.
+  - _COMMON_RE: common embed URL pattern used by Zype player.
+  - _VALID_URL: full regular expression to identify valid Zype embed URLs.
+  - _TEST: example test case with an embed URL, expected MD5, and info_dict fields to validate extraction.
+
+- URLs extraction helper
+  - Static method _extract_urls(webpage):
+    - Scans the page for script tags whose src points to Zype embed URLs matching the common pattern.
+    - Returns a list of discovered embed URLs.
+
+- Core extraction flow (_real_extract)
+  - Video ID extraction: video_id = self._match_id(url).
+  - Attempt to fetch JSON response:
+    - Uses a URL transformation to convert the JS/HTML endpoint into a .json? endpoint: re.sub(r'\.(?:js|html)\?', '.json?', url).
+    - response = downloaded_json['response'].
+  - Robust error handling:
+    - If an ExtractorError occurs due to HTTP 400/401/403, parse the server-provided message from the HTTP error body and raise an ExtractorError with that message (read and parsed as JSON).
+    - Otherwise, re-raise the original error.
+
+- Response parsing
+  - body = response['body']; video = response['video']; title = video['title'].
+
+  - Branching on body type:
+    - If body is a dict:
+      - Build formats from body['outputs']:
+        - For each output with a URL:
+          - If name == 'm3u8': use _extract_m3u8_formats(output_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False).
+          - Else: create a format dict with:
+            - format_id = name
+            - tbr = bitrate (int)
+            - url = output_url
+            - If name is 'm4a' or 'mp3', set vcodec to 'none'
+            - Else populate height/width if available
+      - text_tracks = body.get('subtitles') or []
+    - If body is not a dict (likely a string/HTML snippet):
+      - Try to extract an m3u8 URL directly from body using a regex.
+      - If not found, try to extract a 'sources' array from body and then retrieve a relevant attribute via get_attr helper (integration may be 'verizon-media', in which case construct m3u8_url from an id attribute).
+      - Build formats from the m3u8_url via _extract_m3u8_formats(..., m3u8_id='hls').
+      - Extract text_tracks using a regex for textTracks and parse as JSON if present.
+
+  - Formatting and sorting:
+    - self._sort_formats(formats)
+
+- Subtitles and thumbnails
+  - subtitles: build from text_tracks if present.
+    - For each text_track, take either track['file']['src'] or similar; map to a language label (default 'English').
+  - thumbnails: collect from video.get('thumbnails') with fields url, width, height.
+
+- Return information dictionary
+  - id: video_id
+  - display_id: video.get('friendly_title')
+  - title: title
+  - thumbnails: list of dicts with url, width, height
+  - description: from video.get('description') or 'ott_description' or 'short_description' using dict_get
+  - timestamp: parse_iso8601(video.get('published_at'))
+  - duration: int_or_none(video.get('duration'))
+  - view_count: int_or_none(video.get('request_count'))
+  - average_rating: int_or_none(video.get('rating'))
+  - season_number: int_or_none(video.get('season'))
+  - episode_number: int_or_none(video.get('episode'))
+  - formats: list of format dicts constructed earlier
+  - subtitles: dict of language -> list of subtitle dicts
+
+- Important implementation details
+  - Flexible handling of response shapes:
+    - If body is a dict, relies on body['outputs'] for direct formats and body.get('subtitles') for text tracks.
+    - If body is not a dict, attempts to locate an m3u8 URL or a verizon-media “sources” list to derive formats and text tracks.
+  - HLS handling:
+    - Uses _extract_m3u8_formats for HLS streams with m3u8_native, assigning m3u8_id='hls'.
+  - Audio/video format handling:
+    - Distinguishes audio-only formats (m4a/mp3) by setting vcodec to 'none'.
+    - Populates resolution metadata (height/width) when available.
+  - Error handling:
+    - Special handling for common HTTP errors to surface server-provided messages instead of a generic error.
+  - Metadata extraction:
+    - Uses multiple potential fields for description.
+    - Attempts to parse timestamps and duration robustly via utility helpers (parse_iso8601, int_or_none).
+  - Compatibility hints:
+    - Uses compat_HTTPError and a tolerant approach to non-uniform response shapes often seen in Zype/VOD embeds.
+
+This extractor comprehensively supports Zype embedded players by parsing either structured outputs or ad-hoc sources, builds a consistent set of video formats (including HLS when available), handles subtitles and thumbnails, and returns a rich metadata-enabled info_dict suitable for YouTube-DL consumers.

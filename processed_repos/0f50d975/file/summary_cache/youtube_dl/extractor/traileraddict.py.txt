@@ -1,0 +1,47 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/traileraddict.py
+
+- Purpose
+  - Implement an extractor for TrailerAddict trailer/clip pages to fetch video URL and metadata for youtube-dl.
+
+- Key class
+  - TrailerAddictIE, subclass of InfoExtractor.
+
+- URL handling
+  - _VALID_URL matches TrailerAddict trailer/clip pages and captures:
+    - movie (the movie segment)
+    - trailer_name (the specific trailer segment)
+  - _TEST provides a sample URL and expected metadata (id, title, description, ext).
+
+- Main workflow (_real_extract)
+  - Parse URL with the regex to obtain movie/trailer_name and form a human-readable name for logging.
+  - Download the main page (webpage).
+  - Extract:
+    - title from the HTML <title> tag and strip trailing " - Trailer Addict".
+    - view_count from a span with class views_n (optional).
+    - video_id from a param tag value like /emb/<id>.
+  - Determine video quality option:
+    - If the page contains a JavaScript function named watchplus (or nowatchplus), use fvarhd for HD availability; otherwise use fvar.
+  - Build an info URL: http://www.traileraddict.com/{fvar}.php?tid=<video_id>.
+  - Download the info webpage.
+  - Extract:
+    - final_url from a &fileurl=... parameter; replace %3F with ? to fix URL encoding.
+    - thumbnail_url from a &image=...& parameter.
+  - Optional description:
+    - Extract from a synopsis block via an HTML pattern that targets a synopsis div and a following movie_label_info section.
+  - Return a metadata dictionary with:
+    - id: video_id
+    - url: final video URL
+    - title
+    - thumbnail
+    - description (optional)
+    - view_count (optional)
+
+- Important implementation details
+  - Uses youtube-dl helper methods: _download_webpage, _search_regex, _html_search_regex.
+  - view_count is optional (fatal=False); may be None if not found.
+  - description extraction is optional (fatal=False).
+  - The _WORKING flag is set to False, indicating the extractor may be non-functional currently.
+  - The final video URL is sourced from a secondary info page, with careful handling of URL-encoded characters.
+
+- Output
+  - A dict suitable for youtube-dl’s standard info dictionary, containing id, url, title, thumbnail, description, and view_count.

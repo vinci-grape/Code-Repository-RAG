@@ -1,0 +1,85 @@
+concise summary of the code in ./youtube-dl/youtube_dl/extractor/ellentube.py
+
+- Purpose
+  - Implement ellentube extractors for youtube-dl to fetch video and playlist data from EllenTube.
+  - Supports API-based item extraction, page-based video extraction, and playlist/episode extraction with a feed.
+
+- Key classes
+  - EllenTubeBaseIE (InfoExtractor)
+    - _extract_data_config(webpage, video_id)
+      - Locates a div with a data-component attribute for Details, extracts its data-config JSON, and parses it.
+      - Uses a robust regex to find the relevant HTML block and _parse_json to return a Python object.
+    - _extract_video(data, video_id)
+      - Builds a video info dictionary from the parsed data.
+      - Determines formats by scanning data['media'] for an entry with id 'm3u8' and uses _extract_m3u8_formats with:
+        - URL from entry['url']
+        - video_id
+        - container 'mp4'
+        - entry_protocol 'm3u8_native'
+        - m3u8_id 'hls'
+      - Extracts duration from the m3u8 entry if present.
+      - Collects insights (view, like) via a small helper get_insight(kind) that reads data['insight']['<kind>s'] and converts to int.
+      - Returns a dict with:
+        - extractor_key pointing to EllenTubeIE.ie_key()
+        - id, title, description, duration, thumbnail
+        - timestamp (convert publishTime with scale=1000)
+        - view_count, like_count
+        - formats
+
+  - EllenTubeIE (extends EllenTubeBaseIE)
+    - _VALID_URL
+      - Matches either ellentube: or the API item endpoint for EllenTube items (UUIDs).
+    - _TESTS
+      - Provides a real API URL test with expected fields (id, ext mp4, title, description, thumbnail, duration, timestamp, upload_date, view_count, like_count).
+    - _real_extract(url)
+      - Extracts video_id from URL.
+      - Downloads item data from https://api-prod.ellentube.com/ellenapi/api/item/{video_id} (JSON).
+      - Delegates to _extract_video(data, video_id) to build the final info dict.
+
+  - EllenTubeVideoIE (extends EllenTubeBaseIE)
+    - _VALID_URL
+      - Matches a standard EllenTube video page: https://www.ellentube.com/video/… .html
+    - _TEST
+      - Basic test with only_matching to ensure URL pattern matching.
+    - _real_extract(url)
+      - Downloads the page; uses _extract_data_config to obtain the item id.
+      - Returns a URL result that points to ellentube:{video_id} with ie set to EllenTubeIE, effectively delegating to the API-based extractor.
+
+  - EllenTubePlaylistIE (extends EllenTubeBaseIE)
+    - _VALID_URL
+      - Matches playlist-like pages: https://www.ellentube.com/(episode|studios)/<id>.html
+    - _TESTS
+      - Include tests for a real playlist page with:
+        - id, title, description
+        - playlist_count
+      - Also a pattern-only test.
+    - _real_extract(url)
+      - Extracts display_id from URL; downloads the page.
+      - Uses _extract_data_config(webpage, display_id)['data'] to get data, including a 'filter' string.
+      - Fetches the feed via https://api-prod.ellentube.com/ellenapi/api/feed/?{filter}.
+      - Builds entries by filtering for elements with type 'VIDEO' and having an id, calling _extract_video(elem, elem['id']) for each.
+      - Returns a playlist_result with:
+        - entries, display_id, data.get('title'), clean_html(data.get('description'))
+
+- Important implementation details
+  - Data extraction
+    - Data configurations are embedded in page HTML and retrieved via _extract_data_config using data-component="Details" (case-insensitive).
+    - The data-config attribute contains JSON; extract_attributes is used to fetch it, then _parse_json to Python.
+  - Formats
+    - Supports HLS (m3u8) URLs discovered in data['media'] entry with id 'm3u8'.
+    - Uses _extract_m3u8_formats with m3u8_native handling and 'hls' id.
+  - Metadata handling
+    - Timestamps are parsed from publishTime with scale=1000 (ms to seconds).
+    - view_count and like_count are read from data['insight'] safely via try_get and int_or_none.
+    - Descriptions passed through as-is in both item and playlist contexts; playlist descriptions are cleaned with clean_html.
+  - Cross-referencing extractors
+    - EllenTubeVideoIE returns a URL result that redirects to EllenTubeIE (via ellentube:{video_id}) to reuse the API-based extraction flow.
+  - Tests
+    - Includes _TESTS for direct API item, video page, and playlist pages to validate URLs, expected fields, and behavior.
+
+- Summary
+  - This module provides three extractors for EllenTube:
+    - EllenTubeIE: primary API-based item extractor.
+    - EllenTubeVideoIE: page-based extractor that resolves to the API item via data-config.
+    - EllenTubePlaylistIE: playlist/episode extractor that builds a list of video entries from the feed.
+  - All extractors share a common data parsing approach in EllenTubeBaseIE, which handles the data-config extraction and the video data processing (formats, duration, timestamps, and insights).

@@ -1,0 +1,52 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/bokecc.py
+
+Overview
+- Implements a YouTube-dl extractor for BokeCC (CC视频) videos.
+- Provides a base extractor for parsing BokeCC formats and a concrete IE for handling BokeCC “playvideo” URLs.
+
+Key classes
+- BokeCCBaseIE (InfoExtractor)
+  - Core functionality to extract available video formats from a BokeCC page.
+  - Method: _extract_bokecc_formats(webpage, video_id, format_id=None)
+    - Locates BokeCC player parameters embedded in the page by scanning script/embed tags for a URL to p.bokecc.com with a query string.
+    - Parses the query string into a dict (siteid, vid, etc.) using compat_parse_qs.
+    - Downloads XML with play information from:
+      http://p.bokecc.com/servlet/playinfo?uid=<siteid>&vid=<vid>&m=1
+    - Builds a list of formats from the XML: for each quality node, captures:
+      - format_id: quality.attrib['value']
+      - url: quality.find('./copy').attrib['playurl']
+      - preference: int(quality.attrib['value'])
+    - Sorts formats with _sort_formats and returns the list.
+- BokeCCIE (BokeCCBaseIE)
+  - IE description and URL pattern.
+  - Class attributes:
+    - IE_DESC = 'CC视频'
+    - _VALID_URL = r'https?://union\.bokecc\.com/playvideo\.bo\?(?P<query>.*)'
+    - _TESTS:包含一个示例 URL、期望的 id、ext、title等字段
+  - _real_extract(self, url)
+    - Extracts query parameters from the URL using the _VALID_URL regex and compat_parse_qs.
+    - Ensures both vid and uid exist; otherwise raises ExtractorError('Invalid URL', expected=True).
+    - Constructs video_id as 'uid_vid' (joined with underscore).
+    - Downloads the page content.
+    - Returns a dict with:
+      - 'id': video_id
+      - 'title': 'BokeCC Video' (页面中未提供实际标题时的默认值)
+      - 'formats': result of _extract_bokecc_formats(webpage, video_id)
+
+Important implementation details
+- Robust query parsing: uses compat_parse_qs to convert URL/query strings into dicts with list values.
+- Dynamic format discovery: formats are derived from an XML response (/servlet/playinfo) rather than static page data.
+- XML structure assumptions:
+  - XML path: ./video/quality
+  - Each quality node has:
+    - attribute 'value' (used for format_id and preference)
+    - a child <copy> with attribute 'playurl' (the actual media URL)
+- URL construction:
+  - Play info request uses siteid (uid) and vid values extracted from the player URL on the page.
+- Sorting: formats are reordered using _sort_formats to prioritize higher-quality entries.
+- Title handling: default title is used when the page has no explicit title ("BokeCC Video").
+
+Behavioral notes
+- If the required uid or vid parameters are missing in the URL, extraction fails with a clear ExtractorError.
+- The extractor relies on the existence of BokeCC’s playinfo XML and public access to play URLs.
+- The _TESTS entry demonstrates expected output fields: id, ext, and title for a sample video.

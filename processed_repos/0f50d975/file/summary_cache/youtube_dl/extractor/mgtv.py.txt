@@ -1,0 +1,77 @@
+Summary of MGTVIE (file: youtube-dl/youtube_dl/extractor/mgtv.py)
+
+- Purpose
+  - Implement an InfoExtractor for Mango TV (MGTV) video pages on mgtv.com, extracting video metadata and multiple video formats.
+
+- Key class
+  - MGTVIE(InfoExtractor)
+    - _VALID_URL: Matches MGTV video pages under /v/ or /b/ with a numeric id ending in .html.
+    - IE_DESC: "芒果TV" (MGTV)
+    - _TESTS: Includes a primary test URL with expected id, extension, title, description, duration, and thumbnail; plus two additional tests using only_matching to verify URL pattern handling.
+
+- Core extraction flow (_real_extract)
+  1. Video ID extraction
+     - video_id = self._match_id(url)
+
+  2. Token tk2 generation for API requests
+     - Builds a token using a base64-encoded string containing:
+       - did=<uuid>, pno=1030, ver=0.3.0301, clit=<current_timestamp>
+     - The string is base64-urlsafe encoded and reversed (tk2).
+
+  3. Fetch video metadata from MGTV API
+     - Request: GET https://pcweb.api.mgtv.com/player/video with query parameters tk2 and video_id
+     - Headers: geo verification headers
+     - Response data accessed at ['data']; error handling converts certain HTTP 401 errors into geo-restricted errors.
+       - If the API returns code 40005, raise geo restriction for configured countries.
+       - Otherwise, raise an ExtractorError with the API-provided message.
+
+  4. Basic video info
+     - info = api_data['info']
+     - title = info['title'].strip()
+
+  5. Fetch stream/source information
+     - Request: GET https://pcweb.api.mgtv.com/player/getSource with query:
+       - pm2: api_data['atc']['pm2'] (derived from initial response)
+       - tk2: same tk2 token
+       - video_id: video_id
+     - Response data accessed at ['data']
+     - stream_domain = stream_data['stream_domain'][0]
+
+  6. Build formats from available streams
+     - Iterate over stream entries in stream_data['stream']:
+       - stream_path = stream.get('url'); skip if missing
+       - Retrieve per-format details: GET stream_domain + stream_path (note: include a human-readable note)
+       - format_url = format_data.get('info'); skip if missing
+       - tbr (bitrate) determination:
+         - First try stream['filebitrate']
+         - If missing, try extracting a number with regex r'_(\d+)_mp4/' from format_url
+         - Use int_or_none to normalize
+       - Append a format dict:
+         - 'format_id': str(tbr) if available else str(idx)
+         - 'url': format_url
+         - 'ext': 'mp4'
+         - 'tbr': tbr
+         - 'protocol': 'm3u8_native'
+         - 'http_headers': {'Referer': original url}
+         - 'format_note': stream.get('name')
+     - After collecting, sort formats with self._sort_formats(formats)
+
+  7. Return the final video information
+     - Dictionary includes:
+       - 'id': video_id
+       - 'title': title
+       - 'formats': formats
+       - 'description': info.get('desc')
+       - 'duration': int_or_none(info.get('duration'))
+       - 'thumbnail': info.get('thumb')
+
+- Important implementation details
+  - Geo-restriction handling: If MGTV API returns an HTTP 401 with a body indicating code 40005, the extractor raises a geo-restricted error for configured countries.
+  - Token generation: The tk2 token uses a UUID-based device ID and current time, encoded with base64 urlsafe and reversed; this is required by MGTV APIs.
+  - Multiple sources/streams: The code first gets a list of streams and then fetches per-stream format information from a derived domain, enabling selection among potentially multiple quality levels.
+  - Referer header: Each per-format request includes a Referer header pointing to the original page URL to satisfy server checks.
+  - Robustness: Uses int_or_none and a fallback regex to determine bitrate; gracefully skips formats missing required fields.
+  - Compatibility utilities: Uses compat_httpError and compat_str to support varying Python versions in the environment.
+
+- Overall functionality
+  - The extractor logs into MGTV’s video API with a generated token, retrieves video metadata and available streams, fetches actual media URLs for each stream, constructs a list of formats with appropriate metadata, and returns a structured dictionary compatible with youtube-dl’s standard video info format. It also handles geo-restrictions and potential API errors gracefully.

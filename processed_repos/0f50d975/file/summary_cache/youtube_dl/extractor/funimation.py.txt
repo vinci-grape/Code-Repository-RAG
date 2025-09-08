@@ -1,0 +1,92 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/funimation.py
+
+Overview
+- Implements a Funimation extractor (FunimationIE) for youtube-dl.
+- Supports authenticated access via a login API and fetches video sources from Funimation’s showexperience API.
+- Produces standard info dicts including id, title, description, thumbnail, series/season/episode info, and a list of formats (including m3u8/hls).
+
+Key components
+- Class: FunimationIE(InfoExtractor)
+  - _VALID_URL: Regex matching Funimation pages that contain a show/song/video, capturing the id (last path segment after shows/.../).
+  - _NETRC_MACHINE: 'funimation' for netrc-based login.
+  - _TOKEN: Cached authentication token (initially None).
+  - _TESTS: Examples for unit testing, including:
+    - Direct show pages with expected id, display_id, ext, title, description, and thumbnail.
+    - A UK domain page (only_matching test).
+    - A page with language code in the URL (only_matching test).
+
+Login and initialization
+- _login(self):
+  - Retrieves username/password via _get_login_info() (netrc or user input).
+  - If provided, POSTs to https://prod-api-funimationnow.dadcdigital.com/api/auth/login/ with URL-encoded credentials.
+  - On success, stores returned token in self._TOKEN.
+  - If HTTP 401 occurs, extracts the error message from the response and raises an ExtractorError with that message (marked as expected).
+- _real_initialize(self):
+  - Invokes _login() to obtain a token before extraction.
+
+Extraction process (_real_extract)
+- Determine display_id from URL using self._match_id(url).
+- Download the page content (webpage).
+- Helper _search_kane(name): extracts values from JavaScript variables like KANE_customdimensions.<name> using a regex.
+- Title data extraction:
+  - Attempts to parse TITLE_DATA (JSON-like) from the page via a safe path using js_to_json; default to empty dict if not found.
+- video_id resolution (priority order):
+  - title_data.get('id') if present.
+  - Else KANE_customdimensions.videoID or an iframe-based player path (/player/(\d+)).
+  - If still not found, uses og:video:url metadata to locate a URL containing /player/(\d+).
+- Title/series/episode assembly:
+  - title = title_data['title'] or _search_kane('videoTitle') or the page title (_og_search_title).
+  - series = _search_kane('showName'); if present, title becomes "series - title".
+  - description from meta tags (description or og:description).
+- Authorization header for API access:
+  - If a token exists, include Authorization: Token <token> in the showexperience API request.
+- Fetch sources:
+  - Request: https://www.funimation.com/api/showexperience/{video_id}/
+  - Query parameter: pinst_id is a random 8-character alphanumeric string (to prevent caching or for session purposes).
+  - Response expected: JSON with 'items' being the list of sources.
+  - 403 handling: If a HTTP 403 is returned, parse the error and raise an ExtractorError with a user-friendly message including the details from the API (using the IE name).
+- Build formats:
+  - Iterate through each source item; skip if no 'src'.
+  - Determine format type: source.get('videoType') or determine_ext(source_url).
+  - If type is 'm3u8', extend formats with _extract_m3u8_formats(source_url, video_id, 'mp4', m3u8_id='hls', fatal=False).
+  - Else, append a simple format dict: {'format_id': source_type, 'url': source_url}.
+  - After collecting, sort formats with _sort_formats(formats).
+- Return info dict:
+  - id: video_id
+  - display_id: display_id
+  - title: computed title
+  - description: description
+  - thumbnail: page’s og thumbnail via _og_search_thumbnail
+  - series: series (if any)
+  - season_number: int_or_none(title_data.get('seasonNum') or _search_kane('season'))
+  - episode_number: int_or_none(title_data.get('episodeNum'))
+  - episode: episode (from title_data or Kane fallback)
+  - season_id: title_data.get('seriesId')
+  - formats: list of collected formats
+
+Implementation details and notes
+- URL handling:
+  - _VALID_URL supports both funimation.com and funimationnow.uk, with optional www and language segments. Captures the last path segment after shows/... as id.
+  - Tests cover language code paths and UK domain patterns (only_matching).
+- Data extraction:
+  - Uses a combination of page scraping, embedded JSON extraction (TITLE_DATA), and multiple fallbacks to determine video_id and title.
+  - _search_kane is a helper to pull values from KANE_customdimensions on the page.
+  - For title/series, prioritizes structured data, then Kane data, then page title as fallback.
+- API interaction:
+  - Login via the dedicated Funimation login endpoint, storing an OAuth-like token used for subsequent requests.
+  - The showexperience API is used to fetch actual video sources. It supports both authenticated and unauthenticated access depending on token availability.
+  - pinst_id is a randomly generated alphanumeric string to likely simulate a session/instantiation ID per request.
+- Error handling:
+  - 401 during login: extracts and surfaces the server-provided error message.
+  - 403 from showexperience: surfaces a readable error using the API-provided detail/title.
+- Formats:
+  - Supports both HLS (m3u8) and direct URLs. m3u8 formats are parsed via _extract_m3u8_formats with m3u8_id 'hls'.
+  - Non-HLS sources simply added with a format_id indicating the determined type (e.g., mp4, webm, etc.).
+- Utilities:
+  - determine_ext: to infer file extension when not provided by source data.
+  - int_or_none: safe integer parsing for season/episode numbers.
+  - js_to_json: convert a JS-like JSON string to a Python dict safely.
+  - ExtractorError: standard error type for user-visible messages.
+  - urlencode_postdata: for encoding POST data in login request.
+
+In short, this extractor logs in if credentials are provided, parses Funimation pages to locate video IDs, fetches source data via the showexperience API (honoring token-based authorization when available), builds a list of playable formats (including m3u8), and returns a rich info dict with metadata such as title, description, thumbnail, series/season/episode data, and available formats.

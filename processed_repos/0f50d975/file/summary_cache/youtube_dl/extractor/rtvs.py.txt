@@ -1,0 +1,58 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/rtvs.py
+
+Overview
+- RTVSIE is a YouTube-DL extractor for RTVS (Slovak public broadcaster) radio and television archive pages.
+- It fetches a JWPlayer playlist embedded in the archive page, downloads the playlist JSON, and delegates to JWPlayer data parsing to produce standard YouTube-DL information.
+
+Key components
+- Class RTVSIE(InfoExtractor)
+  - Inherits common extractor behavior from InfoExtractor.
+
+- _VALID_URL
+  - Regular expression: r'https?://(?:www\.)?rtvs\.sk/(?:radio|televizia)/archiv/\d+/(?P<id>\d+)'
+  - Matches RTVS radio or TV archive pages and captures the archive item id.
+
+- _TESTS
+  - Provides two tests:
+    - Radio archive test:
+      - URL: http://www.rtvs.sk/radio/archiv/11224/414872
+      - Expected id: '414872'
+      - Expected extension: mp3
+      - Title: 'Ostrov pokladov 1 časť.mp3'
+      - MD5 of downloaded file
+    - TV archive test:
+      - URL: http://www.rtvs.sk/televizia/archiv/8249/63118
+      - Expected id: '63118'
+      - Expected extension: mp4
+      - Title: 'Amaro Džives - Náš deň'
+      - Description: 'Galavečer pri príležitosti Medzinárodného dňa Rómov.'
+      - MD5 of downloaded file
+  - Both tests set skip_download to True.
+
+Main workflow (_real_extract)
+- video_id = self._match_id(url)
+  - Extracts the archive item id from the URL using _VALID_URL.
+
+- webpage = self._download_webpage(url, video_id)
+  - Downloads the HTML/JS content of the archive page.
+
+- playlist_url = self._search_regex(...)
+  - Searches the page for a JSON-like field containing a playlist URL.
+  - Regex pattern: playlist["\']?\s*:\s*(["\'])(?P<url>(?:(?!\1).)+)\1
+  - This handles playlist: "URL" or playlist: 'URL' forms, capturing the URL string robustly.
+
+- data = self._download_json(playlist_url, video_id, 'Downloading playlist')[0]
+  - Downloads the JSON from the found playlist URL.
+  - Assumes the JSON is a list and selects the first element ([0]).
+
+- return self._parse_jwplayer_data(data, video_id=video_id)
+  - Delegates to the JWPlayer data parser to convert the JWPlayer item into a standard YouTube-DL info dict (including id, title, ext, url, and possibly description).
+
+Implementation details
+- The extractor relies on the presence of a JWPlayer playlist URL embedded in RTVS pages.
+- It uses a versatile regex to extract the URL regardless of whether the playlist URL is quoted with single or double quotes.
+- It assumes the playlist JSON is a list and uses the first element as the target item.
+
+What it achieves
+- Converts RTVS archive entries (radio and TV) into YouTube-DL compatible entries by leveraging JWPlayer data structures.
+- Produces standard fields such as id, extension (mp3/mp4), title, and description when available.

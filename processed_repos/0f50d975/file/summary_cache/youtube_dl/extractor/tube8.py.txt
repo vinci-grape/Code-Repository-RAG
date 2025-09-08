@@ -1,0 +1,37 @@
+- Purpose: Implement an extractor for Tube8 video pages in youtube-dl, as a subclass of KeezMoviesIE.
+
+- Key class:
+  - Tube8IE(KeezMoviesIE): Specialized for Tube8 with URL pattern and metadata extraction logic.
+
+- URL handling:
+  - _VALID_URL: Matches Tube8 video pages and captures display_id and id from URLs like http(s)://...tube8.com/<category>/<display_id>/<id>.
+  - _extract_urls(webpage): Static method that scans a page for embedded Tube8 players and returns a list of embed URLs found in iframe src attributes pointing to tube8.com/embed/...id.
+
+- Tests:
+  - _TESTS contains two cases:
+    - A typical Tube8 video with expected metadata (id, display_id, ext, description, uploader, title, age_limit, duration, categories, tags).
+    - A secondary URL used with only_matching to ensure the URL pattern matches correctly.
+
+- Main extraction flow (_real_extract):
+  - Starts by calling self._extract_info(url) (inherited from KeezMoviesIE) to obtain the base webpage HTML and an info dict with at least id/display_id.
+  - If title is missing, attempts to extract it from the page via a regex looking for videoTitle = "..." in the JavaScript context.
+  - Extracts optional metadata from the page with various regexes:
+    - description: matches Description: ... block in a definition list.
+    - uploader: looks for a span with class "username".
+    - like_count / dislike_count: captures numeric values from rupVar and rdownVar JavaScript variables.
+    - view_count: captures a numeric view count from the page and converts it to int.
+    - comment_count: captures the total comments from an element with id allCommentsCount.
+    - category: extracts a single category name from a Category field; builds categories as a list if present.
+    - tags: extracts a block under Tags: ... and then parses individual tag links to form a tag list.
+  - Uses helper utilities:
+    - int_or_none for safe integer conversion.
+    - str_to_int for converting string numbers (with possible separators) to int.
+    - _search_regex and _html_search_regex to pull data with optional (fatal=False) behavior for missing fields.
+  - Updates the initial info dict with: description, uploader, view_count, like_count, dislike_count, comment_count, categories, and tags.
+  - Returns the enriched info dictionary containing video metadata such as id, display_id, ext, title, description, uploader, age_limit, duration, categories, and tags.
+
+- Important implementation details:
+  - The extractor relies on HTML/JS patterns present on Tube8 pages (Description in a definition list, username span, rupVar/rdownVar for like/dislike, and Tags/Category sections).
+  - Many fields are optional and guarded with fatal=False to avoid extraction failure if missing.
+  - Tags are parsed from an HTML fragment under the Tags section by collecting all anchor text within that fragment.
+  - The code assumes the initial KeezMoviesIE extraction provides core fields (id, display_id, etc.) and augments them with additional descriptive metadata.

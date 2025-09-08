@@ -1,0 +1,26 @@
+- Purpose: NerdCubedFeedIE is a youtube-dl extractor that converts NerdCubed's JSON feed (feed.json) into a YouTube-based playlist of videos.
+
+- URL matching: _VALID_URL matches http/https URLs like https://www.nerdcubed.co.uk/feed.json.
+
+- Test: _TEST defines a sample feed URL, expected playlist id 'nerdcubed-feed', title 'nerdcubed.co.uk feed', and a minimum playlist length of 1300 entries.
+
+- Core functionality (_real_extract):
+  - Downloads the JSON feed via _download_json(url, url, 'Downloading NerdCubed JSON feed').
+  - Iterates over each feed entry and builds a corresponding playlist entry as a dict with:
+    - _type: 'url' (indicating an embedded URL entry)
+    - title: entry['title']
+    - uploader: entry['source']['name'] if entry['source'] exists, otherwise None
+    - upload_date: parsed from entry['date'] (format 'YYYY-MM-DD') and reformatted to 'YYYYMMDD'
+    - url: 'http://www.youtube.com/watch?v=' + entry['youtube_id']
+  - The resulting entries list is used to construct a playlist with:
+    - _type: 'playlist'
+    - title: 'nerdcubed.co.uk feed'
+    - id: 'nerdcubed-feed'
+    - entries: the list built above
+
+- Key implementation details:
+  - Uses datetime.datetime.strptime to parse the date string and reformat to YouTube-friendly 'YYYYMMDD'.
+  - Safely handles optional source field via a conditional expression: feed_entry['source']['name'] if feed_entry['source'] else None.
+  - Assumes each feed entry contains 'title', 'date', 'youtube_id', and optionally 'source' with 'name'.
+
+- Overall behavior: Produces a single playlist object containing YouTube video entries derived from NerdCubed’s feed.json, suitable for listing videos from the NerdCubed site in youtube-dl.

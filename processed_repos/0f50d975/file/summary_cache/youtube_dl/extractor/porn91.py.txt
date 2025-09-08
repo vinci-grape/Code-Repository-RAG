@@ -1,0 +1,36 @@
+- Purpose: A youtube-dl extractor for 91porn (Porn91). It fetches video metadata and streams from 91porn.com using a viewkey-based URL.
+
+- Key class:
+  - Porn91IE (InfoExtractor)
+    - IE_NAME: '91porn'
+    - _VALID_URL: Matches URLs with 91porn.com and a query parameter viewkey, capturing the viewkey as id.
+    - _TEST: Provided test with a sample URL, expected md5, and info_dict (id, title, ext, duration, age_limit).
+
+- Main flow (_real_extract):
+  - video_id = extracted viewkey from URL using _match_id.
+  - Sets a cookie on 91porn.com: language = cn_CN (to get Chinese content).
+  - Downloads the main video page: view_video.php?viewkey={video_id}.
+  - Checks for daily limit message in Chinese ("作为游客，你每天只可观看10个视频"); if present, raises ExtractorError with expected=True.
+  - Extracts title from HTML: <div id="viewvideo-title">...</div>; strips newlines.
+  - Locates the actual video page URL from a textarea with id fm-video_link and loads that page.
+  - Uses _parse_html5_media_entries on the loaded video-page to obtain the media entries; takes the first entry [0] as info_dict (contains basic format metadata like url, abr, etc., as provided by HTML5 media parsing logic in the base class).
+  - Tries to parse duration from the main page using a Chinese label pattern: '时长:    </span> <digits:digits>' (fatal=False if not found).
+  - Tries to parse comment count from the main page using a Chinese label: '留言:    </span> <digits>' (int_or_none, fatal=False).
+  - Augments info_dict with:
+    - id: video_id
+    - title: extracted title
+    - duration: parsed duration (if found)
+    - comment_count: parsed comment count (if found)
+    - age_limit: obtained via _rta_search(webpage) (parses age restriction info from the page)
+  - Returns the final info_dict with all gathered metadata and formats.
+
+- Important implementation details:
+  - Cookie management: sets language to cn_CN to ensure Chinese content is served.
+  - Error handling: detects daily limit message and raises a user-visible ExtractorError with expected=True.
+  - Title extraction: uses a direct HTML div extraction and normalizes newlines.
+  - Video URL resolution: the extractor first fetches a host page, then finds a secondary video link in a textarea (id fm-video_link), and fetches that page to obtain the actual video streams via HTML5 media entries.
+  - Duration and comment parsing: uses Chinese labels in regexes, with fatal=False to allow proceeding if not found.
+  - Age restriction: leverages _rta_search on the initial webpage to determine age_limit.
+
+- What it outputs:
+  - A dict (info_dict) containing at least id, title, duration (if parsed), comment_count (if parsed), age_limit, and the video formats/URLs returned by _parse_html5_media_entries.

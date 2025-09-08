@@ -1,0 +1,52 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/uol.py
+
+Overview
+- Implemented UOLIE extractor for videos on uol.com.br (UOL). Inherits from InfoExtractor.
+- Retrieves video metadata and available formats from UOL APIs, normalizes them, and returns a standard InfoDict.
+
+Main functionality
+- _VALID_URL: Matches UOL video URLs, supporting various patterns (mediaId, v=, view/ paths, video paths). Extracts a video id.
+- _real_extract(url):
+  - Extracts video_id from URL.
+  - Fetches video metadata from https://api.mais.uol.com.br/apiuol/v3/media/detail/{video_id} and reads item data.
+  - Obtains mediaId, title, and revision/version (default 2).
+  - Fetches format data from https://croupier.mais.uol.com.br/v3/formats/{media_id}/jsonp.
+  - Builds a list of formats, normalizing URLs with query parameters and handling HLS separately.
+  - Extracts additional metadata: description, duration, publish date (timestamp), view count, tags, and thumbnails.
+  - Returns a dict with id, title, description, duration, timestamp, view_count, tags, thumbnails, and formats.
+
+Key classes/functions
+- UOLIE(InfoExtractor): Main extractor class.
+- _real_extract(self, url): Core extraction workflow.
+- _download_json(url, video_id): Used to fetch JSON data for video metadata and formats (inherited behavior).
+- _extract_m3u8_formats(...): Used to parse HLS playlists when format_id is HLS.
+- update_url_query(url, query): Utility to append query parameters to a URL.
+- parse_iso8601, parse_duration, int_or_none: Helpers for metadata normalization.
+- clean_html: Sanitizes HTML in descriptions.
+- qualities(['mobile', 'WEBM', '360p', '720p', '1080p']): Generates a quality ordering function for non-HLS formats.
+
+Important implementation details
+- API usage:
+  - Video metadata: https://api.mais.uol.com.br/apiuol/v3/media/detail/{video_id} → item contains mediaId, title, description, duration, publishDate, tags, thumbs, viewsQtty, etc.
+  - Formats: https://croupier.mais.uol.com.br/v3/formats/{mediaId}/jsonp → dict of formats keyed by format_id (e.g., 'mobile', 'WEBM', '360p', '720p', '1080p', 'HLS').
+- URL normalization:
+  - Each format URL is augmented with a query including ver (revision, default 2) and r (referrer http://mais.uol.com.br).
+  - Optional tokens: token and sign from the format data are also added to the query when present.
+- HLS handling:
+  - For format_id 'HLS', uses _extract_m3u8_formats to parse the m3u8 URL.
+  - Propagates the same query parameters to each segment by encoding the query and setting extra_param_to_segment_url on each parsed segment; updates segment URLs with the same query.
+- Format sorting and selection:
+  - Non-HLS formats are added with fields: format_id, url, quality (via qualities mapping), and a neutral preference (-1).
+  - Formats are sorted with _sort_formats to pick the best available.
+- Metadata extraction:
+  - description cleaned via clean_html.
+  - duration parsed with parse_duration.
+  - timestamp parsed from publishDate using parse_iso8601 with a space separator.
+  - view_count parsed as integer with int_or_none.
+  - tags collected from video_data['tags'] descriptions.
+  - thumbnails collected from video_data['thumbSmall'], ['thumbMedium'], ['thumbWmedium'], ['thumbLarge'], ['thumbWlarge'], ['thumbXlarge'] with corresponding ids.
+
+Tests
+- _TESTS includes two real video examples with expected id, title, description, timestamp, upload_date, and ext (mp4). Also includes several URLS with only_matching: True to ensure the regex correctly identifies valid URLs without necessarily fetching data.
+
+Overall, this extractor integrates UOL's media detail and format endpoints, normalizes all formats (including HLS), and assembles a complete InfoDict with standard YouTube-DL fields.

@@ -1,0 +1,52 @@
+Concise summary of FazIE extractor (youtube_dl/extractor/faz.py):
+
+- Purpose
+  - Implements an InfoExtractor for faz.net video pages. Extracts video metadata and available formats from the page and an embedded XML/ENCODINGS configuration.
+
+- URL pattern and tests
+  - _VALID_URL matches faz.net articles with an id at the end of the URL: ...-<id>.html
+  - _TESTS includes a sample video page (expecting mp4, id 12610585, title, and description md5), plus several only_matching test cases to ensure correct URL matching.
+
+- Main workflow (_real_extract)
+  - Extracts video_id from URL using _match_id.
+  - Downloads the page and reads:
+    - OpenGraph description via _og_search_description.
+    - A data-videojs-media attribute value from the page.
+  - If media equals 'extern':
+    - Extracts an external player URL from an iframe src matching a PerformGroup eplayer URL pattern.
+    - Returns a url_result to delegate to that external player.
+  - Otherwise, treats the media content as an XML/encoded configuration:
+    - Parses the XML with compat_etree_fromstring.
+    - Locates ENCODINGS/encodings and iterates over possible quality levels: LOW, HIGH, HQ.
+    - For each existing encoding:
+      - Gets the FILENAME as the video URL.
+      - Reads AVERAGEBITRATE (tbr) and converts to int (handling comma/decimal).
+      - Builds a format dictionary with:
+        - url: encoding URL
+        - format_id: lowercased code ('low', 'high', 'hq')
+        - quality: an ascending priority (pref index)
+        - tbr: total bitrate if available
+        - vcodec: CODEC from the XML
+      - Attempts to infer width and height from the filename using a regex (\d+)x(\d+)_(\d+)\.mp4:
+        - If matched, sets width/height and uses the third number as tbr if tbr is not already set.
+    - Sorts formats with _sort_formats.
+  - Returns a dict with:
+    - id: video_id
+    - title: og:title from the page
+    - formats: list of collected formats
+    - description: cleaned OpenGraph description (stripped) or None
+    - thumbnail: STILL/STILL_BIG from the XML config
+    - duration: DURATION parsed to int if available
+
+- Key implementation details
+  - Uses:
+    - _download_webpage to fetch the HTML
+    - _og_search_description and _og_search_title for metadata
+    - _html_search_regex to locate the data-videojs-media attribute
+    - compat_etree_fromstring to parse XML-encoded media information
+    - xpath_element/xpath_text to navigate the XML
+    - int_or_none to safely parse integers
+  - External player handling (extern) delegates to a PerformGroup eplayer URL, preserving proper redirection via url_result.
+  - Format extraction includes robust handling of possible missing fields and derives video properties (width/height) when available from the filename pattern.
+
+Overall, FazIE fetches a faz.net video page, detects either an embedded XML-based media configuration or an external player, and builds a structured set of video formats (with bitrate, dimensions, and codec information) along with basic metadata.

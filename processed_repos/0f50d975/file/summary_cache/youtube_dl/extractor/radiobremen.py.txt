@@ -1,0 +1,47 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/radiobremen.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for Radiobremen mediathek videos. It fetches metadata, builds a direct MP4 video URL, and returns video information including formats.
+
+- Key components
+  - RadioBremenIE(InfoExtractor): The extractor class.
+  - _VALID_URL: Regex to match Radiobremen mediathek video pages with ?id=<numbers>.
+  - IE_NAME: 'radiobremen'
+  - _TEST: A sample test case with expected output (id, ext, duration, width, title, thumbnail, description).
+
+- Main extraction flow (_real_extract)
+  - Extract video_id from URL using _match_id.
+  - Retrieve metadata from:
+    - meta_url = http://www.radiobremen.de/apps/php/mediathek/metadaten.php?id=<video_id>
+    - meta_doc = download page
+    - title: parsed from HTML <h1>...</h1>
+    - description: parsed from a <p>...</p> block (optional with fatal=False)
+    - duration: parsed from a string matching a pattern like "mm:ss" found after the label “Länge:”
+      - Uses parse_duration to convert to seconds; optional with fatal=False
+  - Retrieve video page info:
+    - page_doc = download the original URL
+    - Extract a JavaScript object via regex ardformatplayerclassic(...) to get:
+      - width
+      - video_id (within the string)
+      - secret
+      - thumbnail
+  - Build the direct video URL:
+    - video_url = http://dl-ondemand.radiobremen.de/mediabase/<video_id>/<video_id>_<secret>_<width>.mp4
+  - Build formats:
+    - A single format dict with url, ext='mp4', width=int(width)
+  - Return metadata dictionary:
+    - id: video_id
+    - title: title
+    - description: description
+    - duration: duration (in seconds, if found)
+    - formats: list with the constructed MP4 format
+    - thumbnail: thumbnail from the extracted data
+
+- Important implementation details
+  - Uses _download_webpage and _html_search_regex for HTML extraction.
+  - Uses a precise regex to extract width, video_id, secret, and thumbnail from the page’s embedded JS.
+  - The code is designed to gracefully handle missing optional fields (description, duration) via fatal=False.
+  - The final video URL is derived directly from the extracted video_id, secret, and width, pointing to Radiobremen’s on-demand server.
+
+- Overall behavior
+  - Converts a Radiobremen mediathek page into a standardized YouTube-dl entry with a single MP4 format and associated metadata (title, description, duration, thumbnail).

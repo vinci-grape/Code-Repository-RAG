@@ -1,0 +1,47 @@
+concisely summarizes the code in ./youtube-dl/youtube_dl/extractor/meta.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor (METAIE) for videos hosted on video.meta.ua. It supports two embedding schemes: an uppod-based HTML5 player and a Pladform embed.
+
+- Class and URL matching
+  - Class: METAIE(InfoExtractor)
+  - _VALID_URL: matches URLs like http(s)://video.meta.ua/(iframe/)?<id> where id is numeric.
+  - _TESTS: included tests verify extraction for a direct video page, an iframe variant, and a Pladform embed scenario.
+
+- Main extraction flow (_real_extract)
+  - Parse video_id from URL and download the page.
+  - Try to locate an obfuscated uppod HTML5 string with regex:
+    - Pattern searched: st_html5 = '#<three-chars>' 
+    - If found, decode it by taking the string in chunks of 3 characters, converting each chunk into an HTML entity like &#x0NN; to reconstruct a JSON string. This is then unescaped and parsed as JSON to obtain uppod_data.
+  - If uppod_data contains a customnotfound field, raise ExtractorError with the provided message (user-visible error).
+  - Extract video_url from uppod_data['file'].
+  - Build an info dictionary:
+    - id: video_id
+    - url: video_url
+    - title: uppod_data.get('comment') or page Open Graph title
+    - description: Open Graph description (or None)
+    - thumbnail: uppod_data.get('poster') or Open Graph thumbnail
+    - duration: integer parsed from Open Graph 'video:duration' if available
+  - YouTube fallback handling:
+    - If the resolved video_url contains 'youtube.com/', mark the result as a transparent URL to be processed by the Youtube extractor:
+      - info['_type'] = 'url_transparent'
+      - info['ie_key'] = 'Youtube'
+  - Return the info dictionary when uppod path is successful.
+
+- Pladform fallback
+  - If no uppod (st_html5) data is found, try to extract a Pladform URL from the page using PladformIE._extract_url(webpage).
+  - If a Pladform URL is found, delegate extraction by returning self.url_result(pladform_url).
+
+- Important implementation details
+  - Deobfuscation algorithm for uppod:
+    - The string st_html5 is decoded by chunking into 3-character pieces and turning each into an HTML entity (&#x0XX;), then unescaping and parsing as JSON.
+  - Robust error handling:
+    - Raises ExtractorError with a message if uppod data signals a not-found condition.
+  - Metadata extraction:
+    - Falls back to Open Graph data for title, description, and thumbnail if not provided in uppod_data.
+  - Multi-source support:
+    - Primary path uses uppod data; secondary path handles Pladform embeds by delegating to the Pladform extractor.
+
+- Notes
+  - The file imports PladformIE and uses PladformIE._extract_url to detect a Pladform embed, then returns the appropriate result.
+  - The code includes a stray “Summary:” line in the snippet (likely an accidental copy/paste artifact) and a minor spelling quirk in module/class names, but the logic centers on uppod-based extraction with a fallback to Pladform.

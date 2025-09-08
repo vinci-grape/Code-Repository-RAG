@@ -1,0 +1,30 @@
+- Purpose: A YouTube-DL extractor for Rotten Tomatoes trailer pages that delegates actual video extraction to Internet Video Archive (IVA).
+
+- Key class:
+  - RottenTomatoesIE(InfoExtractor)
+
+- URL matching (_VALID_URL):
+  - Matches Rotten Tomatoes trailer pages like:
+    https://www.rottentomatoes.com/m/<movie>/trailers/<id>
+  - Captures the numeric trailer id as group "id".
+
+- Test case (_TEST):
+  - Demonstrates extraction on Toy Story 3 trailer with id 11028566.
+  - Expected info includes id, extension (mp4), title, description, and thumbnail.
+
+- Core logic (_real_extract):
+  - video_id = self._match_id(url): extracts the numeric trailer id from the URL.
+  - webpage = self._download_webpage(url, video_id): fetches the page HTML.
+  - iva_id = self._search_regex(r'publishedid=(\d+)', webpage, 'internet video archive id'): extracts the IVA published ID from the page.
+  - Returns a transparent URL entry that delegates to IVA:
+    - '_type': 'url_transparent'
+    - 'url': builds an IVA player URL using the publishedid, e.g.,
+      http://video.internetvideoarchive.net/player/6/configuration.ashx?domain=www.videodetective.com&customerid=69249&playerid=641&publishedid=<iva_id>
+    - 'ie_key': InternetVideoArchiveIE.ie_key(): directs the extractor to use the IVA extractor
+    - 'id': video_id
+    - 'title': self._og_search_title(webpage): uses OpenGraph title from the Rotten Tomatoes page
+
+- Implementation notes:
+  - The extractor does not fetch the video directly; it returns a url_transparent pointing to IVA, enabling the IVA extractor to handle actual media extraction.
+  - Title is sourced from OpenGraph metadata on the Rotten Tomatoes page.
+  - If the publishedid parameter is missing, extraction would fail due to the _search_regex call.

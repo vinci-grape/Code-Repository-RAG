@@ -1,0 +1,87 @@
+This code defines YouTube-DL extractors for Livestream, handling both the newer Livestream site and the original variant, plus a tiny redirector for the shortener service.
+
+Overview
+- Purpose: Extract video and live-stream metadata and download formats from Livestream (new and original domains) and from the shortener service.
+- Outputs: For each video, a dict with id, title, description, thumbnail, duration, timestamp, view/like counts, and a list of downloadable formats. For playlists/events, a playlist result with entries pointing to individual videos.
+
+Key classes
+1) LivestreamIE (modern Livestream extractor)
+   - IE_NAME: 'livestream'
+   - _VALID_URL: Handles URLs like:
+     - https://livestream.com/accounts/<id>/events/<event_id>/videos/<video_id>
+     - or without video_id (event page)
+     - also supports new/old account/event path variants
+   - Core workflow:
+     - _real_extract determines if URL points to a single video or an event.
+     - For a video: fetch video data from API and call _extract_video_info.
+     - For an event: fetch event data, possibly via a feed.json loop, and build a playlist of video URLs (each to a specific video page).
+   - Main helpers:
+     - _parse_smil_formats(smil, smil_url, video_id, namespace=None, ...): Parses SMIL to extract FLV formats from <video> elements. Builds base URL from httpBase meta or a default Akamai base. Returns a list of formats like smil_<bitrate>.
+     - _extract_video_info(video_data): Builds formats from:
+       - sd/hd progressive URLs (if available)
+       - smil_url (via _extract_smil_formats)
+       - m3u8_url (HLS, via _extract_m3u8_formats)
+       - f4m_url (HD, via _extract_f4m_formats)
+       Sorts formats and returns metadata including id, title (caption), description, thumbnail, duration (ms to seconds), timestamp, like_count, view_count, and a list of comments (parsed with parse_iso8601).
+     - _extract_stream_info(stream_info): Handles live streams (play_url SMIL, m3u8_url for HLS, rtsp_url). Returns formats, id, title, thumbnail, and is_live flag.
+     - _extract_event(event_data): When an event doesn’t provide stream_info directly, fetches feed.json pages to enumerate videos and builds a playlist of video URLs. Returns a playlist_result.
+   - Data details:
+     - Formats can be FLV (SMIL), HLS (m3u8_native), RTSP, or progressive URLs.
+     - Duration often converted from milliseconds to seconds; timestamps parsed with parse_iso8601.
+     - Comments extracted from video_data['comments']['data'].
+   - API usage:
+     - Uses a template API URL: http://livestream.com/api/accounts/%s/events/%s
+     - For event pages with streaming, may fetch feed.json to populate playlist entries.
+
+2) LivestreamOriginalIE (legacy Livestream)
+   - IE_NAME: 'livestream:original'
+   - _VALID_URL: Matches original.livestream.com URLs (folder or video pages).
+   - Core workflow:
+     - _real_extract handles folders (via _extract_folder) or individual videos.
+     - For a video: fetch XML from 2.0/clipdetails API and extract basic fields (title, duration, thumbnail, view_count) via XML parsing.
+     - For formats: _extract_video_formats reads progressiveUrl (HTTP), httpUrl (HLS m3u8), and rtspUrl (RTSP) and returns a sorted formats list.
+     - _extract_folder scrapes the folder page to collect sub-entries (folders or videos) and returns a playlist_result.
+   - Notes:
+     - XML parsing uses namespaces (media, ls, etc.) to extract fields.
+     - Title and metadata come from the XML item element; duration converted to float if present.
+
+3) LivestreamShortenerIE (shortener redirector)
+   - IE_NAME: 'livestream:shortener'
+   - IE_DESC: False (do not list in index)
+   - _VALID_URL: livestre.am/<id>
+   - _real_extract: Downloads the page and redirects to the Open Graph URL found on the page (self._og_search_url).
+
+Important implementation details
+- Formats handling:
+  - The modern Livestream extractor aggregates formats from:
+    - SD/HD progressive URLs (direct MP4-like URLs)
+    - SMIL-based streams (via _parse_smil_formats)
+    - HLS (m3u8), with _extract_m3u8_formats
+    - F4M (HD/HDX) via _extract_f4m_formats
+    - RTSP URLs as a separate format (format_id 'rtsp')
+  - SMIL URL parsing uses a base URL from the SMIL meta tag httpBase or a default Livestream base. It constructs FLV URLs with specific query params (v=3.0.3, fp=WIN% 14,0,0,145) and supports clipBegin as ssek for seeking.
+  - The code uses determine_ext and bitrate extraction to populate tbr where possible.
+  - Formats are sorted with _sort_formats.
+- Data extraction:
+  - Timestamps are parsed with parse_iso8601.
+  - Durations are converted to seconds via float_or_none with a divisor of 1000 when the source is in milliseconds.
+  - Comments are built as a list with author_id, author, id, text, and a parsed timestamp.
+- Event vs video flow:
+  - If a video_id is present in the URL, the extractor fetches the specific video data via /videos/{video_id} and returns a single video info dict.
+  - If no video_id, the extractor fetches event data via /accounts/{account}/events/{event} and returns a playlist of videos by enumerating feed.json pages when necessary.
+- Live vs VOD:
+  - _extract_stream_info handles live streams by marking is_live and using the live title if applicable.
+  - The title for live streams is built with _live_title(stream_info['stream_title']).
+- Original vs modern API:
+  - LivestreamIE uses the newer API structure and SMIL/HLS/F4M with various URLs (play_url, m3u8_url, etc.).
+  - LivestreamOriginalIE uses the older 2.0/clipdetails XML API for video data and a separate 3.0 endpoint for live streams.
+
+Test coverage hints
+- The _TESTS for LivestreamIE include:
+  - A direct video URL with expected id, ext, title, timestamp, duration, like/view counts, and a thumbnail pattern.
+  - Event URLs that should resolve to playlists with a minimum number of items.
+  - A few edge-case URLs to ensure domain variants and path variants are matched.
+- The LivestreamOriginalIE tests cover a sample video, a folder with multiple items, and a live URL in original.livestream.com.
+- The ShortenerIE is kept minimal with a small redirect test pattern.
+
+In short, this file provides a comprehensive set of extractors to fetch and normalize metadata and download formats for Livestream videos, both on the modern and original sites, plus a small service to redirect via the shortener domain. It includes robust handling of SMIL, HLS, RTSP, and F4M formats, as well as playlist/event extraction and live-stream metadata.

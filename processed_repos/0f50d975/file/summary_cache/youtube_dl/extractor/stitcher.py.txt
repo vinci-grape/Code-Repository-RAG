@@ -1,0 +1,65 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/stitcher.py
+
+Overview
+- Implements Stitcher extractors for youtube-dl: one for individual episodes (StitcherIE) and one for shows/podcasts (StitcherShowIE), plus a shared base class (StitcherBaseIE).
+- Fetches data from Stitcher’s API (https://api.prod.stitcher.com/) and builds standardized YouTube-DL info dictionaries for audio episodes and show playlists.
+
+Key classes and structure
+- StitcherBaseIE (InfoExtractor)
+  - _VALID_URL_BASE: base pattern for Stitcher podcast/show URLs.
+  - _call_api(path, video_id, query): core helper to call Stitcher API, returns resp['data']; raises ExtractorError if API reports an error.
+  - _extract_description(data): extracts and cleans description from data (prefers html_description, falls back to description).
+  - _extract_audio_url(episode): picks audio URL from episode['audio_url'] or episode['guid'].
+  - _extract_show_info(show): returns basic show metadata: thumbnail (image_base_url) and series (title).
+  - _extract_episode(episode, audio_url, show_info): builds the episode info dict with id, display_id, title, description, duration, url (cleaned), vcodec='none', timestamp, season_number, season_id; merges in show_info.
+
+- StitcherIE (episode extractor)
+  - _VALID_URL: pattern matching individual Stitcher episode URLs (including episode slug and numeric id).
+  - _TESTS: includes several sample URLs with expected metadata, including cases requiring login (no audio URL) and “only_matching” tests.
+  - _real_extract(url):
+    - Extracts audio_id from URL.
+    - Calls _call_api('shows/episodes', audio_id, {'episode_ids': audio_id}) to fetch episode data.
+    - Selects the first episode from data['episodes'].
+    - Determines audio_url via _extract_audio_url; if missing, raises login required.
+    - Retrieves show data via data['shows'][0] (if present) and builds show info.
+    - Returns the result of _extract_episode(episode, audio_url, show_info).
+
+- StitcherShowIE (show/playlist extractor)
+  - _VALID_URL: base plus show slug (id captured as anything not containing /?#& or end).
+  - _TESTS: sample show URLs with expected playlist behavior (including description and title).
+  - _real_extract(url):
+    - show_slug = captured id from URL.
+    - data = _call_api('search/show/%s/allEpisodes' % show_slug, show_slug, {'count': 10000}) to fetch all episodes.
+    - show = data['shows'][0] if present; show_info = _extract_show_info(show).
+    - Iterates over data.get('episodes') to build entries:
+      - For each episode: audio_url = _extract_audio_url(episode); skip if missing.
+      - Build entry via _extract_episode(episode, audio_url, show_info).
+    - Returns a playlist via self.playlist_result(entries, show_slug, show.get('title'), self._extract_description(show)).
+
+Important implementation details
+- API interaction and error handling
+  - All API calls funnel through _call_api, which uses _download_json and checks for errors in resp['errors'][0]['message']; raises ExtractorError if an error is found.
+  - Returns resp['data'], so the data shape is data dozen with 'episodes' and 'shows' keys.
+
+- Data extraction and normalization
+  - Descriptions are cleaned with clean_html on html_description or description.
+  - Audio URLs are normalized with url_or_none on either audio_url or guid.
+  - Episode IDs are coerced to string with compat_str; other IDs use int_or_none / str_or_none helpers.
+  - Timestamps, durations, and season numbers are normalized via int_or_none to handle missing/invalid values.
+  - Show thumbnail comes from image_base_url; series name from show['title'].
+
+- URL handling and output
+  - Episode info includes: id, display_id (slug), title, description, duration, url (cleaned audio), vcodec='none' (audio-only), timestamp, season_number, season_id.
+  - Show info merges into each episode entry (thumbnail and series).
+  - Shows are returned as playlists via playlist_result when a show URL is used.
+  - If no audio_url for an episode in StitcherIE, authentication is required (raise_login_required).
+
+- Utilities and compatibility
+  - Uses helpers: compat_str, int_or_none, str_or_none, try_get, url_or_none, clean_podcast_url.
+  - clean_podcast_url ensures proper podcast URL formatting for the audio URL.
+
+Impact and usage
+- Users can extract:
+  - Individual Stitcher episodes via StitcherIE, provided the audio URL is accessible (may require login).
+  - Stitcher show pages via StitcherShowIE, obtaining a playlist of all episodes with metadata (title, description, duration, thumbnail, etc.).
+- The implementation supports both episode-specific URLs and show/collection URLs, with robust error handling and data normalization.

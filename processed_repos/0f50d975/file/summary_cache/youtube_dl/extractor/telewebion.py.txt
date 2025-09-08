@@ -1,0 +1,49 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/telewebion.py
+
+- Purpose
+  - Implements an InfoExtractor for Telewebion episode/clip pages, enabling extraction of video formats and metadata.
+
+- Key class
+  - TelewebionIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?telewebion\.com/(episode|clip)/(?P<id>[a-zA-Z0-9]+)'
+  - Extracts video_id from the URL using the named group 'id'.
+
+- Testing
+  - _TEST defines a sample Telewebion URL (episode) and expected output fields:
+    - id, ext (mp4), title (Persian title), thumbnail (patterned URL under static.telewebion.com), view_count (int)
+  - Uses skip_download to avoid actual media download during tests (m3u8 download path).
+
+- Main extraction flow (_real_extract)
+  1. Retrieve video_id from URL.
+  2. Fetch episode details via Telewebion API:
+     - Request: https://gateway.telewebion.ir/kandoo/episode/getEpisodeDetail/?EpisodeId={video_id}
+     - Response is parsed from JSON: body.queryEpisode[0]
+  3. Parse metadata:
+     - channel_id: episode_details['channel']['descriptor']
+     - episode_image_id: episode_details.get('image')
+     - episode_image: if image id present, construct URL https://static.telewebion.com/episodeImages/{image_id}/default
+  4. Build and fetch HLS formats:
+     - m3u8_url = https://cdna.telewebion.com/{channel_id}/episode/{video_id}/playlist.m3u8
+     - formats = self._extract_m3u8_formats(m3u8_url, video_id, ext='mp4', m3u8_id='hls', entry_protocol='m3u8_native')
+     - self._sort_formats(formats)
+  5. Return an info dictionary with:
+     - id: video_id
+     - title: episode_details['title']
+     - formats: list of extracted formats
+     - thumbnail: url_or_none(episode_image)
+     - view_count: int_or_none(episode_details.get('view_count'))
+     - duration: float_or_none(episode_details.get('duration'))
+
+- Important implementation details
+  - Uses Telewebion’s API (gateway.telewebion.ir) to fetch episode metadata.
+  - Relies on the channel descriptor to compose the HLS manifest URL.
+  - Handles optional fields gracefully (image/thumbnail, view_count, duration) using helper converters (url_or_none, int_or_none, float_or_none).
+  - Extracts HLS formats with m3u8_native handling and labels them with m3u8_id='hls'.
+  - Output ext is inferred from the HLS formats (tests expect mp4).
+
+- Notable behavior
+  - The extractor focuses on episode/clip content and assumes an HLS playlist is the primary video source.
+  - If image/thumbnail is unavailable, thumbnail will be None.
+  - If certain fields are missing from the API response, corresponding output fields may be None.

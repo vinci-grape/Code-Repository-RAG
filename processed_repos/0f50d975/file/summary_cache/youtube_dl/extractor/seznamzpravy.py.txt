@@ -1,0 +1,67 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/seznamzpravy.py
+
+Overview
+- Provides two extractors for Seznam Zprávy content:
+  - SeznamZpravyIE: extracts video formats from Seznam Zprávy iframe player URLs.
+  - SeznamZpravyArticleIE: extracts a playlist of videos from article pages that reference Seznam Zprávy videos.
+
+Key classes and main functionality
+- SeznamZpravyIE (InfoExtractor)
+  - _VALID_URL: matches iframe/player URLs containing a src parameter for Seznam Zprávy embeds.
+  - _extract_urls(webpage): static method that scans a webpage for iframe embeds pointing to seznamzpravy.cz/iframe/player and returns their URLs.
+  - _extract_sdn_formats(self, sdn_url, video_id):
+    - Downloads SDN JSON data from sdn_url.
+    - Follows a possible Location redirect if present.
+    - Builds mp4 formats from sdn_data['data']['mp4']:
+      - Each format uses the relative path 'url' joined with the base, with format_id like 'http-<format_id>'.
+      - 'tbr' is derived from 'bandwidth' (scaled by 1000).
+      - 'width' and 'height' from 'resolution' if available.
+      - Decodes codecs via parse_codecs.
+    - Handles additional formats via DASH and HLS:
+      - If sdn_data['pls'] contains 'dash', uses _extract_mpd_formats on the dash URL.
+      - If sdn_data['pls'] contains 'hls', uses _extract_m3u8_formats on the hls URL.
+    - Sorts and returns all formats.
+  - _real_extract(self, url):
+    - Parses query parameters from the iframe URL.
+    - Extracts src (SDN base URL), title, contentId (video_id) or derives it from _raw_id(src).
+    - Builds formats via _extract_sdn_formats(src + 'spl2,2,VOD', video_id).
+    - Extracts duration, series, and poster (thumbnail) from query parameters.
+    - Returns a dict with id, title, thumbnail, duration, series, and formats.
+
+- SeznamZpravyArticleIE (InfoExtractor)
+  - _VALID_URL: matches article pages on seznam.cz/zpravy or seznamzpravy.cz with URLs like /clanek/...-<id>.
+  - _API_URL: declared but not directly used in extraction.
+  - _TESTS: two tests:
+    - A page with two videos (playlist_count = 2) and IDs/descriptions validated via MD5 placeholders.
+    - A page with a single video (live stream) (playlist_count = 1).
+  - _real_extract(self, url):
+    - Extracts article_id via _match_id.
+    - Downloads the article webpage and reads JSON-LD via _search_json_ld.
+    - Title = info['title'] or page OpenGraph title; Description = info['description'] or OpenGraph description.
+    - Builds a playlist result:
+      - Each entry URL is collected by SeznamZpravyIE._extract_urls(webpage) and wrapped as a SeznamZpravyIE video entry via url_result(entry_url, ie=SeznamZpravyIE.ie_key()).
+      - Returns playlist_result with article_id, title, and description.
+
+Important implementation details
+- SDN-based video extraction:
+  - The core video data comes from an SDN endpoint (src URL from the iframe 'src' parameter). The code appends spl2,2,VOD to form the full SDN URL used for downloads.
+  - MP4 formats are parsed from sdn_data['data']['mp4'] and combined with optional DASH/HLS formats if provided in sdn_data['pls'].
+  - Each MP4 format includes:
+    - url (absolute, via urljoin)
+    - format_id (http-<format_id>)
+    - tbr (bitrate) derived from 'bandwidth' with scale=1000
+    - width/height from 'resolution'
+    - codecs decoded via parse_codecs(format_data.get('codec'))
+- Redirection handling:
+  - If the initial SDN URL returns a JSON with 'Location', the code follows to fetch the real SDN manifest.
+- Robustness:
+  - Uses compat helpers for URL parsing and query extraction to support various URL forms.
+  - Safely handles missing fields (e.g., width/height, duration) with int_or_none and try_get.
+- Article integration:
+  - SeznamZpravyArticleIE aggregates a list of embedded videos within an article page by reusing SeznamZpravyIE._extract_urls to discover video iframe URLs.
+  - Builds a playlist with each item as a SeznamZpravyIE video entry, preserving the article ID as the playlist ID.
+
+In short
+- The file provides extraction logic for Seznam Zprávy video embeds and article pages:
+  - From iframe player URLs, it fetches SDN-based MP4/DASH/HLS formats and returns a structured video info dict.
+  - From article pages, it compiles a playlist of all embedded Seznam Zprávy videos.

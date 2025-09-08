@@ -1,0 +1,78 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/southpark.py
+
+Overview
+- This module implements a set of extractors for South Park videos, built on top of a common MTV services-based extractor.
+- The base class is SouthParkIE (subclass of MTVServicesInfoExtractor). Several localized variants extend it to handle regional domains/sites.
+
+Main components
+
+1) SouthParkIE (base extractor)
+- Class: SouthParkIE(MTVServicesInfoExtractor)
+- IE_NAME: 'southpark.cc.com'
+- _VALID_URL: Complex regex matching South Park video pages across clips, full-episodes, episodes collections, on southpark.cc or southparkstudios domains. It captures:
+  - url: the full page URL (e.g., southpark.cc.com/clips/...), used as the mgid for feed lookup
+  - id: a part of the path used to identify the video in the feed
+- _FEED_URL: 'http://feeds.mtvnservices.com/od/feed/intl-mrss-player-feed' (the MTV MRSS video feed endpoint)
+- _TESTS: Includes a test for a clip URL, asserting extraction of id, ext (mp4), title, description, timestamp, and upload_date.
+- _get_feed_query(self, uri): Constructs the query parameters for fetching metadata from the MTV feed. Returns:
+  - accountOverride: 'intl.mtvi.com'
+  - arcEp: 'shared.southpark.global'
+  - ep: '90877963'
+  - imageEp: 'shared.southpark.global'
+  - mgid: uri (the captured URL portion)
+- Purpose: The base extractor delegates the heavy lifting to the MTVServicesInfoExtractor, which uses the feed to populate video metadata. SouthParkIE provides the feed-specific query details and URL patterns.
+
+2) Localized extractors (language/region variants)
+
+Each of the following classes inherits from SouthParkIE and customizes URL patterns, feed details, and tests to support regional sites:
+
+- SouthParkEsIE
+  - IE_NAME: 'southpark.cc.com:español'
+  - _VALID_URL: Matches southpark.cc.com/episodios-en-espanol/... URLs
+  - _LANG: 'es'
+  - _TESTS: Includes a sample URL, expecting a title/description, a playlist_count of 4, and skip due to Geo-restriction.
+
+- SouthParkDeIE
+  - IE_NAME: 'southpark.de'
+  - _VALID_URL: Matches southpark.de/(clips|alle-episoden|collections)/...
+  - _FEED_URL: 'http://www.southpark.de/feeds/video-player/mrss/'
+  - _TESTS: Tests for a clip with id/title/description/timestamp/upload_date; also includes:
+    - non-ASCII URL handling test
+    - playlist_count: 3 for some pages
+    - two tests marked only_matching for collection paths or alternate domains (ensuring correct URL matching)
+
+- SouthParkNlIE
+  - IE_NAME: 'southpark.nl'
+  - _VALID_URL: Matches southpark.nl/(clips|(?:full-)?episodes|collections)/...
+  - _FEED_URL: 'http://www.southpark.nl/feeds/video-player/mrss/'
+  - _TESTS: Test for a full-episodes page, with playlist_mincount 3
+
+- SouthParkDkIE
+  - IE_NAME: 'southparkstudios.dk'
+  - _VALID_URL: Matches southparkstudios.(dk|nu)/(clips|full-episodes|collections)/...
+  - _FEED_URL: 'http://www.southparkstudios.dk/feeds/video-player/mrss/'
+  - _TESTS: Tests for a full-episodes page, expecting playlist_mincount 3; and two only_matching tests for collections and an alternate domain (nu)
+
+Key implementation details
+
+- Shared machinery via MTVServicesInfoExtractor:
+  - All regional extractors rely on the base class to fetch and parse metadata from the MTV MRSS feed.
+  - The regional variants mainly provide the correct URL patterns (_VALID_URL), feed endpoints (_FEED_URL when different), and optional language or localization hints (_LANG).
+
+- URL matching and feed querying:
+  - The primary _VALID_URL pattern captures two groups: url (the full page URL to be used as mgid) and id (a portion used to identify the item).
+  - The extracted mgid (passed as uri to _get_feed_query) enables the feed lookup to return the correct video entry.
+  - _get_feed_query(uri) standardizes the query parameters for the feed request, including accountOverride, arcEp, ep, imageEp, and mgid.
+
+- Localization support:
+  - EsIE sets _LANG = 'es' to handle Spanish pages.
+  - Each localized extractor can point to its own MRSS feed endpoint when necessary and provide tests that exercise locale-specific titles, descriptions, and playlist counts.
+
+- Tests:
+  - The _TESTS arrays demonstrate typical outputs:
+    - For SouthParkIE: id, ext, title, description, timestamp, upload_date
+    - For localized variants: checks on title/description, playlist counts, handling of non-ASCII characters, and geo-restriction skip behavior
+    - Some tests are marked only_matching to ensure proper URL recognition without full extraction
+
+In short
+- This file provides a family of South Park extractors for youtube-dl, all deriving from a common MTV-based extractor. The base SouthParkIE defines how to reach the MTV MRSS feed and how to construct the feed query from a South Park page URL. The subclasses tailor the extractors for regional sites (Spanish, German, Dutch, Danish) by adjusting URL patterns, feed endpoints, and tests, while reusing the same feed-driven metadata extraction workflow.

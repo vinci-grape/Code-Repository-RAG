@@ -1,0 +1,67 @@
+Summary of ./youtube-dl/youtube_dl/extractor/go.py
+
+Purpose
+- Implement the GoIE extractor for Go/ABC/Disney-related sites (ABC, Freeform, Disney Now/Junior/XD, FXNow) using Adobe Pass MVPD authentication when needed.
+- Supports both single video extraction and show-based playlists.
+- Handles HLS (m3u8) streams with entitlement, as well as direct MP4 assets, with proper geo-blocking handling and metadata extraction.
+
+Key classes/functions
+- GoIE(AdobePassIE): Main extractor class inheriting from AdobePassIE to support MVPD authentication for protected HLS streams.
+- _SITE_INFO: Mapping of site subdomains to branding and MVPD resource information (brand, requestor_id, resource_id).
+- _VALID_URL: Regular expression to recognize supported Go-branded URLs and capture video_id or display_id.
+- _TESTS: A set of test cases verifying single videos, playlists, and non-matching URLs.
+- _extract_videos(self, brand, video_id='-1', show_id='-1'):
+  - Builds and fetches the JSON from the internal API: http://api.contents.watchabc.go.com/vp2/ws/contents/3000/videos/{brand}/001/-1/{show_id}/-1/{video_id}/-1/-1.json
+  - Returns the 'video' list/object from the response.
+- _real_extract(self, url):
+  - Main extraction logic:
+    - Parse URL to identify sub_domain and brand; derive video_id/display_id.
+    - If video_id or site_info is missing, fetch the page and try to extract video_id/brand/show_id via embedded JSON and various fallbacks (data-video-id, videoIdCode, layout.video.id, data-brand, etc.).
+    - If still not resolved, perform a show-level extraction: fetch all videos for the show, build entries as sub-URLs to go: Go extractor for each video, return a playlist result with show_id and optional show_title.
+    - If a specific video is identified, fetch video_data via _extract_videos(brand, video_id)[0].
+    - Build formats from video_data['assets']['asset']:
+      - For each asset with a URL:
+        - Determine extension (ext) via determine_ext(asset_url).
+        - If ext is m3u8:
+          - Prepare data payload including video_id, video_type, brand, device.
+          - If accesslevel == '1':
+            - Use MVPD entitlement: resolve requestor_id/resource, obtain auth via AdobePass (_extract_mvpd_auth) and add token fields.
+            - Request entitlement from https://api.entitlement.watchabc.go.com/vp2/ws-secure/entitlement/2020/authorize.json with encoded POST data.
+            - If entitlement errors exist:
+              - If error code 1002 → geo-restricted; raise geo block.
+              - Otherwise raise ExtractorError with combined messages.
+            - Append sessionKey to asset_url and fetch HLS formats via _extract_m3u8_formats.
+          - If MVPD is not used, initialize US geo-bypass.
+        - Else (non-m3u8):
+          - Create a format dict with format_id, url, ext.
+          - If asset_url indicates a source mp4 (contains /mp4/source/ or _source.mp4), mark as SOURCE and set a higher priority.
+          - Otherwise try to infer width/height from the URL (e.g., /<width>x<height>/) and set format_id accordingly (e.g., "HD", "720P", etc.).
+    - Sort formats with _sort_formats.
+    - Build subtitles from video_data['closedcaption']['src']; map language to list of {url, ext} (ext mapped to ttml if xml).
+    - Build thumbnails from video_data['thumbnails']['thumbnail'] with url, width, height if present.
+    - Return a dict with:
+      - id, title
+      - description (video_data['longdescription'] or video_data['description'])
+      - duration (convert from ms to seconds via int_or_none(value, 1000))
+      - age_limit (parse_age_limit(video_data['tvrating']['rating']))
+      - episode_number, series, season_number
+      - thumbnails, formats, subtitles
+
+Important implementation details
+- MVPD/Adobe Pass integration:
+  - When an HLS asset has accesslevel '1', the code uses MVPD (brand/requestor_id/resource_id) to obtain an authorization token (via _extract_mvpd_auth) and entitlements from the entitlement endpoint.
+  - If entitlement returns errors, particularly code 1002, the extractor raises a geo restriction with an appropriate message; otherwise it raises a generic ExtractorError with the concatenated error messages.
+  - If MVPD is not used, the code enables geo bypass for US-only access.
+- Fallback and resilience:
+  - If initial URL parsing fails to identify a video_id or brand, the code scrapes the page for embedded JSON (__abc_com__) and attempts multiple fallbacks (layout.video.id, data-video-id, videoIdCode, id fields) to determine the video to fetch.
+  - If a video_id cannot be resolved, the code attempts to extract a show_id and build a playlist of all videos for the show, returning a playlist with entries pointing to the Go extractor for each video.
+  - For Disney-branded content, there are special handling paths to accommodate different page layouts (ABC/Freeform vs Disney networks).
+- Format extraction nuances:
+  - HLS (m3u8) assets rely on dynamic entitlement and session keys; once obtained, the code uses _extract_m3u8_formats to populate formats.
+  - Non-HLS assets use direct MP4 URLs; the code attempts to deduce a meaningful format_id (including RESolutions) and uses SOURCE flag for source MP4s.
+- Metadata and assets:
+  - Thumbnails: collected from video_data['thumbnails']['thumbnail'] with width/height when provided.
+  - Subtitles: closed captions extracted from video_data['closedcaption']['src'], with proper extension mapping (xml → ttml).
+  - Main metadata: id, title, description, duration, age_limit, episode_number, series, season_number.
+
+In short, this extractor handles a wide range of Go-brand pages, resolves video IDs via page scraping or API lookups, supports both MVPD-protected (via Adobe Pass) and public assets, assembles comprehensive formats, subtitles, and thumbnails, and can output either a single video or a playlist of videos for a show.

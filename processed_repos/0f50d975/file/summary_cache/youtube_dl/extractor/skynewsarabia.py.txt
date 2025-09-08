@@ -1,0 +1,53 @@
+Concise code summary for: ./youtube-dl/youtube_dl/extractor/skynewsarabia.py
+
+Purpose
+- Implement YouTube-dl extractors for Sky News Arabia content. Supports:
+  - Individual Sky News Arabia videos
+  - Sky News Arabia articles that may contain one or more videos (inline items)
+
+Key classes
+- SkyNewsArabiaBaseIE(InfoExtractor)
+  - Shared utilities for Sky News Arabia data
+  - _IMAGE_BASE_URL: base URL for image assets
+  - _call_api(path, value): fetches REST API data from http://api.skynewsarabia.com/web/rest/v2/<path>/<value>.json
+  - _get_limelight_media_id(url): extracts a 32-char lowercase hex Limelight media id from a Limelight URL
+  - _get_image_url(image_path_template, width='1600', height='1200'): builds a full image URL using the base and given template
+  - _extract_video_info(video_data): converts a video entry from the Sky API into a standardized InfoExtractor result
+    - Builds a url_transparent entry that points to LimelightMedia for the actual video
+    - Fields extracted: id, title, description, thumbnail, timestamp, duration, tags, categories, webpage_url
+    - Uses Limelight as the underlying video engine (ie_key='LimelightMedia')
+
+- SkyNewsArabiaIE(SkyNewsArabiaBaseIE)
+  - Video extractor for Sky News Arabia videos
+  - IE_NAME = 'skynewsarabia:video'
+  - _VALID_URL: matches https://{www.}skynewsarabia.com/web/video/<id>
+  - _real_extract(url): fetches video data via _call_api('video', id) and returns _extract_video_info(video_data)
+
+- SkyNewsArabiaArticleIE(SkyNewsArabiaBaseIE)
+  - Article extractor for Sky News Arabia articles
+  - IE_NAME = 'skynewsarabia:article'
+  - _VALID_URL: matches https://{www.}skynewsarabia.com/web/article/<id>
+  - _TESTS: includes multiple test cases
+    - First test: article with a single video; expects video info (id, ext, title, description, upload_date, timestamp, duration)
+    - Second test: article with multiple inline video items; expects a playlist with min 2 items
+  - _real_extract(url):
+    - Fetches article data via _call_api('article', id)
+    - If article.mediaAsset.type == 'VIDEO':
+      - Builds a single url_transparent item pointing to LimelightMedia (similar to _extract_video_info) using mediaAsset['videoUrl'][0]['url']
+      - Includes title, description, thumbnail, timestamp, tags, categories, and webpage_url
+    - Otherwise (no single video), iterates article_data['inlineItems'] and collects items of type 'VIDEO' using _extract_video_info
+    - Returns a playlist_result consisting of the gathered video entries, with article_id as id, article_data['headline'] as title, and article_data.get('summary') as description
+
+Important implementation details
+- Limelight integration: Videos are exposed as Limelight media items (url like limelight:media:<id>). The actual media is resolved by the LimelightMedia extractor via ie_key='LimelightMedia' or 'LimelightMedia' in the dict.
+- Image URLs: Uses _get_image_url with a template from the API (mediaAsset['imageUrl'] or similar) and a standard width/height default (1600x1200).
+- Timestamps and durations: Parsed via parse_iso8601 and parse_duration to produce standard upload_date, timestamp, and duration fields when available.
+- Data mapping:
+  - video_data and article_data structures from Sky News Arabia API are normalized into youtube-dl info dicts.
+  - Fields included where available: id, title, description, timestamp, duration, thumbnail, tags, categories, webpage_url, and appropriate ie_key for Limelight resolution.
+- Robust handling of articles:
+  - If an article contains a standalone video, it is surfaced as a single Limelight-based entry (transparent URL).
+  - If there are inline VIDEO items, they are collected into a playlist, exposing multiple video entries.
+
+Overall functionality
+- Provides access to Sky News Arabia video content and article content by calling Sky News Arabia REST API, converting API responses into standard youtube-dl info objects, and leveraging LimelightMedia when necessary to resolve video playback.

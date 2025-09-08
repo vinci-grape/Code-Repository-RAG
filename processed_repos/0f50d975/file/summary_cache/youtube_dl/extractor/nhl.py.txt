@@ -1,0 +1,71 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/nhl.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for NHL-related video content (nhl.com and WCH2016 site).
+
+- Main classes
+  - NHLBaseIE (InfoExtractor)
+    - Core extractor logic shared by NHL and related sites.
+    - _real_extract(url): parses the URL, fetches item details, builds a normalized video object.
+      - URL parsing: extracts site (nhl or wch2016) and id from the URL using _VALID_URL pattern.
+      - Data fetching: downloads JSON from a content-domain URL constructed as:
+        https://<CONTENT_DOMAIN>/<site_prefix>/[item/ if mlb]id/v1/<tmp_id>/details/web-v1.json
+        where:
+        - CONTENT_DOMAIN = nhl.bamcontent.com
+        - site_prefix = first 3 chars of the site (e.g., 'nhl')
+        - 'item/' only used for mlb (not for nhl/wch2016 here)
+        - tmp_id is the captured id from the URL
+      - Normalizes video_data:
+        - If video_data['type'] != 'video', drills into video/media structures to obtain a video_data dict.
+        - If a direct 'video' exists use it; else if a 'videos' list exists, take the first item.
+      - Metadata extraction:
+        - id = video_data['id']
+        - title = video_data['title']
+      - Formats construction:
+        - Iterate over video_data.get('playbacks', []) and process each playback entry:
+          - url must exist; determine extension with determine_ext(playback_url).
+          - If extension is 'm3u8':
+            - Use _extract_m3u8_formats(playback_url, video_id, 'mp4', 'm3u8_native', m3u8_id=playback.get('name','hls'), fatal=False)
+            - Call _check_formats and extend the formats list.
+          - Else (direct HTTP URLs):
+            - height = int_or_none(playback.get('height'))
+            - width = int_or_none(playback.get('width'))
+            - format_id = playback.get('name', 'http' + ('-%dp' % height if height else ''))
+            - tbr (bitrate) parsed from URL via regex _search_regex(r'_(\d+)[kK]', playback_url)
+            - Build a format dict with: format_id, url, width, height, tbr
+        - Sort formats with _sort_formats.
+      - Thumbnails extraction:
+        - Reads video_data.get('image', {}).get('cuts') (which can be a list or a dict)
+        - Normalizes to an iterable of thumbnail entries with fields url, width, height
+      - Returns a standard info dict:
+        - id, title, description, timestamp (parse_iso8601), duration (parse_duration), thumbnails, formats
+  - NHLIE (inherits NHLBaseIE)
+    - IE_NAME = 'nhl.com'
+    - _VALID_URL matches NHL/World Cup of Hockey 2016 pages with a c-<id> path (c-<digits>).
+    - _CONTENT_DOMAIN = 'nhl.bamcontent.com'
+    - _TESTS: provides several examples for different content types:
+      - Video page (type=video) with expected mp4, title, description, timestamp, upload_date
+      - Article page (type=article) with similar metadata
+      - A note that some m3u8 URLs may be invalid (covered by fatal=False in m3u8 handling)
+      - Two additional entries marked only_matching to ensure URL patterns match without requiring video data
+
+- Key implementation details
+  - Uses a common JSON endpoint pattern to fetch item details and normalize to a video payload.
+  - Robust handling of content structures:
+    - If the initial payload isn’t a video, it digs into media/videos to locate a usable video_data dict.
+  - Formats support:
+    - Both HLS (m3u8) and direct HTTP playback URLs are supported.
+    - For m3u8, uses the standard _extract_m3u8_formats path with non-fatal error handling (fatal=False) to avoid breaking on invalid playlists.
+    - For HTTP URLs, includes width/height and an inferred bitrate (tbr) from the URL if available.
+  - Thumbnails:
+    - Supports image cuts for thumbnails, accommodating both dict and list representations.
+  - Metadata normalization:
+    - title, description, timestamp (parse_iso8601), duration (parse_duration) extracted and exposed in the standard info_dict format.
+  - Compatibility helpers:
+    - compat_str for id normalization.
+    - determine_ext to branch between m3u8 and direct URLs.
+    - int_or_none helper to safely coerce numeric fields.
+  - Tests:
+    - Provides multiple _TESTS, including real NHL video URLs and non-video pages (only_matching) to validate URL matching behavior and expected metadata.
+
+This file enables youtube-dl to fetch, parse, and present NHL video and article media in a consistent, standard format with support for both HLS and direct media URLs.

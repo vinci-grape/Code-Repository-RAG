@@ -1,0 +1,42 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/appleconnect.py
+
+- Purpose
+  - Implement an extractor (AppleConnectIE) for Apple iTunes “post” videos on Apple Connect. It parses a post page, extracts embedded video data, and returns a standard info dict for youtube-dl.
+
+- Key class
+  - AppleConnectIE(InfoExtractor): Subclass of youtube-dl’s InfoExtractor handling Apple Connect posts.
+
+- URL handling
+  - _VALID_URL: r'https?://itunes\.apple\.com/\w{0,2}/?post/(?:id)?sa\.(?P<id>[\w-]+)'
+  - Captures the post id after sa. prefix (e.g., sa.4ab17a39-2720-11e5-96c5-a5b38f6c42d3).
+
+- Tests
+  - _TESTS: 
+    - A real example with a known URL, expected MD5, and an info_dict containing id, ext (m4v), title, uploader, thumbnail, upload_date, timestamp.
+    - A second test with only_matching to ensure the URL pattern matches even if not fully exercised.
+
+- Main extraction flow (_real_extract)
+  - Extract post id from URL using _match_id.
+  - Download the post webpage with _download_webpage.
+  - Locate a JSON blob inside the page using _html_search_regex with the pattern class="auc-video-data">(\{.*?\}).
+    - If not found, raise ExtractorError('This post doesn\'t contain a video', expected=True) to indicate an expected failure.
+  - Parse the JSON blob with _parse_json into video_data (a dict).
+  - Extract timestamp from the page via data-timestamp="(\d+)" and convert to int with str_to_int.
+  - Extract like_count by searching for a pattern like "123 Loves" on the page and convert to int with str_to_int (default=None if not found).
+  - Return an info dict with:
+    - id: video_id
+    - url: video_data['sslSrc'] (direct video URL)
+    - title: video_data['title']
+    - description: video_data['description']
+    - uploader: video_data['artistName']
+    - thumbnail: video_data['artworkUrl']
+    - timestamp: the parsed timestamp
+    - like_count: the parsed like count (may be None if not found)
+
+- Notable implementation details
+  - Robust handling for posts without video content by raising an expected ExtractorError.
+  - Data is sourced from an embedded JSON object in the page (auc-video-data) plus additional metadata found in HTML attributes.
+  - Uses standard helpers: _match_id, _download_webpage, _html_search_regex, _parse_json, str_to_int.
+  - The resulting info dict aligns with youtube-dl’s expected fields (id, url, title, description, uploader, thumbnail, timestamp, like_count).
+
+Overall, this extractor targets Apple’s “post” pages, pulls a JSON block with video details, augments it with page-derived metadata, and outputs a complete media info dictionary for download.

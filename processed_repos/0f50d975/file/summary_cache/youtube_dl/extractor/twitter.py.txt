@@ -1,0 +1,85 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/twitter.py
+
+Purpose
+- Implement YouTube-DL extractors for Twitter-related video content. Handles standard Tweets with native Twitter video, Twitter Cards, Amplify videos, Periscope broadcasts, and other embedded card formats. Integrates with Vine, Periscope, and TwitterBroadcast IEs when appropriate.
+
+Key classes
+- TwitterBaseIE(InfoExtractor)
+  - Central helper for Twitter video extraction.
+  - Constants: API base URL, base Twitter URL regex, and a cache for a guest token.
+  - Core helpers:
+    - _extract_variant_formats(variant, video_id): Convert a single video variant to a format dict. Supports HLS (.m3u8) via _extract_m3u8_formats or progressive HTTP formats with bitrate (tbr). Also fills width/height if detectable in the URL.
+    - _extract_formats_from_vmap_url(vmap_url, video_id): Download and parse a Video Map (vmap) file, collect all videoVariant entries, convert each to formats via _extract_variant_formats, and also add a final video URL if present.
+    - _search_dimensions_in_video_url(a_format, video_url): If the URL encodes dimensions (e.g., /1234x567/), populate width/height in the format.
+    - _call_api(path, video_id, query={}): Handles Twitter API calls with guest token authentication. Obtains a guest token if needed, adds x-guest-token header, and performs the request. On 403 errors, surfaces a helpful error message from the JSON response.
+  - This base class provides the shared API access and format extraction utilities used by the TwitterIE, TwitterAmplifyIE, and TwitterBroadcastIE classes.
+
+- TwitterCardIE(InfoExtractor)
+  - IE for Twitter Card endpoints (i/tfw/v1 and videos/tweet cards).
+  - _VALID_URL matches Twitter Card URLs.
+  - _real_extract(url): Delegates to the standard Twitter status page by returning a URL result for the corresponding status page (TwitterIE). This allows Twitter Card URLs to be handled via the main extractor logic.
+
+- TwitterIE(TwitterBaseIE)
+  - Main extractor for standard Twitter timelines/tweets.
+  - IE_NAME = 'twitter'
+  - _VALID_URL matches typical tweet URLs, including i/web, statuses, and status-like paths.
+  - _real_extract(url):
+    - Fetches tweet data via API: statuses/show/{id}.json with card info, extended mode, etc.
+    - Builds a base info dict: id, title, description, uploader, uploader_id, timestamp, uploader_url, like/repost/comment counts, age_limit (18 if possibly_sensitive), and tags (hashtags).
+    - Media extraction flow:
+      - If a media entity exists and is not a photo: extract video info from media:
+        - Gather video variants from media.video_info.variants and convert to formats via _extract_variant_formats.
+        - Build thumbnails from media_url_https/media_url and media sizes, including an 'orig' thumbnail from original_info.
+        - Attach formats, thumbnails, and duration (from duration_millis) to info.
+      - Else if a card exists:
+        - Inspect card_name and handle several cases:
+          - player: provide a direct URL result.
+          - periscope_broadcast: URL with PeriscopeIE, direct URL binding.
+          - broadcast: URL with TwitterBroadcastIE.
+          - summary: use card_url.
+          - unified_card: parse the embedded unified_card JSON and extract from its media_entities.
+          - amplify or other cards: use amplify_url_vmap or player_stream_url to fetch formats via _extract_formats_from_vmap_url. Also construct thumbnails from player_image variants and set duration from content_duration_seconds.
+        - If none of the above, fall back to a reddit-like “expanded_url” if present in tweet entities and use that URL as a direct video URL.
+      - If neither media nor card: try to use an expanded URL from entities.urls[0].expanded_url; if absent, raise an error.
+  - Handles a wide variety of Twitter content representations, including direct tweets with video, cards that embed videos (amplify, periscope, etc.), unified cards, and fallbacks to direct URLs when necessary.
+  - Integrates with other IEs (Periscope, Vine, TwitterBroadcast) by assigning appropriate ie_key and returning URL results when cards reference those formats.
+
+- TwitterAmplifyIE(TwitterBaseIE)
+  - IE for Amplify-hosted Twitter videos (amp.twimg.com).
+  - _VALID_URL matches the Amplify vmap URLs.
+  - _real_extract(url):
+    - Downloads the page, reads the vmap URL from twitter:amplify:vmap meta.
+    - Uses _extract_formats_from_vmap_url to build formats.
+    - Optionally reads a thumbnail from twitter:image:src and dimensions from twitter:image:width/height and twitter:height/width.
+    - Adjusts the first format with the player dimensions and returns a dict with id, title, formats, and thumbnails.
+
+- TwitterBroadcastIE(TwitterBaseIE, PeriscopeBaseIE)
+  - IE for Twitter-broadcasts (Periscope) embedded in Twitter.
+  - _VALID_URL matches i/broadcasts/{id} paths.
+  - _real_extract(url):
+    - Uses Twitter API to fetch the broadcast and then the live video stream status via the broadcast’s media_key.
+    - Extracts an m3u8 URL (noRedirectPlaybackUrl or location).
+    - Checks geo-blocking; raises geo restriction if blocked.
+    - Determines m3u8 type via query param 'type'.
+    - Extracts common format info (state, width, height) and then builds formats via _extract_pscp_m3u8_formats for Periscope broadcasts.
+    - Returns a full info dict.
+
+Important implementation details
+- Guest token authentication: The Twitter API access uses a guest activation flow. The code fetches a guest_token via guest/activate.json with a fixed Authorization header and caches it in _GUEST_TOKEN, then uses x-guest-token on subsequent API calls.
+- Error handling: If an API call returns 403, the code parses the JSON error and raises a helpful ExtractorError with the server-provided message.
+- Formats extraction: Supports multiple representations:
+  - HLS variants (.m3u8) via _extract_m3u8_formats.
+  - Progressive HTTP variants with bitrate information.
+  - vmap-driven formats via _extract_formats_from_vmap_url.
+  - Amplify and other card-based formats via vmap URLs or player streams.
+- Thumbnails: Extracted from media information and media sizes, with support for orig/high-res variants. Thumbnails include width/height when available.
+- Metadata: Builds a rich info dict with id, title (often prefixed with uploader), description, uploader, uploader_id, timestamp, upload_date, duration, like/repost/comment counts, tags, and age_limit.
+- Card handling: Robust handling for multiple Twitter Card types (player, periscope_broadcast, broadcast, summary, unified_card, amplify, etc.). Falls back to direct URLs when embedded content cannot be resolved.
+- Tests: A comprehensive _TESTS array for TwitterCardIE and TwitterIE covers a wide range of tweet formats, including direct video, GIFs, Periscope, Vine, unified cards, and edge cases like suspended accounts or non-video cards.
+
+In short
+- This file provides a complete Twitter video extraction pipeline for YouTube-DL, including:
+  - Managing Twitter API guest authentication.
+  - Extracting formats from various Twitter video representations (direct video, HLS, vmap-based, Amplify, Periscope).
+  - Handling Twitter Cards to extract embedded videos or URLs to other IEs.
+  - Producing rich metadata (title, uploader, timestamp, duration, thumbnails, tags, etc.) and proper error handling.

@@ -1,0 +1,59 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/beatport.py
+
+Purpose
+- Implement BeatportIE to extract metadata and media formats for Beatport track pages.
+
+Key components
+- Class BeatportIE(InfoExtractor)
+  - _VALID_URL: Regular expression matching Beatport track URLs, capturing display_id and id.
+  - _TESTS: Sample test cases with expected id, display_id, title, extension, and md5 for downloaded formats.
+  - _real_extract(url): Main extraction flow.
+
+Main functionality
+- Webpage retrieval
+  - Downloads the Beatport track page using _download_webpage.
+
+- Data extraction
+  - Extracts embedded JSON from the page via a regex search for window.Playables = (...); using _search_regex with DOTALL.
+  - Parses the JSON with _parse_json, keyed by the track_id.
+  - Selects the specific track object from playables['tracks'] where t['id'] == int(track_id).
+
+- Title construction
+  - Builds the title as "<artist names joined by ', '> - <track name>".
+  - If track['mix'] exists, appends " (<mix>)" to the title.
+
+- Formats (media streams)
+  - Iterates over track['preview'] items (keyed by extension, e.g., 'mp3', 'mp4').
+  - Skips entries with empty 'url'.
+  - For each valid entry, creates a format dict:
+    - url: the media URL
+    - ext: extension (mp3 or mp4)
+    - format_id: same as ext
+    - vcodec: 'none'
+  - Codec and quality specifics per extension:
+    - mp3: acodec 'mp3', abr 96, asr 44100, preference 0
+    - mp4: acodec 'aac', abr 96, asr 44100, preference 1
+  - Sorts formats with _sort_formats.
+
+- Thumbnails (images)
+  - Builds a list from track['images'], skipping entries named 'dynamic' or with missing URL.
+  - Each image dict includes:
+    - id: image key/name
+    - url: image URL
+    - height: integer if available (via int_or_none)
+    - width: integer if available (via int_or_none)
+
+Return structure
+- id: string version of track['id'] or fall back to track_id
+- display_id: track['slug'] or original display_id from URL
+- title: constructed title with artists, track name, and optional mix
+- formats: list of the prepared format dicts, sorted
+- thumbnails: list of image dictionaries
+
+Important implementation details
+- Data source: Beatport embeds track metadata in a JavaScript object window.Playables on the page; the extractor pulls this JSON server-side.
+- Robustness: Skips missing preview URLs; only includes valid mp3/mp4 previews.
+- Metadata fidelity: Title combines all artist names and track name, with optional mix, matching Beatport conventions.
+- Type/value handling: Uses compat_str for id normalization and int_or_none for numeric fields in images.
+
+Overall, BeatportIE fetches a Beatport track page, locates the track data in the embedded Playables JSON, constructs a canonical title, enumerates available audio/video formats with appropriate codecs and bitrates, collects track thumbnails, and returns a structured info dictionary suitable for youtube-dl's downstream processing.

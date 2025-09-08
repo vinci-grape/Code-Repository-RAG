@@ -1,0 +1,80 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/asiancrush.py
+
+Overview
+- Implements YouTube-DL extractors for AsianCrush family of sites (asiancrush.com, yuyutv.com, midnightpulp.com, cocoro.tv, retrocrush.tv).
+- Core idea: fetch video metadata from a site API, derive a Kaltura video entry (partner_id:entry_id), and delegate actual video extraction to the Kaltura IE (via url_transparent).
+- Also provides a playlist/series extractor that enumerates all videos in a series using API or HTML scraping, depending on host.
+
+Key classes
+1) AsianCrushBaseIE (InfoExtractor)
+   - Shared helpers and API access for the family of sites.
+   - _VALID_URL_BASE: base regex for hostnames (asiancrush.com, yuyutv.com, midnightpulp.com, cocoro.tv, retrocrush.tv).
+   - _KALTURA_KEYS: list of possible fields in the API object that may contain a Kaltura URL. Used to extract partner_id and entry_id via regex.
+   - _API_SUFFIX: special suffix mapping (e.g., retrocrush.tv uses -ott).
+   - _call_api(host, endpoint, video_id, query, resource): makes JSON API request to https://api[optional_suffix].[host]/endpoint with query params and geo headers; returns the 'objects' list from the response.
+   - _download_object_data(host, object_id, resource): fetches a single object via the API (endpoint 'search').
+   - _get_object_description(obj): returns a textual description from long_description or short_description.
+   - _parse_video_data(video): core transformation:
+     - Derives title from video['name'].
+     - Scans KALTURA_KEYS to find a URL and extract partner_id and entry_id using regex /p/(\d+)/.../entryId/([^/]+)/.
+     - Builds categories from meta.categories' names.
+     - Reads show_info for series/season/episode metadata.
+     - Returns a dict suitable for a url_transparent Kaltura video:
+       - _type: 'url_transparent'
+       - url: 'kaltura:partner_id:entry_id'
+       - ie_key: KalturaIE.ie_key()
+       - id, title, description
+       - age_limit, categories, series, season_number, season_id, episode_number
+
+2) AsianCrushIE (Video IE)
+   - _VALID_URL: builds on _VALID_URL_BASE to match video pages, e.g. .../video/004289v/...
+   - _TESTS: sample tests, including a full extraction test for a known video and several “only_matching” tests for various hosts.
+   - _real_extract(url):
+     - Extracts host and video_id from the URL.
+     - Special case for cocoro.tv: download the page, extract embed vars (entry_id) from iEmbedVars JSON, fall back to original video_id if found.
+     - Calls _download_object_data(host, video_id, 'video') to fetch video metadata.
+     - Returns result of _parse_video_data(video) (a url_transparent Kaltura entry).
+
+3) AsianCrushPlaylistIE (Playlist/Series IE)
+   - _VALID_URL: matches series/0+(id)s paths.
+   - _TESTS: tests for series pages on multiple hosts; includes a playlist_count and expected fields for the first case.
+   - _PAGE_SIZE: set to a large value (1e9) to effectively fetch all items per page.
+   - _fetch_page(domain, parent_id, page):
+     - Calls _call_api(domain, 'getreferencedobjects', parent_id, with params: max, object_type=video, parent_id, start).
+     - Yields parsed video data for each video in the response via _parse_video_data(video).
+   - _real_extract(url):
+     - Extracts host and playlist_id from URL.
+     - cocoro.tv special handling:
+       - Downloads the page, then scans for <a> tags linking to AsianCrushIE URLs and collects them as entries using AsianCrushIE (ie_key).
+       - Attempts to derive a title from the page (h1 tag, OpenGraph, Twitter meta, or <title>).
+       - Derives a description from OpenGraph or Twitter meta.
+     - Non-cocoro hosts:
+       - Downloads the show object via _download_object_data(host, playlist_id, 'show').
+       - Title from show['name'], description via _get_object_description(show).
+       - Entries is an OnDemandPagedList wrapping _fetch_page with the page function and _PAGE_SIZE.
+     - Returns playlist_result(entries, playlist_id, title, description).
+
+Important implementation details
+- Kaltura integration:
+  - The actual video is accessed via a Kaltura URL derived from one of several possible video URL fields in the API object (video_url, progressive_url, download_url, etc.).
+  - partner_id and entry_id are extracted with a regex against the selected Kaltura URL: /p/(\d+)/.../entryId/([^/]+)/.
+  - The extractor builds a Kaltura-based url_transparent entry: 'kaltura:partner_id:entry_id' and sets ie_key to KalturaIE.ie_key().
+- API usage and regional constraints:
+  - API calls use https://api[optional_suffix].[host]/endpoint with JSON responses and a 'objects' array.
+  - _API_SUFFIX contains mappings like 'retrocrush.tv': '-ott', affecting the API subdomain for OTT-like access.
+  - geo_verification_headers() is used to honor geolocation restrictions.
+- Metadata extraction:
+  - Object descriptions come from long_description or short_description.
+  - Age limits are parsed via parse_age_limit on mpaa_rating or tv_rating.
+  - Categories are built from video['meta']['categories'] (names), filtered to remove nulls.
+  - Series, season, and episode metadata come from show_info when present.
+- cocoro.tv handling:
+  - Video: tries to read embed vars from the page to get entry_id if the API path doesn’t yield it directly.
+  - Playlist: HTML scraping is used to gather individual video links from the page, then delegates to AsianCrushIE for each item.
+- Playlist extraction:
+  - For non-cocoro hosts, shows are fetched via API ('show' object) and a paged list of videos is built with OnDemandPagedList for streaming large series.
+- Tests:
+  - _TESTS include a full extraction scenario for a known video and multiple “only_matching” tests to validate URL patterns across hosts.
+
+Summary
+- This file provides a cohesive extraction framework for the AsianCrush family: a base API/metadata layer, a video extractor that returns Kaltura-derived entries, and a playlist/series extractor that aggregates videos from API or HTML depending on host. It robustly handles multiple potential Kaltura sources, integrates with Kaltura IE, and accounts for host-specific quirks (notably cocoro.tv).

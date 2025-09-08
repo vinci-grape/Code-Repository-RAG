@@ -1,0 +1,66 @@
+Here’s a concise, focused summary of the PandoraTV extractor code.
+
+Purpose
+- PandoraTVIE is a youtube-dl extractor for pandora.tv videos. It fetches metadata and builds a list of available video formats, each with an actual streaming URL obtained via Pandora’s API.
+
+Key components
+- Class PandoraTVIE(InfoExtractor)
+  - IE_NAME: 'pandora.tv'
+  - IE_DESC: '판도라TV'
+  - _VALID_URL: Complex regex handling multiple Pandora formats:
+    - New format: https://.../view/{user_id}/{video_id}
+    - Old format: channel.pandora.tv/channel/video.ptv?...
+    - Mobile: m.pandora.tv/?c=view&ch_userid=...&prgid=...
+  - _TESTS: Two primary tests with expected info_dicts (id, ext, title, description, thumbnail, duration, upload_date, uploader, uploader_id, view_count, like_count) and one or more test URLs that should only match a URL but not download (only_matching cases).
+
+Main workflow in _real_extract
+1) URL parsing
+   - Attempts to extract user_id and video_id via the _VALID_URL regex.
+   - If either is missing, falls back to parsing query parameters:
+     - prgid -> video_id
+     - ch_userid -> user_id
+   - If still missing, raises ExtractorError('Invalid URL', expected=True).
+
+2) Metadata/API data retrieval
+   - Calls _download_json with:
+     http://m.pandora.tv/?c=view&m=viewJsonApi&ch_userid={user_id}&prgid={video_id}
+   - Retrieves data['data']['rows']['vod_play_info']['result'] into info.
+
+3) Formats discovery and resolution
+   - Iterates over info items as format_id -> format_url.
+   - Skips entries with empty format_url.
+   - Derives height from format_id using regex ^v(\d+)[Uu]rl$; if no height, skips.
+   - For each valid format, fetches the real streaming URL by POSTing to:
+     http://m.pandora.tv/?c=api&m=play_url
+     with payload prgid=video_id, runtime=info.get('runtime'), vod_url=format_url
+     and headers Origin=url, Content-Type: application/x-www-form-urlencoded
+   - The API response’s 'url' field becomes the actual format URL.
+   - Appends to formats:
+     - format_id: '{height}p' (e.g., '720p')
+     - url: the retrieved streaming URL
+     - height: int(height)
+   - After collecting all formats, sorts them with self._sort_formats(formats).
+
+4) Return metadata payload
+   - id: video_id
+   - title: info['subject']
+   - description: info.get('body')
+   - thumbnail: info.get('thumbnail') or info.get('poster')
+   - duration: float_or_none(info.get('runtime'), 1000) or parse_duration(info.get('time'))
+     - runtime is treated as milliseconds (divided by 1000)
+     - if missing, falls back to parsing a time string in info.get('time')
+   - upload_date: derived from info['fid'] when fid is a string
+     - upload_date = last path segment of fid, first 8 chars (YYYYMMDD)
+   - uploader: info.get('nickname')
+   - uploader_id: info.get('upload_userid')
+   - view_count: str_to_int(info.get('hit'))
+   - like_count: str_to_int(info.get('likecnt'))
+   - formats: the collected list of format dictionaries
+
+Important implementation details
+- Multi-format handling: The extractor does not assume a single MP4/FLV URL. Instead, it enumerates available format_id keys, derives resolutions, and then queries a secondary API (play_url) to obtain the actual streaming URL for each format.
+- Robust URL handling: Supports multiple Pandora URL formats (new, old, mobile) and gracefully degrades to query-string extraction if necessary.
+- Data normalization helpers: Uses compat-like helpers (compat_str, compat_urlparse) for compatibility, and utility helpers (float_or_none, parse_duration, str_to_int, urlencode_postdata) for robust data parsing and formatting.
+- Metadata extraction details: Upload date derivation depends on fid structure; duration may come from runtime (ms) or a time string; uploader info is pulled from nickname and upload_userid.
+
+In short, PandoraTVIE extracts video metadata and builds a set of downloadable formats by calling Pandora’s viewJsonApi, then resolving each format’s real URL via a separate play_url API call, returning a structured dict compatible with youtube-dl’s expectations.

@@ -1,0 +1,49 @@
+Here is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/twentymin.py:
+
+- Purpose
+  - Implement an InfoExtractor for the Swiss site 20min.ch (TwentyMinutenIE) to extract video metadata and direct MP4 formats.
+
+- Key class
+  - TwentyMinutenIE(InfoExtractor)
+    - IE_NAME: '20min'
+    - _VALID_URL: Regex matching 20min.ch video pages, supporting two path patterns that yield a numeric video ID.
+    - _TESTS: Includes three tests demonstrating normal extraction, description/md5 handling, and an unrelated URL (only_matching).
+
+- URL extraction helper
+  - _extract_urls(webpage): Static method that scans HTML for iframes embedding the 20min videoplayer and returns matching URLs that contain a videoId parameter.
+
+- Main extraction flow
+  - _real_extract(self, url):
+    - video_id = self._match_id(url)
+    - Fetches JSON from http://api.20min.ch/video/{video_id}/show and uses the 'content' field as the video data payload.
+    - title = video['title']
+    - Builds two video formats:
+      - Base URL: http://podcast.20min-tv.ch/podcast/20min/{video_id}{suffix}.mp4
+      - Suffixes: '' for SD, 'h' for HD
+      - format_id: 'sd' or 'hd'
+      - Quality is assigned via enumeration order and then _sort_formats is called to order formats.
+    - description = video.get('lead')
+    - thumbnail = video.get('thumbnail')
+    - like_count / dislike_count extracted from video['communityobject'] using a small helper:
+      - extract_count(kind) retrieves int from thumbs_up/thumbs_down, respectively, using int_or_none
+      - like_count = extract_count('up')
+      - dislike_count = extract_count('down')
+    - Returns a dict with:
+      - id: video_id
+      - title
+      - description
+      - thumbnail
+      - like_count
+      - dislike_count
+      - formats
+
+- Important implementation details
+  - Formats are direct MP4 URLs hosted at podcast.20min-tv.ch with a simple naming scheme based on video_id and quality suffix.
+  - The extractor supports both SD and HD formats and sorts them via _sort_formats.
+  - Metadata includes optional fields: description (lead) and thumbnail; engagement counts are optional and parsed safely with int_or_none via try_get.
+  - Uses the JSON API endpoint /video/{id}/show to retrieve structured video data.
+
+- Notable behavior from tests
+  - First test returns id, ext mp4, title, and a thumbnail URL, with MD5 on the page’s content in another test.
+  - Second test includes a description and an md5 check, and explicitly skips download in test params.
+  - Third test is marked only_matching as it matches URL patterns but is not a direct video page for extraction in this context.

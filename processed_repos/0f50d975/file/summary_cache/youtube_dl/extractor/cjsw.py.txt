@@ -1,0 +1,47 @@
+concis e summary
+
+- Purpose
+  - A youtube-dl extractor for CJSW program episode pages. It downloads a webpage for a given program/episode and returns an information dictionary with the audio format and metadata.
+
+- Class and URL pattern
+  - Class: CJSWIE (inherits from InfoExtractor)
+  - _VALID_URL: Matches http(s)://(www.)?cjsw.com/program/<program>/episode/<id>
+    - Captures program and episode id (numeric)
+
+- Tests
+  - _TESTS contains two tests:
+    - A real episode URL with expected id, md5, title, description, series, and episode_id.
+    - A URL that should match but has no description (only_matching test).
+
+- Core extraction flow (_real_extract)
+  1. Parse URL to obtain program and episode_id; construct audio_id as "program/episode_id".
+  2. Download the episode webpage.
+  3. Extract title using two regex options:
+     - <h1 class="episode-header__title">...</h1>
+     - data-audio-title="..."
+     - Applies unescapeHTML to the result.
+  4. Extract audio URL from a button element with data-audio-src="...".
+  5. Derive audio_id from the audio URL path using a UUID-like pattern; fall back to the previously constructed audio_id if not found.
+  6. Build formats list with a single format:
+     - url: audio URL
+     - ext: determined by determine_ext(audio_url, 'mp3')
+     - vcodec: 'none' (audio only)
+  7. Optional metadata:
+     - description: first <p>...</p> block, if present
+     - series: data-showname="..." with default to the program name
+  8. Return a dictionary with:
+     - id: audio_id
+     - title
+     - description (optional)
+     - formats
+     - series
+     - episode_id
+
+- Important implementation details
+  - Uses standard helper methods from youtube-dl: _download_webpage, _search_regex, _html_search_regex, unescapeHTML, determine_ext.
+  - _search_regex for title supports multiple patterns to handle variations in page markup.
+  - audio_id extraction uses a precise UUID-like regex; defaults ensure robustness if the pattern isn’t found.
+  - The extractor currently handles a single audio format (mp3) per episode.
+
+- Output structure
+  - Returns a dict with id, title, description (optional), formats (list with one mp3 format), series, and episode_id.

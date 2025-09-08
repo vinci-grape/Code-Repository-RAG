@@ -1,0 +1,76 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/tagesschau.py
+
+Overview
+- Implements two extractors for the Tagesschau site:
+  - TagesschauPlayerIE: extracts media from the Tagesschau player pages (multimedia/audio, multimedia/video) that use a JSON/API or embedded media in the page.
+  - TagesschauIE: extracts media from Tagesschau article pages that may contain multiple downloadable formats or playlists, and also handles video/audio entries embedded in articles.
+
+Key classes and main functionality
+- TagesschauPlayerIE
+  - _VALID_URL: matches Tagesschau multimedia player pages:
+    - /multimedia/{audio|video}/{audio|video}-<id>~player*.html
+  - _FORMATS: mapping of quality codes ('xs','s','m','l','xl','xxl') to format attributes (width, height, bitrate, etc.) and quality order.
+  - _extract_via_api(self, kind, video_id):
+    - Fetches JSON from https://www.tagesschau.de/api/multimedia/{kind}/{kind}-{id}.json.
+    - Uses info['headline'] as title and iterates over info['mediadata'] to build formats.
+    - For m3u8 formats, uses _extract_m3u8_formats (with entry_protocol='m3u8_native', m3u8_id='hls').
+    - For direct URLs, appends format dicts with url, format_id (quality and extension), and vcodec='none' for audio, otherwise None.
+    - Sorts formats, parses timestamp from info['date'], and returns id, title, timestamp, and formats.
+  - _real_extract(self, url):
+    - Currently not using the API path (commented out); instead downloads the webpage and parses embedded media JSON objects.
+    - Extracts title via _og_search_title.
+    - Scans for embedded media JSON objects with {src: "...", type: "..."} using a regex; converts them to JSON, then extracts:
+      - src, quality, type (to derive kind: 'audio' or 'video'), extension via determine_ext.
+      - Builds a format with fields: url, format_id (quality.ext if available), ext, vcodec ('none' for audio, else None), and augments with _FORMATS[quality] if present.
+    - Sorts formats, fetches thumbnail via _og_search_thumbnail, and returns id, title, timestamp not explicitly included here, but includes formats and thumbnail.
+
+- TagesschauIE
+  - _VALID_URL: matches a broad set of Tagesschau article/multimedia URLs (video/audio pages and articles that may contain downloadable formats or playlists).
+  - _TESTS: extensive tests covering single videos, audio, playlists, exclusive audio, and various “only_matching” URLs.
+  - suitable(cls, url):
+    - Returns False if TagesschauPlayerIE would handle the URL (to avoid duplicates); otherwise delegates to base suitable implementation.
+  - _extract_formats(self, download_text, media_kind):
+    - Parses downloadable formats from HTML using:
+      - A div.button with title and a link: <div class="button" title="..."><a href="...">...</a></div>
+      - Extracts format_id from the URL (or extension if not identifiable).
+      - Builds per-format dicts with format_id, url, and format_name.
+    - If a title is present:
+      - For videos: attempts to parse a detailed format descriptor with vcodec, width, height, vbr, abr, audio_desc, filesize_approx using a multi-line regex. If matched, augments the format with:
+        - format_note, vcodec, width, height, abr, vbr, filesize_approx (parsed via parse_filesize).
+      - For audio: parses “Format: <quality>kbps, <note>” and sets vcodec='none', abr accordingly, plus a format_note describing the format.
+    - Sorts and returns the list of formats.
+  - _real_extract(self, url):
+    - Parses video_id from the URL, uses display_id = video_id.lstrip('-').
+    - Downloads the page and gets title via a span.headline or og:title as fallback.
+    - DOWNLOAD_REGEX identifies the section where downloadable formats are listed:
+      - It captures whether the media is Video or Audio and the inner HTML for the formats.
+    - webpage_type = _og_search_property('type', webpage, default=None):
+      - If 'website' (Article), the page contains multiple entries (infotext blocks). It builds a list of entries by extracting each infotext block and its corresponding download_text via the DOWNLOAD_REGEX.
+        - Each entry has an id, title, and formats (via _extract_formats).
+        - If multiple entries exist, returns a playlist_result(entries, display_id, title).
+        - If only one entry, uses its formats for the final result.
+      - If not an article (single video), extracts download_text and media_kind (default 'Video'), obtains formats via _extract_formats(download_text, media_kind).
+    - thumbnail via _og_search_thumbnail, description via a teaser paragraph regex.
+    - Sorts formats and returns a dict with id, title, thumbnail, formats, and description.
+
+Important implementation details
+- Uses helper utilities from youtube-dl:
+  - determine_ext to infer the file extension from URLs
+  - js_to_json to convert embedded JSON-like strings to valid JSON for parsing
+  - parse_iso8601 to parse timestamps
+  - parse_filesize to convert textual file sizes
+  - _download_json, _download_webpage, _og_search_title/thumbnail, _search_regex, _parse_json, _sort_formats, playlist_result
+- Supports both API-based and HTML-based extraction paths:
+  - TagesschauPlayerIE has an API-based path (_extract_via_api) and a webpage-based fallback due to audio formats not exposed in API.
+  - TagesschauIE focuses on article pages with potentially multiple entries and downloadable formats, including playlist handling.
+- Handles audio/video differentiation:
+  - vcodec is set to 'none' for audio formats; for video, vcodec may be inferred from embedded descriptors.
+- Playlist support:
+  - TagesschauIE can return a playlist_result when a page contains multiple entries; otherwise returns a single video entry with its formats.
+- Edge cases:
+  - Exclusive audio entries, audio in articles, and various URL variants are covered in tests and regex logic.
+- Tests:
+  - _TESTS in both extractors cover multiple URL patterns, expected formats, thumbnails, and playlist behavior to validate extraction logic.
+
+In short
+- The file provides robust extraction for Tagesschau multimedia content, with two extractors: TagesschauPlayerIE for player pages and TagesschauIE for article pages. It builds format objects from either a JSON API or page HTML, supports HLS streams, handles audio/video nuances, and can assemble playlists when a page contains multiple downloadable entries.

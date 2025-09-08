@@ -1,0 +1,80 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/rtl2.py
+
+Overview
+- This module implements YouTube-dl extractors for RTL2 content:
+  - RTL2IE: extracts standard RTL2 on-demand videos (RTMP and HLS formats)
+  - RTL2YouIE: extracts RTL2 You streaming (YOU) videos with client-side AES-CBC decryption
+  - RTL2YouSeriesIE: builds a playlist of all videos in a RTL2 YOU series
+- It uses a mix of API calls, HTML parsing fallbacks, and decryption to obtain streaming formats and metadata.
+- GEO restriction: RTL2 You content is limited to Germany (via _GEO_COUNTRIES).
+
+Key classes and main functionality
+
+1) RTL2IE (InfoExtractor)
+- Purpose: Extracts RTL2 on-demand videos from RTL2’s site.
+- URL pattern (_VALID_URL): Handles RTL2 video pages with either vico_id and vivi_id in the URL or in-page data.
+- How it works:
+  - Attempts to parse vico_id and vivi_id from the URL. If not present, downloads the page and searches for:
+    - data-collection and data-video attributes, or
+    - vico_id and vivi_id embedded in the page JavaScript/HTML.
+  - Calls the API at https://service.rtl2.de/api-player-vipo/video.php with vico_id and vivi_id to obtain video metadata.
+  - Builds a list of formats:
+    - RTMP format if streamurl is present:
+      - Cleans the URL, derives play_path from the /ondemand/ path, and sets RTMP-specific fields
+      - Includes rtmp_conn data (various connection parameters), Flash player info, and resume behavior
+    - HLS format if streamurl_hls is present
+      - Extends formats with Akamai/M3U8 variants via _extract_akamai_formats
+  - Sorts the formats and returns a dict with id, title, thumbnail, description, duration, and the formats list.
+- Returned fields: id, title, thumbnail, description, duration, formats.
+
+2) RTL2YouBaseIE
+- Simple base class providing the common base URL for RTL2 YOU content:
+  - _BACKWERK_BASE_URL = 'https://p-you-backwerk.rtl2apps.de/'
+
+3) RTL2YouIE (InfoExtractor)
+- Purpose: Extracts RTL2 YOU (video-on-demand) content that is encrypted.
+- URL pattern (_VALID_URL): Matches you.rtl2.de video pages and youplayer pages with vid parameter.
+- Decryption details:
+  - Uses a hard-coded AES key (_AES_KEY) and AES-CBC decryption to decrypt a stream URL provided in a base64-encoded payload.
+  - stream_data = JSON from the back-end, containing a base64-encoded streamUrl field.
+  - Decoding steps:
+    - Decode base64 streamUrl, split into data and iv (colon-separated after decoding)
+    - Decrypt data with AES-CBC using the key and iv (converted to int lists), via aes_cbc_decrypt
+    - Convert the decrypted ints back to bytes and check for the string 'rtl2_you_video_not_found'
+- Building formats:
+  - The decrypted stream URL is truncated by removing the last byte (via stream_url[:-compat_ord(stream_url[-1])]) and decoded as MP4/HLS.
+  - Uses _extract_m3u8_formats with 'm3u8_native' to obtain formats.
+  - Sorts formats.
+- Metadata:
+  - Downloads video data from /video/{video_id} to populate title, description, thumbnail, duration, series, and episode.
+  - If the series/title differ, formats the title as "series - title".
+  - Adds age_limit from minimumAge if available.
+- Returned fields: id, title, formats, description, thumbnail, duration, series, episode, age_limit.
+
+4) RTL2YouSeriesIE (InfoExtractor)
+- Purpose: Builds a playlist of all videos in a RTL2 YOU series.
+- URL pattern (_VALID_URL): you.rtl2.de/videos/{id}
+- Flow:
+  - series_id = matched id
+  - Fetches stream data from /videos with query parameters formatId=series_id and a large limit
+  - Iterates over stream_data['videos'], collecting videoId values
+  - For each video, constructs a URL like http://you.rtl2.de/video/{series_id}/{video_id} and creates a playlist entry using the RTL2You extractor
+  - Returns a playlist result containing all entries keyed by series_id
+- This enables batch extraction of all videos within a series.
+
+Important implementation details and notes
+- RTMP vs. HLS: RTL2IE handles both RTMP (with a detailed rtmp_conn and custom play_path) and HLS (via _extract_akamai_formats).
+- Fallbacks to locate IDs: If vico_id/vivi_id aren’t in the URL, the code parses the page HTML for data attributes or uses regex searches to obtain them.
+- AES-CBC decryption for RTL2 YOU: The YOU content is protected; the extractor decrypts a base64-encoded payload using a fixed key and IV to obtain the actual stream URL.
+- Error handling:
+  - If the decrypted stream URL indicates video not found (rtl2_you_video_not_found), an ExtractorError with expected=True is raised.
+- Metadata extraction:
+  - RTL2IE and RTL2YouIE pull metadata such as title, description, thumbnail, duration, and age limits (where available) and compose a final dict that includes these fields along with the formats.
+- GEO restriction support:
+  - RTL2YouIE is annotated with _GEO_COUNTRIES = ['DE'], indicating German geo-restriction handling.
+- Tests:
+  - The module includes _TESTS for RTL2IE (two sample RTL2 pages) and RTL2YouIE (one sample You video and a non-matching second test).
+  - RTL2YouSeriesIE includes a test to verify playlist extraction with a minimum count.
+
+In short
+- The file contains three extractors for RTL2 content: RTL2IE (standard RTL2 videos), RTL2YouIE (encrypted RTL2 YOU videos), and RTL2YouSeriesIE (series playlist for RTL2 YOU). RTL2YOU uses AES-CBC decryption to obtain the streaming URL; RTL2 uses API metadata plus RTMP/HLS formats; both provide standard Youtube-DL style metadata alongside format handling and sorting.

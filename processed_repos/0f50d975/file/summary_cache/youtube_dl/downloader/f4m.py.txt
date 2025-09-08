@@ -1,0 +1,90 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/downloader/f4m.py.
+
+Overview
+- Implements a downloader for Adobe HDS (f4m) manifests.
+- Core flow: fetch manifest, pick media format, obtain bootstrap (inline or via URL), construct a list of fragments, and download each fragment (FLV data) to produce a continuous output stream.
+- Handles live streams by periodically updating fragment availability from the bootstrap, and supports a test mode that limits fragment downloads.
+
+Key classes and functions
+- DataTruncatedError
+  - Custom exception raised when FLV data ends unexpectedly while parsing a fragment.
+- FlvReader(io.BytesIO)
+  - A specialized reader for FLV/fragment data used to parse bootstrap/fragment boxes.
+  - Core methods:
+    - read_bytes(n): safe read with truncation check.
+    - read_unsigned_long_long / read_unsigned_int / read_unsigned_char: numeric readers (big-endian).
+    - read_string: reads a null-terminated string.
+    - read_box_info: reads a box (size, type, payload), supporting 64-bit sizes when needed.
+    - read_asrt / read_afrt / read_abst: parse various bootstrap-related boxes (asrt: segment/run info; afrt: fragment run info; abst: bootstrap info with live flag, segments, fragments, etc.).
+    - read_bootstrap_info: entry to parse an abst box from bootstrap data.
+- read_bootstrap_info(bootstrap_bytes)
+  - Convenience function to parse bootstrap bytes via FlvReader.
+- build_fragments_list(boot_info)
+  - Constructs an ordered list of (segment, fragment) tuples from bootstrap info.
+  - Handles a special case for live streams where the fragment count can be abnormal (4294967295) and limits to a small window.
+  - If live, trims to the last two fragments.
+- Helper I/O and metadata utilities
+  - write_unsigned_int / write_unsigned_int_24: write integers in network order to streams.
+  - write_flv_header: writes the FLV header.
+  - write_metadata_tag: writes an optional FLV metadata tag if metadata exists.
+  - remove_encrypted_media: filters out media entries protected by DRM (based on DRM headers).
+  - _add_ns(prop, ver=1): build XML namespaces for F4M Adobe namespace parsing.
+  - get_base_url(manifest): extracts baseURL from manifest (prefers versioned namespace entries).
+- F4mFD(FragmentFD)
+  - Main downloader class for f4m manifests; extends FragmentFD (a generic fragment-based downloader base).
+  - Key methods:
+    - _get_unencrypted_media(self, doc)
+      - Finds media elements and checks for DRM headers present; removes encrypted media entries and returns the unencrypted ones.
+      - Validates DRM headers presence (or reports errors).
+    - _get_bootstrap_from_url(self, bootstrap_url)
+      - Downloads bootstrap data and parses bootstrap info via read_bootstrap_info.
+    - _update_live_fragments(self, bootstrap_url, latest_fragment)
+      - Polls the bootstrap URL to refresh fragment availability for live streams.
+      - Retries up to 30 times with 5-second waits; errors if it cannot update.
+    - _parse_bootstrap_node(self, node, base_url)
+      - Resolves bootstrap information from either an internal URL attribute or inline base64-encoded data.
+      - Returns boot_info and an optional bootstrap_url.
+    - real_download(self, filename, info_dict)
+      - Entry point to download a given f4m manifest and its fragments.
+      - Steps:
+        - Fetch manifest, fix XML ampersands, parse XML.
+        - Enumerate unencrypted media formats; choose best by bitrate or the user-requested bitrate.
+        - Resolve base URLs and bootstrap (inline or via URL).
+        - Determine live status and metadata (base64 decoded if present).
+        - Build fragments list; support a test mode that limits to the first fragment.
+        - Initialize download context via _prepare_frag_download and _start_frag_download.
+        - Write FLV header and metadata if starting a non-live stream.
+        - Loop over fragments:
+          - Build fragment URL (SegX-FragY) with optional query parameters (base URL query, pv parameter, extra segment URL param).
+          - Download fragment data; parse within FlvReader to locate the mdat box and append its payload to the destination stream via _append_fragment.
+          - Handle DataTruncatedError: in test mode, write raw data; otherwise re-raise.
+          - Handle HTTP errors for live streams (404/410): skip to next fragment, log a warning.
+          - If fragments exhausted in live mode, fetch updated fragments via _update_live_fragments and append to the queue; log if any missed fragments.
+        - Finish fragment download via _finish_frag_download and return True on success.
+  - Notes:
+    - Uses Adobe F4M namespace handling for XML parsing (_add_ns).
+    - Base URL resolution: prefers baseURL in manifest; otherwise falls back to manifest URL.
+    - DRM handling: only unencrypted media are returned; DRM headers must have IDs or report errors.
+    - Metadata handling: supports optional metadata embedded in the manifest for non-live streams.
+    - Live stream handling: dynamic fragmentation with bootstrap-based fragment list refresh and ability to skip unavailable fragments.
+
+Important implementation details
+- XML and bootstrap parsing
+  - Uses compat_etree_fromstring and xpath_text with explicit Adobe F4M namespaces to extract data.
+  - read_bootstrap_info navigates abst, asrt, and afrt box structures to obtain segments and fragments data.
+- Fragment handling
+  - build_fragments_list derives a sequential list of (segment, fragment) pairs across all runs; robust to live stream irregularities.
+  - For live streams, only the last two fragments are kept, aligning with common HDS live behavior.
+- Download strategy
+  - Selects media format by bitrate, supporting explicit bitrate requests or best-available default.
+  - Fragment URLs are constructed as Seg<segment>-Frag<fragment>; optional PV or extra params are appended as query parameters.
+  - FLV data is parsed to extract the media data (mdat). The fragment’s raw mdat payload is appended to the destination stream.
+- Error handling and robustness
+  - DataTruncatedError triggers special handling in test mode (write partial data) or raises otherwise to propagate errors.
+  - HTTP errors during live streaming (404/410) are treated as fragment unavailability and trigger a bootstrap-based update loop.
+  - DRMed content is filtered out early; only unencrypted media is processed.
+- Utilities
+  - Helper functions for writing FLV headers and metadata ensure that the output is a valid FLV stream when appropriate.
+  - remove_encrypted_media and DRM checks provide a safety check before attempting to download/decrypt or parse content.
+
+Overall, this module provides a full workflow for downloading Adobe HDS (f4m) streams, including format selection, bootstrap/fragment resolution for both on-demand and live streams, fragment retrieval and parsing, DRM handling, and stream assembly into a compatible FLV output.

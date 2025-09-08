@@ -1,0 +1,69 @@
+- Purpose
+  - A YouTube-dl extractor for Czech StreamCZ/Televizeseznam pages. It retrieves episode metadata via GraphQL, then fetches a streaming playlist (SPL) to collect available video formats and subtitles.
+
+- Core class
+  - StreamCZIE(InfoExtractor)
+    - _VALID_URL: Matches URLs from stream.cz or televizeseznam.cz that contain a display_id and a numeric id.
+    - _TESTS: Includes three sample URLs with expected video id, title, display_id, duration, and other metadata.
+
+- Main workflow (in _real_extract)
+  1. Parse display_id and video_id from the URL using _VALID_URL.
+  2. Fetch GraphQL data for the episode:
+     - Request to https://www.televizeseznam.cz/api/graphql with variables {'urlName': video_id}.
+     - GraphQL query loads an Episode and returns fields like id, spl, urlName, name, perex, duration, views.
+     - Result accessed via data = ...['data']['episode'].
+  3. Build SPL URL:
+     - spl_url = data['spl'] + 'spl2,3'
+  4. Retrieve the playlist metadata:
+     - metadata = self._download_json(spl_url, video_id, 'Downloading playlist')
+     - If metadata contains Location but not data, follow redirect: spl_url = metadata['Location']; metadata = self._download_json(...)
+     - video = metadata['data']
+  5. Collect subtitles:
+     - Iterate over video.get('subtitles', {}); for each with a language, collect all ext/URL pairs and build a subtitles dict keyed by language.
+     - Each subtitle entry includes ext and a URL formed with urljoin(spl_url, sub_url).
+  6. Collect formats:
+     - Call _extract_formats(spl_url, video) to yield format dictionaries for each stream (two sources: ts and mp4).
+     - Sort formats with _sort_formats.
+  7. Return a video info dict with id, display_id, title, description, duration, view_count, formats, and subtitles.
+
+- Key methods and how formats are built
+  - _extract_formats(self, spl_url, video)
+    - Iterates over two streams sources:
+      - ts: video.get('http_stream', {}).get('qualities', {})
+      - mp4: video.get('mp4')
+    - For each stream entry with a 'url':
+      - format_id is "<stream_id>-<ext>" (e.g., "1-mp4" or "high-ts")
+      - ext is the file extension ('ts' or 'mp4')
+      - source_preference: -1 for ts, 1 for mp4 (to influence format prioritization)
+      - url: full URL built with urljoin(spl_url, stream['url'])
+      - tbr: bandwidth converted with float_or_none(..., scale=1000)
+      - duration: duration converted with float_or_none(..., scale=1000)
+      - width: from stream['resolution'][0] if available, else None
+      - height: from stream['resolution'][1] if available, else derived from format_id by replacing 'p' (e.g., '720p')
+      - Merges in codec information via parse_codecs(stream.get('codec'))
+    - This function yields a dictionary for each available stream.
+
+- Important implementation details
+  - Uses GraphQL to fetch episode metadata (name, perex, duration, views) and a spl base path.
+  - SPL URL manipulation: appends 'spl2,3' to the SPL base to access the manifest/playlist.
+  - Redirect handling: if playlist metadata provides a Location without data, it follows the redirect and re-fetches the playlist.
+  - Subtitles extraction relies on video['subtitles'] and their 'urls' mapping with per-language support.
+  - Formats include both TS (with lower preference) and MP4 formats (higher preference) to give the downloader options.
+  - Uses utility helpers:
+    - json, re for parsing
+    - urljoin to build absolute URLs
+    - float_or_none, int_or_none for numeric fields
+    - merge_dicts to combine dicts
+    - parse_codecs to integrate codec information into format dicts
+
+- Output structure
+  - id: video_id
+  - display_id: human-friendly display_id from URL
+  - title: from GraphQL data['name']
+  - description: from GraphQL data['perex']
+  - duration: float or None (seconds)
+  - view_count: int or None
+  - formats: list of format dictionaries (each with format_id, ext, url, tbr, duration, width, height, source_preference, and merged codec info)
+  - subtitles: dict mapping language -> list of subtitle dicts with ext and url
+
+Overall, the extractor combines GraphQL-driven metadata with a SPL-based playlist to enumerate available video formats and subtitles for StreamCZ/Televizeseznam video pages.

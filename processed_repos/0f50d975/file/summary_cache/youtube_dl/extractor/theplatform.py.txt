@@ -1,0 +1,94 @@
+Summary of thePlatform extractor code ( File: ./youtube-dl/youtube_dl/extractor/theplatform.py )
+
+Overview
+- Implements extraction logic for ThePlatform-hosted video content across multiple sites (e.g., NBC, CNET, MSNBC) using SMIL-based delivery and feed-based endpoints.
+- Defines three main classes:
+  - ThePlatformBaseIE: Shared core for ThePlatform extraction (SMIL parsing, metadata parsing, subtitle handling, geo-block checks, etc.).
+  - ThePlatformIE: Main extractor for individual ThePlatform video URLs. Handles SMIL/config/fallback flows, signed URLs, and metadata aggregation.
+  - ThePlatformFeedIE: Extractor for feed-based endpoints that aggregate multiple video assets, each potentially with multiple formats/assets.
+
+Key classes and main functions
+- ThePlatformBaseIE (inherits from OnceIE)
+  - _extract_theplatform_smil(self, smil_url, video_id, note): Downloads the SMIL XML, detects and handles geo-restriction errors, parses SMIL formats (via _parse_smil_formats), and converts/collects formats and subtitles.
+    - Handles two format sources:
+      - If format URL is suitable for RTMP/Once parsing, uses _extract_once_formats.
+      - Otherwise, uses the direct media URL; for m3u8, refreshes with hdnea cookies if present.
+    - Returns (formats, subtitles).
+  - _download_theplatform_metadata(self, path, video_id): Builds the metadata endpoint and downloads JSON metadata from the platform.
+  - _parse_theplatform_metadata(self, info): Converts platform metadata into YouTube-DL style info:
+    - Subtitles from captions list (lang, src, mime type).
+    - Chapters built from 'chapters' (startTime, endTime) with proper time conversion (ms to seconds).
+    - Other fields: title, description, thumbnail, duration, timestamp, uploader, etc.
+  - _extract_theplatform_metadata(self, path, video_id): Wrapper to fetch and parse metadata.
+  - _sign_url(self, url, sig_key, sig_secret, life=600, include_qs=False): Creates a signed URL for protected ThePlatform resources.
+    - Uses a custom scheme: flags (00/10), expiration, relative path, HMAC-SHA1, and secret.
+    - Returns the original URL with appended sig parameter.
+  - _extract_urls(self, webpage): (in ThePlatformIE) not here; detail below in ThePlatformIE.
+  - Geo-block handling: _initialize_geo_bypass and geo_verification_headers are used to respect location restrictions.
+
+- ThePlatformIE (ThePlatformBaseIE, AdobePassIE)
+  - _VALID_URL: Complex regex to match ThePlatform URLs and capture provider_id, media, config, and id.
+  - _TESTS: Tests for various ThePlatform URLs (embedded players, direct media, config-based flows, etc.).
+  - _extract_urls(cls, webpage): Extracts a ThePlatform URL from a page by:
+    - Looking for og:video or twitter:player meta tags pointing to player.theplatform.com/p/...
+    - Also scanning iframe/script tags for sources to player.theplatform.com/p/...
+  - _sign_url: Provided by base class for signed URLs when needed.
+  - _real_extract(self, url):
+    - Unsmuggle URL data (smuggling for geo/callback data) and initialize geo bypass if needed.
+    - Parse URL to extract provider_id and video_id; default provider_id to 'dJ5BDC' if missing.
+    - Build a path = provider_id + '/' + (media/ parts) + video_id.
+    - If GUID query parameter present:
+      - Download the page, attempt to discover a feed_id from embedded scripts, then redirect to feed.theplatform.com with byGuid=...
+    - If smuggled_data.force_smil_url is True: use the original URL as smil_url.
+    - If URL contains /guid/: fetch the page, extract a SMIL URL from a <link> tag with type application/smil+xml, possibly adjusting the path and query to include formats. This is an explicit SMIL flow.
+    - If config is present (group('config')), fetch the config JSON, determine a release_url or fallback to a default feed URL, create smil_url accordingly with formats/manifest, etc.
+    - Else, default to the standard SMIL URL: http://link.theplatform.com/s/<path>?mbr=true
+    - If smuggled_data includes sig: sign the smil_url with _sign_url.
+    - Call _extract_theplatform_smil to obtain (formats, subtitles) and sort formats.
+    - Fetch metadata via _extract_theplatform_metadata(path, video_id) and merge subtitles (from SMIL) with metadata subtitles.
+    - Build final dict with id, formats, subtitles, and other metadata (title, description, thumbnail, duration, timestamp, uploader, chapters, etc.).
+    - Return the consolidated metadata dict.
+
+- ThePlatformFeedIE (ThePlatformBaseIE)
+  - _URL_TEMPLATE: Template for feed endpoints.
+  - _VALID_URL: Regex to match feed URLs: provider_id, feed_id, and byGuid filter parameter.
+  - _TESTS: Tests for feed endpoints and inline extraction vs. only_matching.
+  - _extract_feed_info(self, provider_id, feed_id, filter_query, video_id, custom_fields=None, asset_types_query={}, account_id=None):
+    - Builds the real URL and fetches feed JSON, picking entry = first item in entries.
+    - main_smil_url: either the public URL from entry or constructed from account_id/guid if present.
+    - Iterates over entry['media$content'] to collect all assets:
+      - For each item, fetch smil_url and deduce cur_video_id and duration.
+      - Determine asset types (plfile$assetTypes or query parameter assetTypes from smil_url).
+      - For each asset_type not yet included:
+        - Build query with mbr, formats, and assetTypes, plus any asset-type-specific overrides from asset_types_query.
+        - Call _extract_theplatform_smil on the updated SMIL URL to fetch formats/subtitles for that asset type, and merge into overall lists.
+    - Sort formats, build thumbnails, timestamp, and categories from the feed entry.
+    - Retrieve base metadata via _extract_theplatform_metadata using provider_id and the first_video_id, then merge subtitles and combine metadata with video-specific fields.
+    - Return a consolidated dict with id, formats, subtitles, thumbnails, duration, timestamp, categories, and any custom_fields.
+  - _real_extract(self, url): delegates to _extract_feed_info using captured provider_id, feed_id, and filter extracted from the URL.
+
+Important implementation details
+- SMIL handling:
+  - Uses _extract_theplatform_smil to download and parse SMIL data, with support for both RTMP-style and HTTP-based formats.
+  - Handles geo-restriction errors by inspecting SMIL for error nodes and raising ExtractorError or geo-restricted signals accordingly.
+  - Subtitles are parsed from SMIL and merged with metadata-derived subtitles.
+- Metadata handling:
+  - _download_theplatform_metadata and _parse_theplatform_metadata convert platform data into YouTube-DL's common info fields, including title, description, thumbnail, duration, timestamp, uploader, and chapters.
+  - Chapters are built from the platform’s chapters array, converting times with proper millisecond units.
+- URL signing:
+  - The _sign_url function constructs a signed URL using a time-bound signature, supporting cases where the server requires signed links. It uses a specific ThePlatform scheme with flags, expiration, relative path, and HMAC-SHA1.
+- URL discovery and smuggling:
+  - _extract_urls scans pages to locate ThePlatform player URLs (via meta tags or iframe/script sources).
+  - The extractor supports smuggling data (via unsmuggle_url) to carry geo or other parameters, and uses sig to sign SMIL URLs when provided.
+- Multiple content sources:
+  - For individual videos, the flow can lead to a direct SMIL URL, a config-based release URL, or a guid-based feed, with different paths to retrieve formats.
+  - For feeds, multiple asset types (formats) are fetched by iterating through each asset type and aggregating their SMIL-derived formats.
+- Output:
+  - Each extractor returns a dictionary containing video metadata (title, description, thumbnails, duration, timestamp, uploader, chapters) and a list of formats and subtitles suitable for YouTube-DL post-processing.
+  - Keys follow YouTube-DL conventions (id, ext, title, description, duration, timestamp, uploader, thumbnails, chapters, formats, subtitles, etc.).
+
+Tests
+- The file includes _TESTS for both ThePlatformIE and ThePlatformFeedIE to validate URL extraction, metadata parsing, and format gathering under various ThePlatform endpoints (including signed URLs and GUID-based flows).
+
+In short
+- This module provides a robust, multi-path ThePlatform extractor supporting SMIL-based playback, signed URLs, GUID/config-based flows, and feed-based multi-asset extraction. It consolidates video metadata and formats, handles subtitles and chapters, and respects geo-restrictions, using a combination of SMIL parsing, JSON metadata, and feed data.

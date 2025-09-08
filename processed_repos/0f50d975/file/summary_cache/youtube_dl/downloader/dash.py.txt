@@ -1,0 +1,58 @@
+Concise summary of code in youtube-dl/youtube_dl/downloader/dash.py
+
+What it does
+- Implements a downloader for DASH (Dynamic Adaptive Streaming over HTTP) segments.
+- Downloads media fragments described in a DASH manifest and appends them to produce a single output file.
+- Handles per-fragment retries, HTTP errors, and missing fragments according to configuration.
+
+Key components
+- DashSegmentsFD(FragmentFD)
+  - A FragmentFD-based downloader dedicated to DASH segments, with FD_NAME = 'dashsegments'.
+- real_download(self, filename, info_dict)
+  - Core method performing the segment download loop and assembly.
+
+Main workflow
+- Prepare
+  - Reads fragment_base_url and fragments from info_dict.
+  - If test flag is set, only uses the first fragment.
+  - Initializes a context dict (ctx) with:
+    - filename
+    - total_frags (number of fragments)
+  - Calls _prepare_and_start_frag_download(ctx) to initialize progress tracking.
+  - Reads fragment_retries and skip_unavailable_fragments from params.
+- Iterate over fragments
+  - Skip fragments already downloaded: if frag_index <= ctx['fragment_index'], continue.
+  - Determine if the fragment is fatal:
+    - fatal = True for the first fragment (frag_index == 1) or when skip_unavailable_fragments is False.
+  - Resolve fragment URL:
+    - Use fragment['url'] if present; otherwise construct URL via urljoin(fragment_base_url, fragment['path']).
+  - Prepare HTTP headers:
+    - Start with info_dict.get('http_headers').
+    - If the fragment specifies a 'range', add a Range header with that byte range.
+- Per-fragment download with retries
+  - Enter a retry loop (for count in itertools.count()) and try:
+    - success, frag_content = _download_fragment(ctx, fragment_url, info_dict, headers)
+    - If success, append content with _append_fragment(ctx, frag_content).
+  - Exceptions handling:
+    - HTTPError: If count < fragment_retries, log retry via report_retry_fragment and retry; otherwise fall through to error handling.
+      - The comments note that HTTP 404s for a fragment are common; retries help robustness.
+    - DownloadError: If fatal, re-raise (don't retry). If not fatal, proceed to handle as a non-fatal fragment issue.
+  - Break after handling exceptions; if not successful:
+    - If not fatal: report_skip_fragment(frag_index) and continue to next fragment.
+    - If fatal: report_error and return False (abort download).
+- Finish
+  - After successfully processing all fragments, call _finish_frag_download(ctx) and return True.
+
+Important implementation details
+- The first DASH segment is treated specially: it contains headers necessary to generate a valid MP4, so the downloader aborts per the fatal condition for the first fragment.
+- Fragment resolution supports both explicit fragment URLs and relative paths resolved against fragment_base_url.
+- Range requests are supported by adding a Range header when a fragment specifies a byte range.
+- Robustness:
+  - Up to fragment_retries retries for HTTPError per fragment, with per-fragment retry reporting via report_retry_fragment.
+  - Distinguishes fatal vs non-fatal errors: first fragment and skip-unavailable-fragments=False are fatal; others can be skipped upon failure.
+  - If a fragment fails with DownloadError and is fatal, it raises; otherwise it can be skipped.
+- Progress and assembly are managed via inherited methods from FragmentFD:
+  - _prepare_and_start_frag_download, _download_fragment, _append_fragment, _finish_frag_download, report_retry_fragment, report_skip_fragment, report_error.
+
+Overall
+- This module provides a focused DASH segment downloader that processes a manifest’s fragment list, handles per-fragment retries and errors, respects DASH-specific behavior (notably the first segment containing necessary headers), and assembles the fragments into a single output file.

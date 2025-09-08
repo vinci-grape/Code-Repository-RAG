@@ -1,0 +1,34 @@
+- Purpose: A youtube-dl extractor for Business Insider video pages that delegates actual video extraction to JW Platform (JWPlatformIE).
+
+- Core class: BusinessInsiderIE inherits from InfoExtractor.
+
+- URL matching (_VALID_URL):
+  - Matches Business Insider pages on businessinsider.* (com or nl) with any subpath and captures the last path segment as video id.
+  - Example: http://uk.businessinsider.com/... or https://www.businessinsider.nl/...
+
+- How it extracts video data (_real_extract):
+  - Extracts video_id from the URL using _match_id.
+  - Downloads the page content with _download_webpage.
+  - Searches the page for a JW Platform video id using multiple regex patterns (to handle different embed formats):
+    - data-media-id="<8 alphanumeric chars>"
+    - id="jwplayer_<8 alphanumeric chars>"
+    - id: "<8 alphanumeric chars>" (in JS-like object)
+    - (?:jwplatform\.com/players/|jwplayer_)<8 alphanumeric chars>
+  - The JW Platform id is expected to be an 8-character alphanumeric string.
+
+- Output:
+  - Returns a URL result pointing to the JW Platform extractor: 'jwplatform:<jwplatform_id>'.
+  - Uses JWPlatformIE.ie_key() as the extractor to delegate actual video extraction.
+  - Passes video_id as the captured Business Insider page id, so the final video metadata is tied to that id.
+
+- Key implementation details:
+  - Uses a resilient set of regexes to locate the JW Platform id across different embedding patterns.
+  - The extracted JW Platform id is 8 alphanumeric characters.
+  - The final video info is fetched by JWPlatformIE, not by its own parser.
+
+- Tests (_TESTS):
+  - Includes two full-page examples (UK NL variants) with expected video ids, titles, descriptions (via md5), upload dates, and timestamps.
+  - A third test demonstrates only_matching for a non-target page.
+  - Tests show typical JW Platform IDs like 'cjGDb0X9' and '5zJwd4FK' and expect mp4 format.
+
+In short, this extractor identifies Business Insider video pages, locates the underlying JW Platform video identifier via multiple patterns, and hands off to JWPlatformIE to obtain the actual video metadata and streams.

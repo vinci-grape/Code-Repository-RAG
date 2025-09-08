@@ -1,0 +1,77 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/kinopoisk.py
+
+Purpose
+- Implement an InfoExtractor for KinoPoisk film pages. It fetches metadata and streaming formats for a given film URL, focusing on Russian users (geo-limited).
+
+Key class
+- KinoPoiskIE(InfoExtractor)
+
+Main configuration
+- _GEO_COUNTRIES = ['RU'] – restricts access to Russia.
+- _VALID_URL = r'https?://(?:www\.)?kinopoisk\.ru/film/(?P<id>\d+)' – matches KinoPoisk film pages like /film/81041.
+- _TESTS – includes two tests:
+  - Valid example with /film/81041/watch/ and expected details (title, id, duration, age_limit, thumbnail, etc.) and bestvideo format.
+  - A non-watch URL /film/81041 to verify URL matching.
+
+Core extraction flow (_real_extract)
+1. Extract film ID
+   - video_id = self._match_id(url)
+
+2. Retrieve data from KinoPoisk widget
+   - webpage = self._download_webpage(
+       'https://ott-widget.kinopoisk.ru/v1/kp/', video_id,
+       query={'kpId': video_id}
+     )
+   - This calls the OTT widget service with the film ID to get embedded data.
+
+3. Parse JSON data from the page
+   - data = self._parse_json(
+       self._search_regex(
+           r'(?s)<script[^>]+\btype=["\']application/json[^>]+>(.+?)<',
+           webpage, 'data'),
+       video_id)['models']
+   - The code finds a script tag of type application/json, extracts its contents, parses JSON, and reads the 'models' section.
+
+4. Identify film metadata
+   - film = data['filmStatus']
+   - title = film.get('title') or film['originalTitle']
+
+5. Build streaming formats (HLS)
+   - formats = self._extract_m3u8_formats(
+       data['playlistEntity']['uri'], video_id, 'mp4',
+       entry_protocol='m3u8_native', m3u8_id='hls')
+   - self._sort_formats(formats)
+   - This uses the provided HLS playlist URL to create format entries with the mp4 container, parsing with native HLS.
+
+6. Extract additional metadata
+   - description = dict_get(
+       film, ('descriptscription', 'description',
+              'shortDescriptscription', 'shortDescription'))
+     Note: Includes misspelled keys as fallbacks to robustly obtain a description.
+   - thumbnail = film.get('coverUrl') or film.get('posterUrl')
+   - duration = int_or_none(film.get('duration'))
+   - age_limit = int_or_none(film.get('restrictionAge'))
+
+7. Return result
+   - A dictionary containing:
+     - 'id': video_id
+     - 'title': title
+     - 'description': description
+     - 'thumbnail': thumbnail
+     - 'duration': duration
+     - 'age_limit': age_limit
+     - 'formats': formats
+
+Important implementation details
+- Data source: Uses the KinoPoisk OTT widget endpoint (https://ott-widget.kinopoisk.ru/v1/kp/) with kpId=query parameter to obtain a JSON blob containing a models object, which includes filmStatus and playlistEntity information.
+- JSON parsing: Extracts embedded JSON with a regex looking for a script tag of type application/json, then parses it and selects models.
+- Formats: Uses _extract_m3u8_formats to convert the provided HLS playlist URI into downloadable video formats, with entry_protocol='m3u8_native' and m3u8_id='hls'.
+- Robust metadata extraction: description retrieval attempts multiple keys, including common misspellings, to maximize compatibility with variations in the JSON structure.
+- Type handling: Uses int_or_none to safely parse numeric fields (duration, age limit).
+
+What this code does not do
+- It does not handle non-HLS dash formats; it relies on HLS via the playlist URI.
+- It does not attempt to bypass geo restrictions beyond declaring RU as the target country.
+
+In short
+- KinoPoiskIE fetches data from KinoPoisk’s widget endpoint, parses the embedded JSON to obtain film metadata and an HLS playlist, constructs video formats, and returns a structured info dictionary with id, title, description, thumbnail, duration, age_limit, and formats.

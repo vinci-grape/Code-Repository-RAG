@@ -1,0 +1,85 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/infoq.py
+
+Purpose
+- Implement an extractor for InfoQ presentations that can retrieve video and audio formats from InfoQ pages.
+- Supports multiple hosting schemes used by InfoQ: RTMP (BokeCC-style), HTTP video with CloudFront-style signed params, and HTTP audio (mp3). Also handles CN pages via a different path that uses BokeCC formats.
+
+Key class
+- InfoQIE(BokeCCBaseIE)
+  - Inherits common helpers from BokeCCBaseIE and YouTube-DL extractor utilities.
+
+Core data
+- _VALID_URL: Regexp matching InfoQ presentation pages and capturing the presentation id.
+- _TESTS: Several test cases showing expected id, title, ext, description, and md5 checksums for different InfoQ pages, including a CN page and an audio-focused example.
+
+Main methods and functionality
+1) _extract_rtmp_video(self, webpage)
+- Purpose: Extract RTMP video format (hardcoded server).
+- Process:
+  - video_url is a fixed RTMP base: rtmpe://videof.infoq.com/cfx/st/
+  - Finds encoded_id from the page via jsclassref variable using a regex.
+  - real_id = base64decode(encoded_id), URL-unquote, then used as playpath prefixed with mp4:
+    playpath = 'mp4:' + real_id
+  - Returns a single-format list with:
+    - format_id: 'rtmp_video'
+    - url: video_url
+    - ext: determined from playpath
+    - 'play_path': playpath
+
+2) _extract_cf_auth(self, webpage)
+- Purpose: Extract CloudFront-like authorization parameters embedded in the page.
+- Process:
+  - Reads InfoQConstants.scp (Policy), scs (Signature), sck (Key-Pair-Id)
+  - Returns a dict with keys: Policy, Signature, Key-Pair-Id
+- Used to sign both video and audio HTTP requests.
+
+3) _extract_http_video(self, webpage)
+- Purpose: Extract HTTP video URL protected by CF-like auth.
+- Process:
+  - Finds video URL in P.s parameter.
+  - Augments the URL with CF auth query parameters via update_url_query(..., self._extract_cf_auth(webpage))
+  - Returns a format dict:
+    - format_id: 'http_video'
+    - url: augmented URL
+    - http_headers: Referer set to https://www.infoq.com/
+
+4) _extract_http_audio(self, webpage, video_id)
+- Purpose: Extract HTTP audio (mp3) URL protected by CF-like auth.
+- Process:
+  - Attempts to read hidden inputs from a form named mp3Form using _form_hidden_inputs.
+  - If not found, returns [] (no audio formats).
+  - filename field from form becomes http_audio_url by joining with base URL http://ress.infoq.com/downloads/mp3downloads/
+  - Augments with CF auth query parameters.
+  - Validates the URL with _is_valid_url; if invalid, returns [].
+  - Returns a format dict:
+    - format_id: 'http_audio'
+    - url: augmented audio URL
+    - vcodec: 'none' (indicating audio only)
+
+5) _real_extract(self, url)
+- Purpose: Orchestrates the extraction for a given InfoQ presentation page.
+- Process:
+  - video_id = captured id from URL
+  - Downloads page HTML
+  - Extracts title from <title> and description from meta description
+  - If '/cn/' in URL (CN pages), uses _extract_bokecc_formats(webpage, video_id) (CN pages rely on BokeCC formats)
+  - Otherwise builds formats by concatenating:
+    - RTMP video formats: _extract_rtmp_video(webpage)
+    - HTTP video formats: _extract_http_video(webpage)
+    - HTTP audio formats: _extract_http_audio(webpage, video_id)
+  - Sorts formats with _sort_formats(formats)
+  - Returns a dict with:
+    - id: video_id
+    - title: extracted title
+    - description: extracted description
+    - formats: list of available formats
+
+Important implementation details
+- The RTMP path is hardcoded and relies on a Base64-encoded identifier embedded in the page (jsclassref), which is decoded to build the RTMP play_path.
+- CF-like authorization data is extracted from specific InfoQConstants variables in the page (Policy, Signature, Key-Pair-Id) and injected into both HTTP video and HTTP audio URLs.
+- CN pages are treated differently and delegated to BokeCC-based extraction, due to differences in how their media is served (and a known 403 behavior for HTTP video on CN pages).
+- Audio formats are derived from a hidden HTML form (mp3Form); if unavailable, no audio format is returned.
+- The code uses several helper methods from the parent classes (e.g., _download_webpage, _html_search_regex, _search_regex, _form_hidden_inputs, _is_valid_url, etc.) to parse HTML and validate URLs.
+- Test cases demonstrate support for multiple InfoQ locales, different video types (mp4, flv, mp3), and formats selection via parameters (e.g., requesting best audio).
+
+In short, InfoQIE is a multi-source extractor for InfoQ presentations, capable of handling RTMP video, signed HTTP video, and signed HTTP audio, with special handling for CN pages via BokeCC. It parses identifiers from the InfoQ page, decodes embedded IDs for RTMP streaming, signs HTTP URLs with page-provided credentials, and assembles a structured formats list for the final InfoQ video metadata.

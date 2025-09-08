@@ -1,0 +1,62 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/audiomack.py
+
+Overview
+- Provides two extractors for Audiomack:
+  - AudiomackIE: extracts a single track from audiomack.com
+  - AudiomackAlbumIE: extracts an album/playlist from audiomack.com
+- Handles both hosted tracks and tracks wrapped by SoundCloud (delegates to SoundcloudIE when needed).
+
+Key classes and main methods
+- AudiomackIE (InfoExtractor)
+  - _VALID_URL: matches audiomack track URLs, including variations that end with /song/ or contain a song path.
+  - _real_extract(url):
+    - Converts the incoming URL to an API tag by replacing '/song/' with '/' in the matched id (album_url_tag).
+    - Calls the extended API: http://www.audiomack.com/api/music/url/song/{album_url_tag}?extended=1&_={timestamp}
+    - Validates API response: must contain 'url' and not contain 'error'; otherwise raise ExtractorError.
+    - If the API returns a SoundCloud URL, delegates processing to SoundcloudIE via url_result.
+    - Otherwise returns a simple info dict: id, uploader, title, url.
+- AudiomackAlbumIE (InfoExtractor)
+  - _VALID_URL: matches audiomack album URLs.
+  - _real_extract(url):
+    - Converts to a tag by replacing '/album/' with '/' in the matched id (album_url_tag).
+    - Builds a playlist result: {'_type': 'playlist', 'entries': []}
+    - Since Audiomack provides album metadata via per-track API responses (no single album endpoint), it loops over track numbers using itertools.count().
+    - For each track, fetches: http://www.audiomack.com/api/music/url/album/{album_url_tag}/{track_no}?extended=1&_={timestamp}
+    - Error handling:
+      - If 'url' missing or 'error' in response: raise ExtractorError with track context.
+      - If api_response['url'] is falsy: end of playlist; break loop.
+    - Metadata extraction:
+      - If album_id or album_title present in the track response, store them once in the top-level result.
+    - Per-track entry:
+      - song_id derived from the track URL (basename without extension) as a fallback.
+      - entry fields: id (api_response['id'] or song_id), uploader (artist), title (title or song_id), url.
+    - Returns the assembled playlist result.
+- Utilities and helpers
+  - SoundcloudIE.suitable(url) check to detect SoundCloud-wrapped tracks
+  - url_basename to derive IDs from URLs
+  - compat_str to normalize strings
+  - time.time() to bust API cache (_ query parameter)
+  - _download_json to fetch JSON from API endpoints
+  - _match_id(url) to extract the relevant part of the URL
+
+Important implementation details
+- SoundCloud wrapping support: Audiomack often wraps tracks in a SoundCloud URL; the code detects this and delegates to SoundcloudIE when suitable.
+- API endpoints:
+  - Song details: /api/music/url/song/{tag}?extended=1&_={time}
+  - Album details (per track loop): /api/music/url/album/{album_tag}/{track_no}?extended=1&_={time}
+- Album extraction strategy: there is no single endpoint for album metadata; the extractor iterates track numbers until a track has no URL (end of album) or an error occurs.
+- Metadata propagation for albums: album_id and album_title are collected from the first tracks that expose them; per-track entries include id, uploader, title, and url.
+- URL handling: _VALID_URL patterns extract a generic id; the code normalizes to a usable API tag by removing the segment '/song/' or '/album/' for API calls.
+- Error handling: robust checks for missing/invalid API fields, and informative ExtractorError messages that include the problematic URL and track context.
+
+Tests
+- _TESTS in AudiomackIE:
+  - Hosted track test: verifies id, ext, uploader, title for a standard hosted track.
+  - SoundCloud-wrapped track test: demonstrates compatibility with wrapping; marked only_matching and indicates the need for a proper test URL for actual assertion.
+- _TESTS in AudiomackAlbumIE:
+  - Standard album playlist: validates album id and title, and playlist length.
+  - Album with no metadata: validates fallback behavior by extracting per-track entries, including a track with specific title and id, and shows handling of album-level metadata when present.
+  - Demonstrates behavior when requesting a subrange of the playlist (playliststart/playlistend).
+
+Summary
+- This file provides two extractors to handle Audiomack tracks and albums, with special handling for SoundCloud-wrapped content. It uses Audiomack’s API endpoints with extended data to populate track and album metadata and builds a playlist-like structure for albums by iteratively querying per-track information until the end of the album is reached.

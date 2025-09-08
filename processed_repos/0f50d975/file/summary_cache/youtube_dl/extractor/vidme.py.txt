@@ -1,0 +1,57 @@
+- Purpose
+  - YouTube-dl extractor for Vid.me. Supports extracting single videos and user-based playlists (including likes) from vid.me URLs.
+
+- Main classes
+  - VidmeIE (InfoExtractor)
+    - Handles individual video pages.
+    - URL pattern: https://vid.me/(e/)?<id> with id up to 5 alphanumeric chars.
+    - _real_extract:
+      - Fetches video data from https://api.vid.me/videoByUrl/<video_id>.
+      - On HTTP 400, attempts to read and parse the JSON error body.
+      - If API response contains error or video state indicates deleted/suspended/disabled, raises ExtractorError with an appropriate message.
+      - Builds formats from video['formats']:
+        - dash → MPD formats via _extract_mpd_formats
+        - hls  → HLS formats via _extract_m3u8_formats
+        - other → direct format dicts with id, url, width, height, and a computed preference
+      - If no formats but video['complete_url'] exists, adds that as a format.
+      - Sorts formats with _sort_formats.
+      - Extracts metadata: id, title, description, thumbnail, timestamp (parse_iso8601), upload_date, uploader, uploader_id, age_limit (18 if nsfw), duration, view_count, like_count, comment_count.
+      - Returns a dict with id, title, description, thumbnail, uploader info, age_limit, timestamp, duration, view counts, and formats.
+  - VidmeListBaseIE (InfoExtractor)
+    - Base for user-related video lists.
+    - _LIMIT = 100 (max per API docs).
+    - _entries(user_id, user_name): paginates through https://api.vid.me/videos/<self._API_ITEM>?user=<user_id>&limit=<LIMIT>&offset=<offset>.
+      - For each video, yields a URL result pointing to VidmeIE with the video URL (using VidmeIE.ie_key()).
+      - Stops when no videos are returned or when total pages are exhausted using page['page']['total'].
+  - VidmeUserIE (VidmeListBaseIE)
+    - For a user’s video list.
+    - IE_NAME = 'vidme:user'
+    - _VALID_URL matches Vid.me user pages (excluding "/likes").
+    - _API_ITEM = 'list'
+    - _TITLE = 'Videos'
+    - _real_extract resolves the username to user_id via https://api.vid.me/userByUsername?username=<name> and returns a playlist_result of the entries with title "<username> - Videos".
+  - VidmeUserLikesIE (VidmeListBaseIE)
+    - For a user’s liked videos.
+    - IE_NAME = 'vidme:user:likes'
+    - _VALID_URL matches Vid.me user/likes pages.
+    - _API_ITEM = 'likes'
+    - _TITLE = 'Likes'
+    - _real_extract behaves like VidmeUserIE but targets the likes list and uses the title "<username> - Likes".
+
+- Notable implementation details
+  - Error handling: If API returns an error field, or the video state indicates deletion or suspension, raises ExtractorError with clear messages. Special handling for HTTP 400 to still parse JSON from the error body.
+  - Formats handling: Supports DASH (MPD), HLS (M3U8), and direct URLs. Each format includes id, url, width, height, and a preference hint (clips get lower preference).
+  - Fallback format: If no formats are provided but complete_url exists, uses that URL with available width/height.
+  - Metadata extraction: Carefully maps API fields to standard info dict keys (title, description, thumbnail, timestamp/upload_date, uploader/uploader_id, nsfw to age_limit, duration, view_count, like_count, comment_count).
+  - Date parsing: Uses parse_iso8601 with a space as separator to derive upload_date and timestamp.
+  - Pagination: _entries handles paging via offset/limit until all videos are exhausted or total is reached, making it suitable for long user playlists.
+  - Tests: Includes multiple _TESTS for VidmeIE (single video, including NSFW and no-format cases), and for user and likes list endpoints with expected IDs, titles, and partial metadata.
+
+- Summary of endpoints used
+  - Single video: https://api.vid.me/videoByUrl/<video_id>
+  - Video list by user (videos): https://api.vid.me/videos/list?user=<id>&limit=...&offset=...
+  - User lookup: https://api.vid.me/userByUsername?username=<username>
+
+- Output
+  - VidmeIE returns a full video info dict with formats and metadata.
+  - VidmeUserIE and VidmeUserLikesIE return playlist results constructed from the user’s videos or liked videos respectively.

@@ -1,0 +1,42 @@
+Here is a concise, high-level summary of the code in youtube-dl/youtube_dl/extractor/vimple.py:
+
+- Purpose
+  - Implement an extractor for Vimple videos by parsing Spruto data embedded in the Vimple iframe page.
+
+- Key classes
+  - SprutoBaseIE (InfoExtractor)
+    - Provides shared logic to convert Spruto data into a standard youtube-dl video info dict.
+    - _extract_spruto(self, spruto, video_id)
+      - Takes a Spruto data object and a video_id.
+      - Uses spruto['playlist'][0] as the source playlist.
+      - title = playlist['title'].
+      - video_id override: uses playlist.get('videoId') if present, else keeps the passed video_id.
+      - thumbnail: playlist.get('posterUrl') if present, else playlist.get('thumbnailUrl').
+      - duration: int_or_none(playlist.get('duration')).
+      - formats: builds a list of dicts with 'url' from each item in playlist['video'].
+      - self._sort_formats(formats) to order formats sensibly.
+      - Returns a dict with id, title, thumbnail, duration, formats.
+
+  - VimpleIE (SprutoBaseIE)
+    - Specific extractor for Vimple videos; inherits SprutoBaseIE.
+    - IE_DESC: 'Vimple - one-click video hosting'.
+    - _VALID_URL: Regex matching Vimple/Player URLs, capturing an ID of 32–36 hex/dash characters. Accepts:
+      - http(s)://player.vimple.ru/iframe/<id>
+      - http(s)://vimple.ru/<id> or http(s)://vimple.co/<id>
+    - _TESTS: Includes a primary test with a real video URL, expected metadata (id, ext, title, duration, thumbnail), and two additional tests for URL matching without extraction.
+    - _real_extract(self, url)
+      - video_id = self._match_id(url)
+      - webpage = self._download_webpage('http://player.vimple.ru/iframe/%s' % video_id, video_id)
+      - Extracts Spruto JSON via a regex search for sprutoData: ... and parses it with _parse_json.
+        - Uses: self._search_regex(r'sprutoData\s*:\s*({.+?}),\r\n', webpage, 'spruto data')
+      - Returns self._extract_spruto(spruto, video_id)
+
+- Important implementation details
+  - Spruto data source: The extractor fetches the iframe page for the video ID and looks for a JavaScript object/JSON fragment named sprutoData, which contains the necessary playlist and video URLs.
+  - Data mapping: The first (and presumably primary) playlist entry is used. If a playlist videoId exists, it overrides the URL-provided video_id for the final info dict.
+  - Thumbnails: Uses posterUrl if available, else thumbnailUrl.
+  - Duration: Safely parsed using int_or_none to handle missing/invalid values.
+  - Formats: A simple list built from playlist['video'], where each item contributes a URL. The formats are then sorted with _sort_formats for sensible display order.
+  - Robustness: The code is designed to handle missing fields gracefully (e.g., videoId or posterUrl not present) and relies on the Spruto structure.
+
+In short, VimpleIE fetches the Vimple iframe page, extracts Spruto JSON, and converts the first playlist’s metadata and video URLs into a standard youtube-dl video info dictionary (id, title, thumbnail, duration, formats).

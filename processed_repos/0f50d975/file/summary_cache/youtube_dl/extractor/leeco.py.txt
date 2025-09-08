@@ -1,0 +1,84 @@
+Summary of ./youtube-dl/youtube_dl/extractor/leeco.py
+
+Overview
+- This file provides three extractors for LeTV/Letv content:
+  - LeIE: main extractor for le.com video pages (乐视网)
+  - LePlaylistIE: extractor for LeTV playlists (redirects to LeIE for each video)
+  - LetvCloudIE: extractor for Letv Cloud videos (yuntv.letv.com)
+
+Key classes and their purpose
+- LeIE (InfoExtractor)
+  - Handles direct video pages on le.com and lesports domains.
+  - Fetches a JSON-based “flash playJson” for the video, then derives one or more streaming formats (primarily HLS via decrypted m3u8).
+  - Decrypts the m3u8 data if needed and assembles a list of formats with proper protocol handling.
+  - Extracts metadata: video id, title, description, thumbnail, and publish timestamp.
+  - Important helpers:
+    - ror(param1, param2): 32-bit unsigned right rotate (used by Letv SWF-based time key logic)
+    - calc_time_key(param1): computes a time-based key using ror (used in the tkey parameter to the API)
+    - decrypt_m3u8(encrypted_data): decrypts an encrypted m3u8 payload (specific to Letv’s embedded SWF encryption). If data doesn’t start with 'vc_01', returns original data.
+    - _check_errors(play_json): handles geo restrictions and generic errors based on play status/flags
+  - Data flow:
+    - Downloads flash playJson data from player-pc.le.com with tkey derived from calc_time_key(time)
+    - Validates response via _check_errors
+    - For each available format in playurl['dispatch'], builds a media URL, retrieves the m3u8 via a secondary request, decrypts it, and stores it as an HLS (m3u8) format
+    - Sorts formats by height, quality, and format_id
+    - Extracts publish time from the page HTML and description via meta tags
+  - Returns a dict with id, title, thumbnail, description, timestamp, and formats.
+
+- LePlaylistIE (InfoExtractor)
+  - Handles LeTV playlists (URLs under le.com that are not video pages, e.g., tv/le.com/.../index.html)
+  - Suitable method ensures this runs only if LeIE does not match the URL
+  - Real extraction steps:
+    - Downloads the playlist page and finds all video ids via regex looking for http://www.letv.com/ptv/vplay/{id}.html
+    - Builds a list of entries using LeIE as the embedded extractor
+    - Extracts playlist title (from keywords meta) and description
+    - Returns a playlist result with entries, title, and description
+
+- LetvCloudIE (InfoExtractor)
+  - Handles Letv Cloud (yuntv.letv.com) video pages
+  - URL pattern specific to bcloud pages and query parameters (uu, vu, etc.)
+  - Core logic:
+    - Extracts uu and vu from URL, constructs a media_id as "uu_vu"
+    - Fetches format data for both flash and html5 through _get_formats(cf, uu, vu, media_id)
+      - _get_formats(cf, uu, vu, media_id):
+        - Builds a JSON request to Letv Cloud API (gpc.php) with a signature
+        - Signature is created by sign_data(obj) depending on cf ('flash' or 'html5')
+        - If API returns code 10071, retry with a corrected timestamp
+        - If API returns no usable data, raise descriptive errors
+        - Parses the data to collect available media formats:
+          - Each media item provides a base64-encoded main_url; decode it
+          - The decoded URL’s basename is base64-decoded again to determine file extension
+          - Build format entries with: url, ext, format_id (vtype), format_note (definition), width, height
+    - Combines formats from both flash and html5 sources, sorts them, and returns a video entry
+  - Important helpers:
+    - sign_data(obj): creates MD5 signature based on cf type, with a predefined salt and parameter order
+      - For cf == 'flash': uses items = ['cf', 'format', 'ran', 'uu', 'ver', 'vu']
+      - For cf == 'html5': uses items = ['cf', 'ran', 'uu', 'bver', 'vu']
+    - _get_formats performs decoding of URLs (base64) and extraction of file extensions
+  - Returns a dict with id (video id), title (constructed as “Video {media_id}”), and a list of formats.
+
+Important implementation details
+- URL matching and geo restrictions
+  - LeIE uses _VALID_URL to target le.com video pages and related leagues/sports domains
+  - _GEO_COUNTRIES = ['CN'] indicates geo-restriction handling for certain content
+  - geo_verification_headers() is used when requesting the flash playJson to comply with geo checks
+- Encryption/decryption and signature logic
+  - decrypt_m3u8 implements a specialized decoding used by LeTV’s SWF-based m3u8 protection
+  - calc_time_key and ror implement time-key derivation used in the tkey parameter for playJson requests
+  - LetvCloudIE uses a signature mechanism via sign_data to access the Letv Cloud API
+- Data flows and format assembly
+  - LeIE accumulates formats by querying dispatch data, retrieving m3u8 URLs, decrypting them, and converting to standard format dicts
+  - HLS formats are labeled with protocol 'm3u8_native' and are wrapped using encode_data_uri
+  - LetvCloudIE decodes multiple nested base64 URLs, determines file extensions, and fills in width/height when available
+- Metadata extraction
+  - LeIE extracts publish time from the page by parsing a label (发布时间) and converts to a timestamp with a Chinese timezone offset
+  - Description is pulled from meta description tag
+  - LePlaylistIE uses keywords (split on a Chinese comma) as playlist title and pulls meta description
+- Testing
+  - _TESTS provide sample URLs, expected IDs, ext, titles, and MD5 checksums for validation (including a Mainland China-only video path requiring a proxy)
+  - Tests also cover non-video playlist URLs via only_matching behavior
+
+In short
+- This module provides three extractors to cover LeTV content: LeIE for direct videos, LePlaylistIE for playlists referencing LeIE, and LetvCloudIE for Letv Cloud-based videos.
+- It handles a mix of JSON-based flash data and a custom m3u8 decryption, builds a consolidated list of video formats (mostly HLS), and extracts key metadata.
+- It includes specific handling for geo restrictions, signature-based API access to Letv Cloud, and legacy SWF-derived time-key calculations.

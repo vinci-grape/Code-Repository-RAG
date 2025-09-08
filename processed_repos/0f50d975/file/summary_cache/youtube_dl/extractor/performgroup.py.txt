@@ -1,0 +1,86 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/performgroup.py
+
+Overview
+- Implemented as PerformGroupIE, a video extractor for Perform Group’s eplayer content (used by sites that embed their player).
+- Subclass of InfoExtractor from youtube-dl, following the standard extraction flow.
+
+Key components
+- _VALID_URL
+  - Regular expression that matches URLs like:
+    http(s)://player.performgroup.com/eplayer(eplayer.html|.js)#/<id>.<auth_token>
+  - Captures:
+    - id: a 26-hex-character string
+    - auth_token: a 26-character alphanumeric string
+- _TESTS
+  - Example test case with a sample URL, expected md5 for the content, and an info_dict with id, ext, title, description, timestamp, upload_date.
+
+Main functionality
+- _call_api(self, service, auth_token, content_id, referer_url)
+  - Performs a GET request to:
+    http://ep3.performfeeds.com/ep{service}/{auth_token}/{content_id}/
+  - Headers:
+    - Referer: the page URL
+    - Origin: http://player.performgroup.com
+  - Query parameter: _fmt=json
+  - Returns the parsed JSON response.
+  - Used for two endpoints:
+    - bootstrap: to obtain initial video metadata
+    - vod: to obtain media details for the actual video formats
+
+- _real_extract(self, url)
+  1) Parse URL to extract:
+     - player_id (id)
+     - auth_token
+  2) Fetch bootstrap data via _call_api('bootstrap', auth_token, player_id, url)
+     - bootstrap['config']['dataSource']['sourceItems'][0]['videos'][0] gives the video object
+     - video_id = video['uuid']
+  3) Fetch Vod data via _call_api('vod', auth_token, video_id, url)
+     - vod['videos']['video'][0]['media'] contains media information
+  4) Build formats list
+     - HLS (m3u8): media.get('hls', {}).get('url')
+       - Use _extract_m3u8_formats with video_id as id, 'mp4' extension, 'm3u8_native' protocol, and m3u8_id='hls'
+       - fatal=False to avoid failing if not present
+     - HDS/F4M: media.get('hds', {}).get('url')
+       - Use _extract_f4m_formats with hdcore indicator, and f4m_id='hds'
+       - fatal=False to avoid failing if not present
+     - Content items: media.get('content', [])
+       - Each content item can provide a direct HTTP URL
+       - Build a format dict for each:
+         - format_id: 'http' or 'http-<tbr>' if bitrate present
+         - url: content URL
+         - tbr: bitrate (converted via int_or_none, default 1000 if present)
+         - width, height: from content fields
+         - filesize: from fileSize
+         - vcodec: video codec type
+         - fps: videoFrameRate
+         - vbr: video bitrate (default 1000)
+         - abr: audio bitrate (default 1000)
+  5) Sort formats with self._sort_formats(formats)
+  6) Return info dict:
+     - id: video_id
+     - title: video['title']
+     - description: video.get('description')
+     - thumbnail: video.get('poster')
+     - duration: int_or_none(video.get('duration'))
+     - timestamp: int_or_none(video.get('publishedTime'), 1000)
+     - formats: list of gathered formats
+
+Important implementation details
+- Robustness:
+  - Uses int_or_none utility to safely convert numeric fields to int or None.
+  - When generating HLS/HDS formats, uses fatal=False to gracefully skip missing streams.
+- Format handling:
+  - Supports multiple streams: HLS (m3u8), HDS (f4m), and direct HTTP content items.
+  - HTTP formats include metadata like width, height, bitrate (tbr), vbr/abr, and vcodec.
+- Data sources:
+  - Bootstrap API provides initial dataSource including the video UUID.
+  - Vod API provides detailed media information including hls/hds URLs and content streams.
+- Network details:
+  - API calls include Referer and Origin headers to mimic the site’s request context.
+  - _fmt=json query parameter is used to request JSON responses.
+- Integration:
+  - Follows youtube-dl’s standard extractor pattern: _REAL_EXTRACT, _download_json usage, and _extract_m3u8_formats/_extract_f4m_formats helpers.
+  - Returns a dictionary compatible with youtube-dl’s standard video info structure.
+
+In short
+- This extractor targets Perform Group’s eplayer content, fetches bootstrap and video data via their performfeeds API, collects available formats from HLS, HDS, and direct HTTP streams, and assembles a complete video info dictionary with id, title, description, thumbnail, duration, timestamp, and a sorted list of formats.

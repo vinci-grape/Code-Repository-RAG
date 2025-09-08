@@ -1,0 +1,49 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/clyp.py
+
+Overview
+- Implements an extractor for Clyp (clyp.it) audio pages.
+- Class: ClypIE(InfoExtractor)
+- Primary goal: fetch audio metadata and available audio formats from Clyp’s API and return a structured info dictionary for youtube-dl.
+
+Key components
+- _VALID_URL: Regex pattern to match Clyp URLs: https://clyp.it/<id> (id is lowercase alphanumeric).
+- _TESTS: Two test cases:
+  - First test without a token, expects mp3 format, duration, timestamp, and upload date.
+  - Second test with a token parameter in the URL; includes skip_download in params to avoid downloading during tests.
+- _real_extract(url):
+  - Extracts audio_id from the URL using _match_id.
+  - Parses the query string to capture an optional token parameter.
+  - Builds an API query dict with token if present.
+  - Downloads JSON metadata from https://api.clyp.it/{audio_id} using _download_json.
+  - Builds a list of formats by iterating over:
+    - security variants: '' (non-secure) and 'Secure'
+    - extensions: 'Ogg' and 'Mp3'
+    - For each combination, constructs format_id = security + ext, and looks up a corresponding URL in metadata as '{format_id}Url'.
+    - If a URL exists, adds a format with fields: url, format_id, vcodec='none'.
+  - Sorts formats with _sort_formats.
+  - Extracts additional metadata:
+    - title = metadata['Title']
+    - description = metadata.get('Description')
+    - duration = float_or_none(metadata.get('Duration'))
+    - timestamp = unified_timestamp(metadata.get('DateCreated'))
+  - Returns a dict with: id, title, description, duration, timestamp, formats.
+
+Important implementation details
+- API interaction:
+  - Endpoint: https://api.clyp.it/{audio_id}
+  - Supports an optional token via URL query parameter token (token is preserved and sent to the API if present).
+- Formats handling:
+  - Considers both Ogg and Mp3 formats, for both non-secure and secure URLs (four potential variants per audio): Ogg, Mp3, SecureOgg, SecureMp3.
+  - Each available URL contributes a format with vcodec set to 'none' (audio-only).
+  - Uses _sort_formats to order formats by quality/default preferences.
+- Metadata extraction:
+  - Title and (optional) Description come directly from API response fields Title and Description.
+  - Duration parsed via float_or_none, allowing missing or non-numeric values.
+  - Timestamp parsed via unified_timestamp from DateCreated (epoch or date string) to a standard UNIX timestamp.
+- Output structure:
+  - Returns a dictionary containing id, title, description, duration, timestamp, and a list of formats. The ext is inferred from the selected formats (tests expect mp3 when Mp3Url is present).
+- Robustness:
+  - Gracefully handles missing description or formats by only including available URLs.
+  - TOKEN support enables access to token-protected audio metadata.
+
+In short, this extractor fetches Clyp audio metadata from the API, enumerates all available audio formats (Ogg/Mp3 with/without secure URLs), and returns a complete info structure suitable for youtube-dl.

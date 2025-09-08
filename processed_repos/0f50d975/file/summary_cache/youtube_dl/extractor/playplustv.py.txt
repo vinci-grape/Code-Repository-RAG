@@ -1,0 +1,85 @@
+Here's a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/playplustv.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor for PlayPlus TV (PlayPlus/VOD videos).
+  - Requires user login to access content and returns video formats, metadata, and thumbnails.
+
+- Key class
+  - PlayPlusTVIE(InfoExtractor)
+
+- URL pattern
+  - _VALID_URL = r'https?://(?:www\.)?playplus\.(?:com|tv)/VOD/(?P<project_id>[0-9]+)/(?P<id>[0-9a-f]{32})'
+  - Matches VOD URLs like: https://www.playplus.tv/VOD/<project_id>/<media_id>
+
+- Test data
+  - _TEST contains a sample URL, expected mp4 ext, title, description hash, timestamp, upload_date, and a skip message indicating account credentials are required.
+
+- Network/geo setup
+  - _NETRC_MACHINE = 'playplustv' (credentials may be provided via .netrc)
+  - _GEO_COUNTRIES = ['BR'] (geographic restriction to Brazil)
+
+- Authentication state
+  - _token and _profile_id attributes store Bearer token and user profile ID after login.
+
+- Core helpers
+  - _call_api(resource, video_id=None, query=None)
+    - Calls https://api.playplus.tv/api/media/v2/get<resource> with Authorization: Bearer <token>.
+    - Passes along video_id and optional query parameters.
+    - Returns parsed JSON.
+
+- Initialization and login
+  - _real_initialize(self)
+    - Retrieves login credentials via self._get_login_info().
+    - If no credentials, raises a login required error.
+    - Performs login with PUT to https://api.playplus.tv/api/web/login using JSON body { email, password }.
+    - On success, stores token from response['token'] in self._token.
+    - On 401 error, raises a user-friendly ExtractorError with message from the response.
+    - Fetches the user profile via _call_api('Profiles') and stores the first profile ID at self._profile.
+
+- Media extraction
+  - _real_extract(self, url)
+    - Extracts project_id and media_id from the URL using the _VALID_URL regex.
+    - Fetches the media object via _call_api('Media', media_id, { profileId, projectId, mediaId })['obj'].
+    - title = media['title'].
+
+  - Formats
+    - Iterates media.get('files', []) to build a list of formats.
+    - For each file with a 'url', creates a dict with:
+      - url: file URL
+      - width: int_or_none(fileInfo.get('width'))
+      - height: int_or_none(fileInfo.get('height'))
+    - Uses self._sort_formats(formats) to prioritize/organize formats.
+
+  - Thumbnails
+    - Iterates media.get('thumbs', []) to build a list of thumbnails with:
+      - url, width, height (parsed via int_or_none)
+
+  - Metadata/Extras
+    - description: clean_html(media.get('description')) or media.get('shortDescription')
+    - timestamp: int_or_none(media.get('publishDate'), 1000)
+      - Uses 1000 as scale to convert seconds to milliseconds if needed.
+    - view_count: int_or_none(media.get('numberOfViews'))
+    - comment_count: int_or_none(media.get('numberOfComments'))
+    - tags: media.get('tags')
+
+  - Returns a dict containing:
+    - id: media_id
+    - title
+    - formats
+    - thumbnails
+    - description
+    - timestamp
+    - view_count
+    - comment_count
+    - tags
+
+- Important implementation details
+  - Requires user login; credentials are retrieved via netrc (machine playplustv) or prompted through the standard login flow.
+  - Uses a Bearer token for API requests to the PlayPlus API.
+  - Handles login errors gracefully by surfacing the errorMessage from the API on 401.
+  - Works with the API endpoints under api.playplus.tv/api/media/v2/get* and the login endpoint at api.playplus.tv/api/web/login.
+  - Enforces geographic restriction to BR.
+  - Builds formats from the provided files array, including optional width/height, and sorts them for downstream selection.
+  - Robust metadata extraction with HTML cleaning and fallbacks for description and timestamps.
+
+Overall, this extractor authenticates the user, retrieves profile context, fetches media details via PlayPlus API, and then exports a standard video information structure (id, title, formats, thumbnails, and metadata) suitable for downloading through youtube-dl.

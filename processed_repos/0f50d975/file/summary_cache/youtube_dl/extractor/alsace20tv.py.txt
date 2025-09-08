@@ -1,0 +1,52 @@
+Summary of alsace20tv.py
+
+- Purpose
+  - Implements two YouTube-DL extractors for Alsace20TV:
+    - Alsace20TVIE: extracts video data from standard Alsace20TV video pages.
+    - Alsace20TVEmbedIE: extracts video data from embed URLs under /emb/.
+
+- URL patterns
+  - Alsace20TVIE: https://(www.)?alsace20.tv/...-<id>
+  - Alsace20TVEmbedIE: https://(www.)?alsace20.tv/emb/<id>
+
+- Core workflow (Alsace20TVIE)
+  - Video ID extraction: Uses _VALID_URL to capture an id, then passes it to _extract_video.
+  - API data fetch: Calls https://www.alsace20.tv/visionneuse/visio_v9_js.php?key=<id>&habillage=0&mode=html to obtain a JSON payload with video details.
+  - Title: Read from info['titre'].
+  - Formats:
+    - info.get('files') contains manifest URLs. For each item:
+      - If the URL contains '/smil:_', extend formats with _extract_smil_formats.
+      - Otherwise, extend formats with _extract_mpd_formats (mpd_id set to the manifest key).
+    - Formats are sorted with _sort_formats.
+  - Webpage context:
+    - If a page URL is provided, it is downloaded (fatal=False to avoid hard failure if missing).
+  - Thumbnail:
+    - Prefer info['image']['preview']; if missing, fall back to OG thumbnail from the page.
+  - Upload date:
+    - Attempts to extract a 6-digit date from the thumbnail URL (pattern /(\d{6})_/).
+    - Converts to a YYYYMMDD string using unified_strdate with the 20 prefix (20YY-MM-DD).
+  - Description:
+    - Extracted from HTML element with class 'wysiwyg' on the page via clean_html(get_element_by_class('wysiwyg', ...)).
+  - Duration:
+    - Retrieved from the page using OpenGraph property 'video:duration' if the page is available.
+  - View count:
+    - Taken from info['nb_vues'] and converted to int with int_or_none.
+  - Return value:
+    - A dict containing id, title, formats, description, upload_date, thumbnail, duration, and view_count.
+
+- Key implementation details
+  - Robust data access:
+    - Uses dict_get and safe fallbacks (or {}) to handle missing JSON fields.
+  - Format handling:
+    - Supports both SMIL and MPD manifests, enabling flexible retrieval of video formats.
+  - Metadata extraction:
+    - Upload date is derived from the thumbnail URL pattern when available.
+    - Description is scraped from a specific page element; duration can be sourced from OpenGraph data on the page.
+  - Reusability:
+    - Alsace20TVEmbedIE reuses Alsace20TVIE's _extract_video method, providing a consistent extraction flow for embedded videos.
+  - Testing:
+    - Includes _TESTS with sample URLs, expected metadata, and format preference (bestvideo).
+
+- Summary of Alsace20TVEmbedIE
+  - Inherits from Alsace20TVIE and only changes the URL pattern to /emb/<id>.
+  - The actual extraction defers to _extract_video via _real_extract, ensuring embed URLs are processed identically to main pages.

@@ -1,0 +1,65 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/iwara.py.
+
+What it is
+- A Youtube-DL extractor for Iwara videos, implemented as the IwaraIE class extending InfoExtractor.
+- Supports URLs under iwara.tv and ecchi.iwara.tv (and www. prefix).
+
+Main functionality
+- Converts a given Iwara video URL into a standard Youtube-DL video info dictionary.
+- Fetches metadata from the Iwara API and builds a list of available video formats.
+- Handles age-restriction and fallback behavior when API data is unavailable.
+
+Key components and behavior
+- _VALID_URL: Regex that matches video pages and captures the video id. Accepts:
+  - http(s)://(www.)?(iwara.tv|ecchi.iwara.tv)/videos/{id}
+- _TESTS: Three test cases to validate:
+  - Simple video URL with mp4 extension and age limit 18.
+  - Ecchi subdomain URL with a GoogleDrive format (demonstrates add_ie: ['GoogleDrive']).
+  - Another iwara.tv URL with metadata like title, description, upload_date, uploader, and uploader_id; includes add_ie: ['Youtube'].
+
+Extraction flow in _real_extract
+1. video_id = self._match_id(url)
+2. webpage, urlh = self._download_webpage_handle(url, video_id)
+3. Determine age_limit:
+   - hostname = hostname of redirected URL
+   - If the first part of the hostname (before first dot) is 'ecchi', age_limit = 18; otherwise 0
+   - This uses compat_urllib_parse_urlparse to parse the URL
+4. Try to fetch video data:
+   - video_data = self._download_json('http://www.iwara.tv/api/video/%s' % video_id, video_id)
+5. If video_data is empty/false:
+   - Fallback: extract an iframe URL from the page HTML with a regex
+   - Return a url_transparent result pointing to the iframe URL with the computed age_limit
+6. If video_data is present:
+   - title: extract from <title>...</title> in the page, removing a trailing ' | Iwara'
+   - Build formats list by iterating over video_data entries:
+     - For each a_format:
+       - format_uri = a_format.get('uri'); skip if missing
+       - format_id = a_format.get('resolution')
+       - height: parse digits before 'p' in format_id (e.g., '1080p' -> 1080)
+       - ext: mime type extension derived via mimetype2ext(a_format.get('mime')), default to 'mp4'
+       - url: ensure absolute https URL via self._proto_relative_url(format_uri, 'https:')
+       - width: derive from 16:9 aspect ratio if height is known (width = int(height / 9 * 16))
+       - quality: 1 if format_id == 'Source' else 0 (Source is favored)
+       - Collect format dicts with keys: url, format_id, ext, height, width, quality
+   - self._sort_formats(formats) to order by quality/height
+7. Return a result dict with:
+   - 'id': video_id
+   - 'title': extracted title
+   - 'age_limit': computed age_limit
+   - 'formats': list of format dictionaries
+
+Implementation details and utilities used
+- _download_webpage_handle: fetches the page and a redirected URL handle
+- compat_urllib_parse_urlparse: parse the redirected URL to get host
+- _download_json: fetch JSON data from the Iwara API
+- _html_search_regex: extract title from HTML; cleans trailing ' | Iwara'
+- _proto_relative_url: convert relative video URLs to absolute https URLs
+- mimetype2ext: derive file extension from MIME type; defaults to 'mp4'
+- int_or_none: safely convert strings to int or None
+- remove_end: strip a trailing substring from the title
+- _sort_formats: standard youtube-dl method to order formats
+- When API data is absent, the extractor yields a url_transparent result to an iframe URL, enabling another extractor (or direct play) to handle it
+- The code accounts for special cases like Source vs other resolutions by assigning a higher priority to Source format (quality = 1)
+
+Overall purpose
+- To robustly extract video information from Iwara, handling both direct API-provided formats and fallback iframe scenarios, while honoring age restrictions and providing clean, well-structured metadata for downstream processing by Youtube-DL.

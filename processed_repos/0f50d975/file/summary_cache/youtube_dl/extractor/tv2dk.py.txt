@@ -1,0 +1,97 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/tv2dk.py
+
+Overview
+- Defines two extractors for Danish TV2 domains:
+  1) TV2DKIE: generic TV2 subdomains (tvsyd.dk, tv2ostjylland.dk, tvmidtvest.dk, tv2fyn.dk, tv2east.dk, tv2lorry.dk, tv2nord.dk)
+     - Extracts Kaltura-based video entries embedded in pages.
+  2) TV2DKBornholmPlayIE: specific to play.tv2bornholm.dk
+     - Extracts videos via a custom AJAX JSON endpoint and builds formats from provided sources.
+
+Key classes and main functionality
+- TV2DKIE (InfoExtractor)
+  - _VALID_URL: Matches TV2 subdomains listed above with a path that ends in an id-like segment. The id is captured as video_id.
+  - _TESTS: Several test cases showing typical Kaltura-based videos and some non-video pages (only_matching for non-video pages). Tests indicate that extracted videos use the Kaltura extractor (add_ie: ['Kaltura']).
+  - _real_extract(url):
+    - Downloads the page HTML for the given URL.
+    - Scans for HTML elements containing data-entryid and data-partnerid attributes (likely Kaltura embed tags) using a regex and extract_attributes.
+    - For each such element:
+      - Gets data-entryid as kaltura_id and data-partnerid as partner_id.
+      - Creates a Kaltura URL result: 'kaltura:<partner_id>:<kaltura_id>' with the Kaltura extractor, and video_id set to kaltura_id.
+      - Aggregates these as entries.
+    - If no entries found from the page, falls back to two regex searches to locate:
+      - kaltura_id via entry_id patterns
+      - partner_id via partial/patterns that resemble the Kaltura embedding URL
+      - Adds this single entry if discovered.
+    - If exactly one entry was found, returns that entry directly.
+    - If multiple entries were found, returns a playlist of all found entries.
+  - Important implementation details:
+    - The code uses direct detection of Kaltura embeds via data-entryid/data-partnerid attributes first (robust for heavily JavaScript-rendered pages).
+    - Fallback regex covers additional embedding patterns in the raw HTML.
+    - Uses self.url_result with type 'Kaltura' to delegate extraction to the KalturaIE.
+    - The _TESTS indicate typical results include fields like id, ext, title, timestamp, upload_date, uploader_id, duration, and view_count.
+
+- TV2DKBornholmPlayIE (InfoExtractor)
+  - _VALID_URL: Matches play.tv2bornholm.dk with a query string containing id parameter (?P<id>\d+).
+  - _TEST: Demonstrates extraction from the Bornholm player, with id '781021', and title like '12Nyheder-27.11.19'. Specifies to skip actual download (skip_download) per test.
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Performs a POST request to https://play.tv2bornholm.dk/controls/AJAX.aspx/specifikVideo with JSON payload:
+      {
+        "playlist_id": video_id,
+        "serienavn": ""
+      }
+      and headers:
+        X-Requested-With: XMLHttpRequest
+        Content-Type: application/json; charset=UTF-8
+      The response is expected to be a JSON object with a field 'd' containing the video data (video metadata and sources).
+    - Parses the response:
+      - Extracts title from the video data via a regex on a JavaScript-like object string (title: "..." or 'title': '...').
+      - Extracts sources by locating a JSON array in the video data string and parsing it with _parse_json, converting JS-style to Python via js_to_json.
+    - Formats construction:
+      - Iterates through each source dict in sources and reads source['src'] as URL (deduplicated with a set).
+      - Determines extension from the URL (determine_ext) and checks the type field:
+        - If type is 'application/x-mpegurl' or extension is 'm3u8', builds HLS formats via _extract_m3u8_formats with:
+          - ext='mp4'
+          - entry_protocol='m3u8_native'
+          - m3u8_id='hls'
+          - fatal=False
+        - If type is 'application/dash+xml' or extension is 'mpd', builds DASH formats via _extract_mpd_formats with mpd_id='dash' and fatal=False
+        - Otherwise, adds a direct format with the URL.
+      - Sorts formats with _sort_formats.
+    - Returns a dict with:
+      - id: video_id
+      - title: extracted title
+      - formats: assembled list of formats
+  - Important implementation details:
+    - Uses a dedicated AJAX endpoint for Bornholm content and parses the resulting 'd' data field.
+    - Supports multiple format types (HLS, MPEG-DASH, and direct URLs).
+    - Deduplicates sources to avoid duplicate formats.
+    - Leverages existing format extraction helpers (e.g., _extract_m3u8_formats, _extract_mpd_formats, _parse_json, js_to_json).
+
+Key implementation details and utilities used
+- Imports:
+  - json, re for data handling and regex parsing.
+  - InfoExtractor base class and utilities:
+    - determine_ext: deduces file extension from URLs.
+    - extract_attributes: parses HTML tag attributes into a dict.
+    - js_to_json: converts JS-like JSON strings to proper JSON for parsing.
+    - url_or_none: helper to skip invalid URLs.
+- Entry extraction strategy for TV2DKIE:
+  - Primary path: locate Kaltura embeds using data-entryid/data-partnerid attributes in the page HTML.
+  - Fallback path: search for entry_id and partner_id in the HTML using regexes that capture typical Kaltura embedding patterns (including escaped Unicode patterns).
+  - If multiple entries found, present as a playlist; if a single entry, return that entry directly for efficiency.
+- Kaltura integration:
+  - Uses self.url_result with a Kaltura-specific URL and type, which tells youtube-dl to dispatch to the Kaltura extractor.
+- Bornholm extraction specifics:
+  - AJAX flow is explicit and tightly coupled to the Bornholm site’s implementation.
+  - Title extraction uses a regex against the returned video data string.
+  - Sources are parsed from a JSON-like array embedded in the response data, requiring js_to_json for compatibility with Python JSON parsing.
+  - Formats prioritization: HLS and DASH formats are preferred when available; direct URLs are included as fallback formats.
+- Tests:
+  - TV2DKIE tests demonstrate both:
+    - A typical Kaltura-based page that yields a Kaltura entry (with metadata like title, timestamp, etc., and uploader_id).
+    - A page that matches but is not a video (only_matching) to ensure proper URL matching.
+  - TV2Bornholm test demonstrates a non-download skip scenario with a specific video id and title.
+
+In short
+- The file implements two extractors for TV2 Denmark content. TV2DKIE detects Kaltura-embedded videos on several TV2 subdomains and builds Kaltura entries (or a playlist). TV2DKBornholmPlayIE handles the Bornholm player by calling an AJAX endpoint, parsing title and multiple sources, and building a concrete set of formats (HLS/DASH/direct) for playback.

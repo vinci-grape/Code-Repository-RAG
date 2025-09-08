@@ -1,0 +1,27 @@
+Concise summary of the file:
+
+- Purpose
+  - Implement a YouTube-DL extractor for The Scene (thescene.com) videos. It identifies the embedded Conde Nast video player on The Scene pages and delegates extraction to the Conde Nast extractor.
+
+- Main class
+  - TheSceneIE(InfoExtractor)
+    - _VALID_URL: Matches URLs like https://thescene.com/watch/<anything>/<video-id>. Captures the video id portion as id.
+    - _TEST: Provides a sample URL and the expected upstream metadata structure (via the Conde Nast extractor). Demonstrates the expected fields such as id, ext, title, display_id, duration, series, season, tags, categories, upload_date, timestamp, uploader.
+    - _real_extract(url):
+      - display_id = self._match_id(url): extracts the slug-like id from the URL.
+      - webpage = self._download_webpage(url, display_id): fetches the page HTML.
+      - player_url: Uses _html_search_regex to locate a script tag with id 'js-player-script' and extract its src attribute. The URL is then joined to the page URL with compat_urlparse.urljoin to form an absolute URL.
+        Regex pattern: r"id=\'js-player-script\'[^>]+src=\'(.+?)\'"
+      - Returns a url_transparent entry:
+        - _type: 'url_transparent' (indicates delegation to another extractor)
+        - display_id: the slug captured from the URL
+        - url: the resolved player_url
+        - ie_key: 'CondeNast' (delegate to the Conde Nast extractor)
+
+- Key implementation details
+  - Delegation approach: The actual video metadata is obtained from the Conde Nast extractor; TheSceneIE only finds the upstream player URL and forwards the URL to Conde Nast.
+  - URL extraction: Relies on a specific script tag with id 'js-player-script' to locate the video player source.
+  - Robustness: Uses compat_urlparse.urljoin to ensure the extracted player URL is absolute.
+  - Minimal surface: The extractor does not parse metadata itself beyond routing; downstream metadata (title, duration, tags, etc.) comes from the Conde Nast extractor.
+
+Overall, TheSceneIE scans The Scene pages for the embedded Conde Nast player script and hands off extraction to the Conde Nast extractor, providing display_id and the upstream player URL as a transparent URL.

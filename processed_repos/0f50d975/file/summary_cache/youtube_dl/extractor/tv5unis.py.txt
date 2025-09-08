@@ -1,0 +1,74 @@
+Concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/tv5unis.py
+
+What it does
+- Implements YouTube-DL extractors for TV5 Unis content.
+- Uses TV5 Unis GraphQL API to fetch media metadata and a Limelight mediaId, then returns a url_transparent pointing to LimelightMedia with embedded metadata.
+- Applies geo restriction (Canada) and translates certain fields (rating to age_limit, season/episode numbers, etc.) into standard YouTube-DL info.
+
+Main components
+- TV5UnisBaseIE (InfoExtractor)
+  - Core shared logic for TV5 Unis extractors.
+  - _GEO_COUNTRIES = ['CA'] to restrict geo.
+  - _real_extract(url):
+    - Extracts URL groups via self._VALID_URL.
+    - Calls the TV5 Unis GraphQL API at https://api.tv5unis.ca/graphql with a query name and arguments produced by _gql_args(groups).
+    - The query requests: collection.title, episodeNumber, rating.name, seasonNumber, tags, title, and videoElement.mediaId.
+    - Builds a result dict with:
+      - _type: 'url_transparent'
+      - id: media_id (from videoElement)
+      - title: product['title']
+      - url: smuggle_url('limelight:media:' + media_id, {'geo_countries': self._GEO_COUNTRIES})
+      - age_limit: parsed from rating.name using parse_age_limit
+      - tags: product['tags']
+      - series: collection.title
+      - season_number: int_or_none(seasonNumber)
+      - episode_number: int_or_none(episodeNumber)
+      - ie_key: 'LimelightMedia'
+    - This delegates actual playback to the LimelightMedia extractor with a geo-restricted URL.
+
+- TV5UnisVideoIE (derived from TV5UnisBaseIE)
+  - IE_NAME = 'tv5unis:video'
+  - _VALID_URL: https?://(?:www\.)?tv5unis\.ca/videos/[^/]+/(?P<id>\d+)
+  - _GQL_QUERY_NAME = 'productById'
+  - _gql_args(groups): returns 'id: %s' % groups
+    - Uses the numeric id captured from the URL to form the GraphQL argument.
+  - _TEST: provides a sample URL and expected Limelight-based metadata for unit tests.
+
+- TV5UnisIE (derived from TV5UnisBaseIE)
+  - IE_NAME = 'tv5unis'
+  - _VALID_URL: matches TV5 Unis video pages by root slug with optional season/episode:
+    https?://(?:www\.)?tv5unis\.ca/videos/(?P<id>[^/]+)(?:/saisons/(?P<season_number>\d+)/episodes/(?P<episode_number>\d+))?
+  - _TESTS: two examples
+    - One with a specific season/episode, expecting title, description, duration, age_limit, series, season/episode numbers, and subtitles.
+    - One without season/episode, expecting basic metadata.
+  - _GQL_QUERY_NAME = 'productByRootProductSlug'
+  - _gql_args(groups): builds GraphQL args as:
+      - rootProductSlug: "<slug>" (groups[0])
+      - If season/episode present (groups[1] not None), append ', seasonNumber: <n>, episodeNumber: <n>' from groups[1:]
+  - This enables GraphQL queries for root-slug based videos, with optional season/episode.
+
+Key implementation details
+- GraphQL integration
+  - Queries are built dynamically using two class attributes: _GQL_QUERY_NAME and _gql_args(groups).
+  - The GraphQL response is accessed as data[_GQL_QUERY_NAME], from which videoElement.mediaId is retrieved to locate the actual media on Limelight.
+- Media redirection to Limelight
+  - The extractor returns a url_transparent pointing to LimelightMedia with the mediaId.
+  - The actual video extraction/streaming is delegated to LimelightMedia (ie_key = 'LimelightMedia').
+  - geo restriction is applied by smuggle_url with geo_countries set to ['CA'].
+- Metadata extraction and helpers
+  - age_limit derived via parse_age_limit(try_get(product, lambda x: x['rating']['name'])).
+  - season_number and episode_number safely parsed with int_or_none.
+  - series derived via try_get(product, lambda x: x['collection']['title']).
+  - tags taken directly from product.get('tags').
+- Robustness helpers
+  - try_get used to safely access deeply nested fields.
+  - int_or_none converts strings to ints when present; None otherwise.
+
+Tests included
+- TV5UnisVideoIE _TEST with a video-only URL and expected Limelight-based metadata (id, ext, title, duration).
+- TV5UnisIE _TESTS include two sample pages:
+  - One with season/episode and expected detail like description, subtitles, duration, age_limit, tags, series, and numbers.
+  - One without season/episode, with metadata accordingly.
+
+In short
+- This module provides two extractors for TV5 Unis content (by video ID and by root slug), both using GraphQL to fetch a mediaId and metadata, then returning a monosource to LimelightMedia with appropriate geo and metadata mappings. It focuses on collecting high-level info (title, series, season/episode, age limit, tags) and defers actual streaming to Limelight.

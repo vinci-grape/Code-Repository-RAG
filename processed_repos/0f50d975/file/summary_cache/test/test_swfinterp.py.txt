@@ -1,0 +1,36 @@
+Concise but comprehensive summary
+
+Overview
+- This test file dynamically creates and runs unit tests for the SWF interpreter used by youtube-dl.
+- It compiles ActionScript tests (.as) to SWF if needed, then runs them through SWFInterpreter and checks the results against expected outputs embedded in the .as files.
+
+Key components
+- TestSWFInterpreter (unittest.TestCase): container for dynamically added test methods.
+- _make_testfunc(testfile): factory function that builds a test function for a given .as file.
+- SWFInterpreter: imported from youtube_dl.swfinterp; used to load and execute SWF content.
+- Compilation via mxmlc: if the corresponding .swf is missing or out-of-date relative to the .as file, the test compiles the .as file into a .swf.
+- Test data extraction: the .as file must contain lines formatted as // input: <json> and // output: <json>, which are parsed and used as input and expected output for the test.
+- Dynamic test discovery: tests are created for every file in the swftests directory with a .as extension.
+
+How it works
+- It dynamically inserts the repository root into sys.path to import youtube-dl modules.
+- It defines TEST_DIR as the swftests directory adjacent to this file.
+- For each .as file in swftests:
+  - It creates a test function named test_swf_<test_id>, where test_id is the basename without the .as extension.
+  - It checks if a corresponding .swf exists and is up-to-date; if not, it attempts to compile using mxmlc.
+  - If mxmlc is not installed, the test is skipped with an explanatory message.
+  - It loads the SWF content and instantiates SWFInterpreter with it.
+  - It reads the .as file content to extract input and expected output using regex looking for lines like // input: <json> and // output: <json>.
+  - It locates the SWF class named after test_id, extracts the main function, invokes it with the parsed input, and asserts that the result equals the parsed output.
+
+Important implementation details
+- Test data extraction: _find_spec uses a multi-line regex to locate // key: value lines and json.loads the value.
+- File handling: AS files are read with UTF-8 encoding; SWF files are read in binary mode.
+- Recompilation logic: SWF is rebuilt if missing or older than the corresponding AS file, ensuring tests run against current code.
+- Error handling: If mxmlc is not found (OSError with errno ENOENT), the test is skipped gracefully to avoid false failures.
+- Test naming: test function names are normalized to test_swf_<test_id> for clarity in test output.
+- Class/function extraction: SWFInterpreter.extract_class(test_id) and extract_function(swf_class, 'main') are used to obtain the callable entry point for the test.
+- Environment setup: The code modifies sys.path to ensure the youtube-dl package modules can be imported when running tests from this directory.
+
+Overall purpose
+- Provide automated, data-driven tests for the SWF interpreter by compiling ActionScript test cases to SWF, executing them, and verifying output against explicit expectations embedded in the test files.

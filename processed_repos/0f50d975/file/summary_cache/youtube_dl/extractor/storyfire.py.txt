@@ -1,0 +1,78 @@
+Summary of the code in youtube-dl/youtube_dl/extractor/storyfire.py
+
+Purpose
+- Implement a set of extractors for the StoryFire site to retrieve video data and expose the actual video via Vimeo.
+
+Main classes
+- StoryFireBaseIE (InfoExtractor)
+  - Shared helpers and common logic used by all StoryFire extractors.
+  - _VALID_URL_BASE: base URL pattern for StoryFire.
+  - _call_api(path, video_id, resource, query=None)
+    - Calls StoryFire app API at https://storyfire.com/app/<path>/<video_id> and returns the parsed JSON.
+    - Uses the resource string for the status message during download.
+  - _parse_video(video)
+    - Converts a StoryFire video object into a youtube-dl usable entry.
+    - Extracts a Vimeo ID from video['vimeoVideoURL'] via regex.
+    - Returns a url_transparent entry pointing to the Vimeo URL, with a Referer header of https://storyfire.com/ (smuggled to preserve headers).
+    - Collects and returns metadata: title, description, thumbnail, view/like/comment counts, duration, timestamp, uploader info, and episode_number.
+    - Other format extraction is currently commented out (no direct extraction of HLS/DASH formats).
+
+- StoryFireIE (video-details)
+  - _VALID_URL: base + video-details/<24-hex-id>
+  - _real_extract(url)
+    - Extracts the internal video_id from the URL.
+    - Fetches video metadata via _call_api('generic/video-detail', ...), accessing the 'video' field.
+    - Delegates to _parse_video to produce the final entry.
+
+- StoryFireUserIE (user videos)
+  - _VALID_URL: base + user/<id>/video
+  - _PAGE_SIZE: 20
+  - _fetch_page(user_id, page)
+    - Calls _call_api('publicVideos', user_id, 'page N', with skip offset) to fetch a page of videos.
+    - Parses and yields each video using _parse_video.
+  - _real_extract(url)
+    - Extracts the user_id from the URL.
+    - Builds an OnDemandPagedList over pages of results (paging function is _fetch_page).
+    - Returns a playlist_result built from the paged entries.
+
+- StoryFireSeriesIE (series stories)
+  - _VALID_URL: base + write/series/stories/<id>
+  - _extract_videos(stories)
+    - Iterates through stories; yields parsed videos for those with hasVideo set.
+  - _real_extract(url)
+    - Extracts series_id from the URL.
+    - Fetches series stories via _call_api('seriesStories', series_id, 'series stories').
+    - Returns a playlist_result from the parsed videos.
+
+Key implementation details
+- Video extraction model:
+  - All video entries ultimately point to a Vimeo video page (via _parse_video returning a url_transparent with a Vimeo URL and a Referer header).
+  - Actual video formats are not downloaded directly from StoryFire; the extractor relies on Vimeo to provide the media.
+  - The Referer header is set to storyfire.com to help with Vimeo access protections.
+
+- Metadata handling:
+  - Uses int_or_none to robustly coerce numeric fields (views, likes, comments, duration, timestamp, episode_number).
+  - Includes uploader information and uploader URL when available.
+  - Provides standard fields such as id, title, description, thumbnail, duration, timestamp, and counts.
+
+- API interaction:
+  - Centralized API access via _call_api, pointing to https://storyfire.com/app/{path}/{video_id} with optional query parameters.
+  - For video-details, the API returns a dict with a 'video' key containing necessary metadata.
+  - For users and series, additional endpoints return lists of videos or stories, which are parsed page-by-page.
+
+- Pagination and playlists:
+  - User videos use OnDemandPagedList to lazily load pages of results (PAGE_SIZE = 20).
+  - Series videos are collected by iterating over the returned stories and selecting those with hasVideo.
+
+Tests and notes
+- StoryFireIE test demonstrates parsing of a video-details URL and returning a Vimeo-backed entry with expected metadata.
+- StoryFireUserIE test shows pagination behavior and playlist creation.
+- StoryFireSeriesIE tests cover series with multiple videos and a case with zero videos.
+- Some formatting code (HLS/DASH) is present but commented out, indicating an intended but not implemented direct format extraction from StoryFire; current behavior defers to Vimeo.
+
+In short
+- This file provides a cohesive set of extractors for StoryFire:
+  - Video details → Vimeo-based entry with rich metadata.
+  - User’s video feed → paginated playlist of parsed videos.
+  - Series’ stories → playlist of videos within a series.
+- It relies on the StoryFire app API for data and uses Vimeo as the actual video source, with careful handling of HTTP Referer headers.

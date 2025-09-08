@@ -1,0 +1,51 @@
+Summary of the Podomatic extractor (youtube-dl/youtube_dl/extractor/podomatic.py):
+
+- Purpose
+  - Implements an InfoExtractor for Podomatic to extract episode/audio information and direct MP3 URLs and return a standardized info dict for youtube-dl.
+
+- Key class
+  - PodomaticIE (inherits from InfoExtractor)
+    - IE_NAME = 'podomatic'
+    - _VALID_URL: Regular expression (verbose) that matches two Podomatic URL forms:
+      - https://<channel>.podomatic.com/entry/<id>
+      - https://www.podomatic.com/podcasts/<channel>/episodes/<id>
+      - Captures: proto (http/https), channel (or channel_2), and id
+    - _TESTS: Includes sample URLs with expected metadata:
+      - Two actual MP3 entries with id, uploader, uploader_id, title, duration, and md5
+      - A third URL in the pods/episodes form marked as only_matching to test URL pattern recognition
+
+- Core functionality (_real_extract)
+  - Parse URL with _VALID_URL to obtain:
+    - video_id = the captured id
+    - channel = either channel or channel_2 from the URL
+  - Build a JSON data URL for embedded parameters:
+    - {proto}://{channel}.podomatic.com/entry/embed_params/{video_id}?permalink=true&rtmp=0
+  - Download and parse JSON:
+    - data = json.loads(self._download_webpage(json_url, video_id, 'Downloading video info'))
+  - Resolve media URL (video_url):
+    - Prefer data['downloadLink'] if present and non-empty
+    - If not, construct video_url from data:
+      - data['streamer'] with 'rtmp' replaced by 'http'
+      - combine with data['mediaLocation']
+  - Extract metadata:
+    - uploader = data['podcast']
+    - title = data['title']
+    - thumbnail = data['imageLocation']
+    - duration: int_or_none(data.get('length'), 1000) (likely converts milliseconds to seconds)
+  - Return a dict with:
+    - id: video_id
+    - url: video_url
+    - title
+    - uploader
+    - uploader_id: channel
+    - thumbnail
+    - duration
+
+- Important implementation details
+  - Uses a robust URL regex to support both entry and podcast episode forms.
+  - Uses an embedded params JSON endpoint to fetch metadata and media URLs.
+  - Handles missing downloadLink by constructing a workaround URL from streamer and mediaLocation.
+  - Converts length (likely in milliseconds) to seconds via int_or_none(length, 1000).
+  - Returns only standard fields commonly used by youtube-dl (id, url, title, uploader, uploader_id, thumbnail, duration).
+
+Overall, the extractor focuses on retrieving Podomatic episode/audio data via an embedded JSON endpoint and producing a typical info dict for downstream processing.

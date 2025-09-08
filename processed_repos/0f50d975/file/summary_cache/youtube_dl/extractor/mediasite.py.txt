@@ -1,0 +1,92 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/mediasite.py
+
+Overview
+- Implements three extractors for Mediasite content:
+  - MediasiteIE: extracts individual Mediasite presentations (videos).
+  - MediasiteCatalogIE: extracts a catalog listing (as a playlist) of presentations under a given catalog.
+  - MediasiteNamedCatalogIE: resolves a named catalog to a MediasiteCatalogIE playlist.
+- Designed for youtube-dl and follows the common InfoExtractor pattern.
+
+Key classes and main functionality
+- MediasiteIE (InfoExtractor)
+  - URL pattern: matches Mediasite Play or Showcase Presentation URLs with a presentation id (id) captured in _ID_RE.
+  - _STREAM_TYPES mapping: associates Mediasite internal stream types with pretty format IDs:
+    - 0: 'video1' (main video)
+    - 2: 'slide'
+    - 3: 'presentation'
+    - 4: 'video2'
+    - 5: 'video3'
+  - _extract_urls(webpage): static helper that finds embedded Mediasite Play iframes in a page and returns their URLs.
+  - _real_extract(url):
+    - Unmasks the URL (unsmuggle_url) and parses the resource_id and optional query string.
+    - Downloads the page and follows to the redirect URL.
+    - Locates the PlayerService URL (service_path) from HTML, with a default path as fallback.
+    - Calls GetPlayerOptions via a JSON POST to fetch presentation data (including streams and video URLs).
+    - Builds the presentation structure:
+      - title = presentation['Title']
+      - description = presentation['Description']
+      - duration = presentation['Duration'] (converted with float_or_none, ms to seconds)
+      - timestamp = presentation['UnixTime'] (ms to seconds)
+      - streams: iterates presentation['Streams']; for each:
+        - stream_type identifies type; skip if missing.
+        - VideoUrls is a list of entries with Location (URL) and MediaType.
+        - If MediaType == 'SS': extract ISM formats via _extract_ism_formats.
+        - If MediaType == 'Dash': extract MPD formats via _extract_mpd_formats.
+        - Else: add a basic format dict with format_id, url, and extension derived from MimeType.
+        - stream_id derived from _STREAM_TYPES or a default type%u label.
+        - If stream_type != 0 (secondary streams): mark their formats with preference -1.
+        - If Stream has ThumbnailUrl: add to thumbnails with id and URL (relative to redirect_url) and preference (0 for main, -1 otherwise).
+      - Sort formats with _sort_formats.
+    - Returns a playlist-like dict:
+      - id: resource_id
+      - title: video title
+      - description, duration, timestamp
+      - formats: list of all formats
+      - thumbnails: list of thumbnails
+
+- MediasiteCatalogIE (InfoExtractor)
+  - _VALID_URL: matches Catalog/Full/URL patterns with a catalog_id (and optionally current_folder_id and root_dynamic_folder_id).
+  - _real_extract(url):
+    - Extracts mediasite_url, catalog_id, current_folder_id (default to catalog_id), root_dynamic_folder_id.
+    - Downloads the catalog page and tries to read an anti-forgery token (optional).
+    - If token found, reads the corresponding header name (default X-SOFO-AntiForgeryHeader) to use in the request.
+    - Prepares a JSON payload data with folder info and paging preferences (e.g., ItemsPerPage 1000, Sort by Date Descending).
+    - Posts the data to mediasite_url/Catalog/Data/GetPresentationsForFolder with appropriate headers (including anti-forgery header if present).
+    - catalog response contains PresentationDetailsList; builds a list of entries:
+      - For each video with an Id, creates a url_result pointing to MediasiteIE at /Play/{video_id}.
+      - Returns a playlist_result containing these entries, the catalog_id as the id, and the current folder name as the title.
+  - This extractor effectively builds a playlist of Mediasite presentations within a catalog/folder.
+
+- MediasiteNamedCatalogIE (InfoExtractor)
+  - _VALID_URL: matches catalogs by name: /Mediasite/Catalog/catalogs/<catalog_name>.
+  - _real_extract(url):
+    - Resolves mediasite_url and catalog_name from URL.
+    - Downloads the page and extracts CatalogId with a regex.
+    - Returns a url_result pointing to MediasiteCatalogIE at /Catalog/Full/{catalog_id}, with video_id set to catalog_id.
+  - This acts as a convenience to open a named catalog.
+
+Implementation details and noteworthy behavior
+- ID pattern: _ID_RE covers 32-34 hex chars or a GUID-like pattern with dashes, used to identify Mediasite resources.
+- _extract_urls allows embedding-based extraction by scanning for iframes containing Mediasite Play URLs.
+- Anti-forgery tokens (optional) in MediasiteCatalogIE:
+  - Tries to read AntiForgeryToken from the page; if present, uses a token header name (customizable, default X-SOFO-AntiForgeryHeader) to pass the token back in the POST request.
+  - This enables access to certain catalogs that require anti-forgery protection.
+- Stream handling:
+  - Supports multiple stream types and formats per stream:
+    - ISM (SS) formats via _extract_ism_formats.
+    - MPEG-DASH (Dash) formats via _extract_mpd_formats.
+    - Other direct video URLs are added with mime type to extension mapping via mimetype2ext.
+  - Streams with stream_type != 0 are deprioritized (preference -1) to prefer the main video stream for quality.
+  - Thumbnails are associated per stream and given a preference that prioritizes the main stream thumbnail.
+- Metadata extraction:
+  - Title, description, duration, and UnixTime (converted to timestamp) are pulled from the Presentation data.
+  - Duration and timestamp conversions use float_or_none with a 1000 divisor (indicating milliseconds to seconds conversion).
+- Error handling:
+  - If the presentation data is None, an ExtractorError is raised with a user-facing message (PlayerPresentationStatusMessage).
+- Testing support:
+  - _TESTS contain representative Mediasite URLs and expected info_dict results (id, ext, title, etc.), as well as cases for only_matching.
+
+In short
+- MediasiteIE fetches and parses a Mediasite presentation via the PlayerService, assembling all available video/audio/slide streams into a list of formats, with appropriate prioritization and thumbnails, and returns a structured video entry.
+- MediasiteCatalogIE and MediasiteNamedCatalogIE provide mechanisms to enumerate and access catalogs or named catalogs as playlists of Mediasite videos.
+- The code handles both direct video formats and streaming formats (ISM/MPD), anti-forgery protections in catalogs, and embeds logic to produce clean, usable youtube-dl results.

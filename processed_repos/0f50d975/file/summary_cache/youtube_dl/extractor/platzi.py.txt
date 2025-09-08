@@ -1,0 +1,75 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/platzi.py
+
+Purpose
+- Implement YouTube-DL extractors for Platzi:
+  - PlatziIE: extract individual lecture video (supports es and en domain variants).
+  - PlatziCourseIE: extract a course as a playlist, aggregating all lecture videos via transparent references to PlatziIE.
+- Includes a login flow to access protected content.
+
+Key classes and main responsibilities
+- PlatziBaseIE (InfoExtractor)
+  - Handles login to Platzi and provides a common base for Platzi extractors.
+  - _LOGIN_URL, _NETRC_MACHINE control login behavior and credentials sourcing.
+  - _real_initialize triggers login automatically when the extractor is used.
+  - _login implements the login sequence:
+    - Retrieves credentials via _get_login_info (netrc or other configured sources).
+    - Downloads login page, collects hidden inputs, fills in email and password.
+    - Submits the login form and checks if login succeeded by inspecting the redirect URL.
+    - If redirected back to login page, fetches a login error page and parses a JSON-like login object to surface specific errors (error, password, nonFields). Raises ExtractorError on failure.
+- PlatziIE (Platzi video extractor)
+  - _VALID_URL matches Platzi lesson URLs for es/en versions:
+    - platzi.com/clases/<slug>/<id>-<slug>
+    - courses.platzi.com/classes/<id>-<slug>
+  - _real_extract(url)
+    - Extracts lecture_id via _match_id.
+    - Downloads the lecture page and finds client_data in the page, supporting multiple possible patterns to extract the JSON payload.
+    - data = parsed JSON, from which material = data['initialState']['material'] is retrieved.
+    - title derived from material['description']['title']; description decoded from base64 content if present (cleaned HTML).
+    - Builds video formats:
+      - Iterates material['videos'] by server; for each server dict, checks for 'hls' and 'dash' URLs.
+      - For HLS: uses _extract_m3u8_formats with entry_protocol='m3u8_native', m3u8_id, and non-fatal note.
+      - For DASH: uses _extract_mpd_formats with mpd_id and non-fatal note.
+    - Sorts formats with _sort_formats.
+    - duration derived from material['duration'] via int_or_none with invscale=60 (conversion detail handled by utility; test expects 420).
+    - Returns a dict with id, title, description, duration, and formats.
+  - Notes:
+    - Requires Platzi login for protected content (tests mark as skipped without credentials).
+- PlatziCourseIE (Platzi course/playlist extractor)
+  - _VALID_URL matches course pages (es/en variants) and captures a course identifier.
+  - suitable(url) overridden to ensure it only handles URLs not suitable for PlatziIE (i.e., if PlatziIE is not suitable, then PlatziCourseIE handles them).
+  - _real_extract(url)
+    - course_name from _match_id.
+    - Downloads course page and extracts data payload via regex data = {...}; then props = data['initialProps'].
+    - Iterates through props['concepts'] (chapters) and their materials:
+      - Skips non-dict chapters/materials or non-video materials.
+      - For video materials, constructs video URL relative to page with urljoin.
+      - For each video, emits an entry dict with:
+        - _type: 'url_transparent'
+        - url: video_url
+        - title, id from material
+        - ie_key: PlatziIE (delegate to PlatziIE for actual extraction)
+        - chapter, chapter_number, chapter_id for playlist metadata
+    - Determines course_id and course_title from props['course'].
+    - Returns a playlist_result(entries, course_id, course_title)
+  - This approach delegates actual video extraction to PlatziIE, while aggregating all videos into a single playlist.
+
+Important implementation details
+- Login flow:
+  - Uses _download_webpage to fetch login page and _hidden_inputs to collect hidden fields.
+  - Posts form data via _request_webpage with urlencode_postdata.
+  - Detects successful login by URL change; otherwise reads a login error page and parses a JSON-like object to surface specific login errors.
+- Data extraction nuances:
+  - The video metadata is embedded in the page as a JSON-like payload (client_data or data blocks). The code uses multiple regex patterns to robustly extract the JSON payload.
+  - Description is sometimes stored as base64-encoded content inside the JSON; decoded with compat_b64decode and cleaned via clean_html.
+  - Duration is normalized using int_or_none with invscale; implemented to produce the expected duration in the tests.
+- Formats:
+  - Both HLS (m3u8) and DASH (mpd) formats are supported and added to the formats list.
+  - Non-fatal parsing is enabled for both HLS and DASH so that missing formats don’t fail the whole extraction.
+- URL handling and compatibility:
+  - Supports both Spanish Platzi site (platzi.com) and English course site (courses.platzi.com) by including both URL patterns in the validators.
+  - The course extractor uses a transparent URL approach to reuse PlatziIE for individual videos.
+- Tests:
+  - _TESTS sections show example URLs, expected IDs, titles, durations, and some required login (skip labels indicate credentials are required to run those tests).
+
+In short
+- This file provides a full Platzi video extractor with login support. It can fetch individual lecture videos (supporting both es/en domains) and build a course playlist by aggregating videos from a course page. It decodes embedded JSON data to obtain video formats, titles, descriptions, and durations, and it leverages PlatziIE for actual video extraction while PlatziCourseIE stitches together a playlist.

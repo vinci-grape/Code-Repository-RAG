@@ -1,0 +1,82 @@
+This file implements Instagram extractors for youtube-dl, focusing on both single posts and GraphQL-based playlists (users and hashtags).
+
+Main components
+
+1) InstagramIE (single post/video extractor)
+- Purpose: Extract metadata and media formats for a single Instagram post (post, IGTV, reel) given a URL like https://instagram.com/p/..., https://instagram.com/tv/..., or https://instagram.com/reel/....
+- URL pattern: _VALID_URL matches Instagram posts by id and type (p|tv|reel).
+- Core logic in _real_extract:
+  - Download the page and try to read Instagram GraphQL data from window._sharedData (and fall back to window.__additionalDataLoaded if needed).
+  - If media data is found, extract:
+    - video URL, dimensions (height/width), duration, timestamp, uploader info (uploader, uploader_id), title, description, thumbnail, like_count, comment_count, and comments.
+    - For posts with multiple media (edge_sidecar_to_children), build a playlist of individual video entries (id, url, title, thumbnail, duration, width, height, view_count) and return a playlist result if applicable.
+  - If no direct video URL was found, fall back to the page’s OG video URL.
+  - Build a formats list (typically a single mp4 format) and fill in remaining fields:
+    - id, title (defaulting to "Video by <uploader_id>"), description (with lowercase escaping if present), thumbnail (OG thumbnail or media thumbnail), duration, timestamp, uploader_id, uploader, like_count, comment_count, comments.
+  - If some fields are missing (e.g., uploader_id, description, thumbnail), attempt to extract from the page data or fall back to sensible defaults.
+- Helper: _extract_embed_url(webpage)
+  - Tries to extract an embedded Instagram post URL from the page (iframe src or instagram-media blockquote link).
+  - Used to identify embedded posts that should be processed as separate items.
+
+2) InstagramPlaylistIE (GraphQL-based playlist helper)
+- Purpose: Base class for building playlists by querying Instagram GraphQL endpoints (used for user timelines and hashtag timelines).
+- Key methods:
+  - _parse_graphql(webpage, item_id): Extracts a JSON data blob from the page (sharedData) containing GraphQL data.
+  - _extract_graphql(data, url): Core logic to iterate through GraphQL timeline pages and yield individual video entries as InstagramIE results.
+    - Uses the query_hash defined in subclasses to request timeline data from https://www.instagram.com/graphql/query/.
+    - Handles GIS headers (X-Instagram-GIS) with multiple templates to bypass anti-scraping measures. Caches the working GIS template in self._gis_tmpl.
+    - Tries multiple GIS templates (rhx_gis-based) with appropriate headers until a successful response or until all options fail.
+    - For each media edge:
+      - Skips non-video items; for valid GraphVideo nodes, constructs an info dict with:
+        - id (shortcode), video URL (via Instagram post URL), title, description, thumbnail, timestamp, like_count, comment_count, view_count, etc.
+      - Each entry is yielded as a URL result that points to InstagramIE for final per-item extraction.
+    - Pagination: Reads page_info.has_next_page and end_cursor to fetch subsequent pages until exhausted.
+- Real extract flow:
+  - _real_extract(url): Determine user or tag from URL, download the page, parse GraphQL data, set a cookie (ig_pr=1) to ensure accessible timelines, and return a playlist_result composed of the entries produced by _extract_graphql.
+
+3) InstagramUserIE (user timeline)
+- Subclass of InstagramPlaylistIE
+- _VALID_URL matches a user profile page.
+- Defines:
+  - _QUERY_HASH: GraphQL query hash for user timelines.
+  - _parse_timeline_from(data): Returns data['data']['user']['edge_owner_to_timeline_media'].
+  - _query_vars_for(data): Returns {'id': data['entry_data']['ProfilePage'][0]['graphql']['user']['id']}.
+- This enables fetching a user’s media timeline as a playlist of individual InstagramIE entries.
+
+4) InstagramTagIE (hashtag timeline)
+- Subclass of InstagramPlaylistIE
+- _VALID_URL matches a hashtag exploration URL.
+- Defines:
+  - _QUERY_HASH: GraphQL query hash for hashtag timelines.
+  - _parse_timeline_from(data): Returns data['data']['hashtag']['edge_hashtag_to_media'].
+  - _query_vars_for(data): Returns {'tag_name': data['entry_data']['TagPage'][0]['graphql']['hashtag']['name']}.
+- This enables fetching a hashtag timeline as a playlist of individual InstagramIE entries.
+
+Key implementation details and nuances
+
+- GraphQL data extraction:
+  - The code reads a GraphQL payload from the page (sharedData) and/or __additionalDataLoaded as a fallback to obtain media data for a post.
+  - For playlists, it issues GraphQL queries to Instagram’s endpoints with a dynamic set of GIS headers. It tries multiple GIS header formats (rhx_gis, csrf token, and User-Agent variants) to maximize compatibility.
+  - The code caches a working GIS template to speed up subsequent requests.
+
+- Handling different post types:
+  - Single-media posts: video_url, description, title, timestamp, uploader, etc. are filled from the GraphQL/media payload.
+  - Carousel posts (edge_sidecar_to_children): a playlist is produced with one entry per media item in the carousel.
+  - IGTV posts: treated similarly to standard posts, with appropriate fields (e.g., duration, timestamp, uploader).
+
+- Fallbacks:
+  - If GraphQL data is unavailable or incomplete, the extractor attempts to obtain the OG video URL from the page.
+  - If fields like uploader_id, description, or thumbnail are missing, it tries to extract them from other page data or leaves them as None.
+
+- Tests:
+  - The _TESTS include several scenarios:
+    - A typical post with all metadata and a md5 for the video.
+    - A post with missing description (ensuring graceful handling).
+    - A multi-video post (carousel) returning a playlist with multiple entries.
+    - An IGTV post.
+    - A few “only_matching” URLs to ensure the URL regex works for different types without triggering extraction.
+
+Overall, this module provides robust support for:
+- Extracting single Instagram posts (including IGTV and reels) with comprehensive metadata and a single MP4 format.
+- Building playlists for user timelines and hashtag timelines via Instagram GraphQL, yielding individual video entries that link back to the standard InstagramIE for per-item extraction.
+- Handling anti-scraping GIS headers by trying multiple header templates and caching the successful one for future requests.

@@ -1,0 +1,79 @@
+Summary of the file: ./youtube-dl/youtube_dl/extractor/allocine.py
+
+Purpose
+- Implement an InfoExtractor for Allocine, capable of extracting video information and formats from Allocine article/video/film pages.
+
+Main class
+- AllocineIE(InfoExtractor)
+
+Key components
+- _VALID_URL: Regex that matches Allocine article, video, or film pages and captures a numeric id. Supports URLs like:
+  - http(s)://www.allocine.fr/article/fichearticle_gen_carticle=123456.html
+  - http(s)://www.allocine.fr/video/player_gen_cmedia=123456.html
+  - http(s)://www.allocine.fr/video-123456/
+  - etc.
+
+- _TESTS: Several test cases with sample URLs, expected MD5 of video content, and info_dict fields to validate extraction (id, display_id, ext, title, description, thumbnail, duration, timestamp, upload_date, view_count).
+
+- _real_extract(self, url): Core extraction logic
+  - display_id = self._match_id(url): derive display_id from the URL using _VALID_URL.
+  - webpage = self._download_webpage(url, display_id): fetch page HTML.
+
+  - formats = [] and quality = qualities(['ld', 'md', 'hd']): prepare to collect video formats and a quality ranking.
+
+  - model extraction path (data-model attribute):
+    - model = self._html_search_regex(r'data-model="([^"]+)"', webpage, 'data model', default=None)
+    - If model exists:
+      - model_data = self._parse_json(model, display_id)
+      - video = model_data['videos'][0]
+      - title = video['title']
+      - For each video_url in video['sources'].values():
+        - video_id, format_id = url_basename(video_url).split('_')[:2]
+        - Append a format dict: {'format_id': format_id, 'quality': quality(format_id), 'url': video_url}
+      - duration = int_or_none(video.get('duration'))
+      - view_count = int_or_none(video.get('view_count'))
+      - timestamp = unified_timestamp(try_get(video, lambda x: x['added_at']['date'], compat_str))
+    - Note: video_id is derived from the last processed URL; used later as the id.
+
+  - non-model path (fallback using Allocine API):
+    - video_id = display_id
+    - media_data = self._download_json('http://www.allocine.fr/ws/AcVisiondataV5.ashx?media=%s' % video_id, display_id)
+    - title = remove_end(self._html_search_regex(r'(?s)<title>(.+?)</title>', webpage, 'title').strip(), ' - AlloCiné')
+    - Iterate media_data['video'].items():
+      - Consider only keys ending with 'Path'
+      - format_id = key[:-len('Path')]
+      - Append format dict: {'format_id': format_id, 'quality': quality(format_id), 'url': value}
+    - duration, view_count, timestamp = [None] * 3 (unknown in this path)
+
+  - self._sort_formats(formats): sort/normalize the collected formats.
+
+  - Return a dict with video metadata and formats:
+    - 'id': video_id
+    - 'display_id': display_id
+    - 'title': title
+    - 'description': self._og_search_description(webpage)
+    - 'thumbnail': self._og_search_thumbnail(webpage)
+    - 'duration', 'timestamp', 'view_count'
+    - 'formats': formats
+
+Important implementation details
+- Uses two parallel strategies:
+  - Primary: If Allocine provides a data-model JSON payload in a data-model attribute, extract the first video, read its title, and enumerate all sources (video URLs) to build formats. Each URL’s basename is parsed to derive video_id and format_id.
+  - Fallback: If no data-model is present, call an Allocine web service (AcVisiondataV5.ashx) to obtain video URLs (Path values) and derive formats from keys ending with Path.
+
+- Formats handling:
+  - In model path: uses video['sources'] with relative URLs, derives format_id from the URL basename, assigns a quality score using qualities(['ld','md','hd']).
+  - In non-model path: uses keys in media_data['video'] that end with Path to determine format_id and corresponding URL; also scores quality similarly.
+
+- Metadata extraction:
+  - title: modeled path uses video['title']; non-model path derives title from the HTML <title> tag and trims " - AlloCiné".
+  - description/thumbnail: pulled from OpenGraph tags via _og_search_description/_og_search_thumbnail.
+  - duration: parsed as int when available (model path); otherwise None.
+  - timestamp: parsed via unified_timestamp from added_at.date in the model path; otherwise None.
+  - view_count: parsed as int when available (model path); otherwise None.
+
+- Robustness:
+  - Graceful handling of missing model data vs. API-based data.
+  - Uses helper utilities: _download_webpage, _download_json, _parse_json, _html_search_regex, _og_search_description, _og_search_thumbnail, int_or_none, remove_end, unified_timestamp, try_get, url_basename, and _sort_formats.
+
+Overall, this extractor supports two paths for Allocine video data, builds a set of video formats with quality ranking, and returns standard video metadata compatible with youtube-dl’s extraction framework.

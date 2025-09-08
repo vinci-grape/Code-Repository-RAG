@@ -1,0 +1,43 @@
+- What it is: A YouTube-DL extractor named RestudyIE for the restudy.dk video site.
+
+- Class and inheritance:
+  - RestudyIE(InfoExtractor): Subclass of the common InfoExtractor used by youtube-dl.
+
+- URL pattern:
+  - _VALID_URL = r'https?://(?:(?:www|portal)\.)?restudy\.dk/video/[^/]+/id/(?P<id>[0-9]+)'
+  - Accepts http/https, optional www or portal subdomain, path /video/.../id/<digits>.
+  - Captures the video id as the group "id".
+
+- Tests (_TESTS):
+  - Test 1: URL https://www.restudy.dk/video/play/id/1637
+    - Expected info: id='1637', ext='flv', title='Leiden-frosteffekt',
+      description='Denne video er et eksperiment med flydende kvælstof.'
+    - Params: skip_download: True (RTMP download scenario)
+  - Test 2: URL https://portal.restudy.dk/video/leiden-frosteffekt/id/1637
+    - only_matching: True (ensures URL pattern matches portal subdomain)
+
+- Main functionality (_real_extract):
+  - Extracts video_id via self._match_id(url).
+  - Downloads the page: webpage = self._download_webpage(url, video_id).
+  - Retrieves metadata from OpenGraph tags:
+    - title = self._og_search_title(webpage).strip()
+    - description = self._og_search_description(webpage).strip()
+  - Retrieves video formats from a SMIL manifest:
+    - Builds SMIL URL: https://cdn.portal.restudy.dk/dynamic/themes/front/awsmedia/SmilDirectory/video_<video_id>.xml
+    - formats = self._extract_smil_formats(..., video_id)
+    - Sorts formats: self._sort_formats(formats)
+  - Returns a dictionary with:
+    - id: video_id
+    - title: title
+    - description: description
+    - formats: formats
+
+- Key implementation details:
+  - Uses a SMIL XML manifest to derive available formats (via _extract_smil_formats) rather than direct video URLs.
+  - OpenGraph-based metadata extraction for title and description.
+  - Flexible URL handling for both www.restudy.dk and portal.restudy.dk subdomains.
+  - The returned metadata structure aligns with youtube-dl expectations: id, title, description, formats.
+  - Minimal error handling shown; relies on SMIL manifest existence and OG tags.
+
+- Overall summary:
+  - RestudyIE is a lightweight extractor that identifies Restudy video pages by id, fetches page metadata from OpenGraph, resolves video formats from a SMIL manifest hosted on the portal CDN, and returns a standard youtube-dl info dictionary with id, title, description, and a sorted list of formats.

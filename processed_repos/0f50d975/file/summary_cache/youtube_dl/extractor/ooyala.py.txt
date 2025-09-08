@@ -1,0 +1,91 @@
+Concise summary of file: ./youtube-dl/youtube_dl/extractor/ooyala.py
+
+Overview
+- Implements YouTube-DL extractors for Ooyala video content.
+- Core logic is in OoyalaBaseIE, with two concrete extractors:
+  - OoyalaIE for standard Ooyala embed/video pages.
+  - OoyalaExternalIE for externalId-based Ooyala content.
+
+Main classes and responsibilities
+- OoyalaBaseIE (InfoExtractor)
+  - Handles the common flow to fetch and decode Ooyala content.
+  - _extract(content_tree_url, video_id, domain, supportedformats, embed_token)
+    - Downloads content_tree JSON and extracts metadata:
+      - embed_code, asset_pcode (or embed_code as fallback), title, description, thumbnail, duration, captions.
+    - Calls SAS authorization endpoint to obtain authorization_data for the embed_code.
+      - Endpoint: http://player.ooyala.com/sas/player_api/v2/authorization/embed_code/{pcode}/{embed_code}
+      - Query parameters: domain, supportedFormats, embedToken
+      - Returns authorization_data for the embed_code (or error if not authorized).
+    - Builds formats by iterating over streams in authorization_data (or fallback stream if not provided):
+      - Base URL for default HLS stream when no streams are present:
+        http://player.ooyala.com/hls/player/all/{embed_code}.m3u8
+      - Each stream contains a URL data field (base64-encoded). Decodes to the real media URL.
+      - Determines format type by delivery_type or file extension and uses appropriate extractors:
+        - hls / m3u8 -> _extract_m3u8_formats (with normalization of URL path)
+        - hds / f4m -> _extract_f4m_formats
+        - dash / mpd -> _extract_mpd_formats
+        - smooth -> _extract_ism_formats
+        - smil -> _extract_smil_formats
+        - else -> adds a basic format dict with url, ext, codecs, format_id, width/height, bitrates, fps
+      - Safely handles missing data with try_get, compat_b64decode, and determines extensions with determine_ext.
+    - If no formats found and authorization did not succeed, raises ExtractorError with message from auth_data.
+    - Sorts formats with _sort_formats.
+    - Extracts subtitles from metadata.closed_captions_vtt.captions if available.
+    - Returns a dict with id (embed_code), title, description, thumbnail, duration (ms converted to seconds), subtitles, and formats.
+- OoyalaIE (OoyalaBaseIE)
+  - _VALID_URL matches standard Ooyala embed or embedded content URLs.
+  - _TESTS contains several examples demonstrating various scenarios (regular mp4, ipad-only, SAS-authenticated, and an empty stream edge case).
+  - _real_extract(url)
+    - Uses unsmuggle_url to extract potential domain, supportedformats, embed_token.
+    - Extracts embed_code from URL.
+    - Builds content_tree_url using _CONTENT_TREE_BASE and content_tree embed_code path.
+    - Calls _extract with the content_tree_url, embed_code, and any smuggled options.
+  - Helpers:
+    - _url_for_embed_code(embed_code): builds player.js URL for a given embed code.
+    - _build_url_result(embed_code): builds a standard Youtube-DL url_result for the embed code URL.
+- OoyalaExternalIE (OoyalaBaseIE)
+  - _VALID_URL matches externalId-based Ooyala URLs and a pattern with partner_id, video id, and pcode.
+  - _TEST demonstrates an externalId-based example.
+  - _real_extract(url)
+    - Parses partner_id, video_id, pcode from the URL via regex.
+    - Builds content_tree_url with _CONTENT_TREE_BASE external_id path.
+    - Calls _extract(content_tree_url, video_id) to process as in OoyalaBaseIE.
+
+Key implementation details
+- Endpoints and constants:
+  - _PLAYER_BASE = http://player.ooyala.com/
+  - _CONTENT_TREE_BASE = http://player.ooyala.com/player_api/v1/content_tree/
+  - _AUTHORIZATION_URL_TEMPLATE = authorization endpoint for embed_code
+- Authorization flow:
+  - Fetches content metadata to obtain embed_code and asset_pcode.
+  - Requests authorization data with domain, supported formats (default: mp4,rtmp,...) and embedToken.
+  - authorization_data contains a per-embed_code entry with streams describing delivery_type and encoded URLs.
+- URL decoding:
+  - Stream URL data is base64-encoded in stream['url']['data']; decode with compat_b64decode and decode to utf-8 to obtain real media URL.
+- Format extraction:
+  - Supports multiple streaming protocols/formats via YouTube-DL helpers:
+    - HLS: _extract_m3u8_formats
+    - HDS: _extract_f4m_formats
+    - DASH: _extract_mpd_formats
+    - Smooth Streaming: _extract_ism_formats
+    - SMIL: _extract_smil_formats
+  - If a stream has an unknown type, falls back to a basic format dict including vcodec/vbr/width/height/fps when available.
+  - Normalizes HLS URLs by replacing /ip(ad|hone)/ with /all/ to ensure proper manifest access.
+- Error handling:
+  - If no formats discovered and authorization indicates not authorized, raises ExtractorError with the message from auth_data.
+- Subtitles:
+  - Extracts VTT captions from metadata['closed_captions_vtt']['captions'] if available, mapping language codes to a list of subtitle dicts with 'url'.
+- Metadata handling:
+  - title, description, thumbnail_image or promo_image, and duration are pulled from content_tree metadata.
+  - Duration is converted from milliseconds to seconds using float_or_none(value, 1000).
+- SMUGGLED URL support:
+  - OoyalaIE._real_extract uses unsmuggle_url to retrieve optional domain, supportedformats, and embed_token when the URL includes smuggled data.
+  - External extractor similarly uses the standard processing after extracting IDs.
+
+Usage flow (high level)
+- For standard Ooyala videos (OoyalaIE):
+  - URL -> extract embed_code -> fetch content_tree -> authorize -> decode and assemble formats/subtitles -> return media info dict.
+- For externalId-based videos (OoyalaExternalIE):
+  - URL with externalId and pcode -> derive content_tree_url -> same extraction path as above.
+
+This file provides a complete integration for Ooyala-hosted videos by leveraging the SAS authorization flow and supporting a wide range of streaming formats, with robust handling of metadata, subtitles, and errors.

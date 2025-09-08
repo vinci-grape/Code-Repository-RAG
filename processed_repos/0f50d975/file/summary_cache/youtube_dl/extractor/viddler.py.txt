@@ -1,0 +1,90 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/viddler.py
+
+Purpose
+- Implement a YouTube-DL extractor for Viddler videos. Retrieves video metadata and multiple playback formats via Viddler API and returns a structured InfoDict compatible with youtube-dl.
+
+Key components
+- Class: ViddlerIE(InfoExtractor)
+  - Inherits common extraction utilities from youtube_dl.
+
+- URL matching (_VALID_URL)
+  - Regex: r'https?://(?:www\.)?viddler\.com/(?:v|embed|player)/(?P<id>[a-z0-9]+)(?:.+?\bsecret=(\d+))?'
+  - Captures:
+    - id: the Viddler video identifier
+    - secret: optional numeric secret parameter for protected videos
+
+- Tests (_TESTS)
+  - Four test cases demonstrating:
+    - Regular videos with various metadata (title, duration, uploader, etc.)
+    - A video with secret parameter (secret-protected), skipped download for the test as needed
+  - Each test asserts expected fields like id, ext, title, description, uploader, timestamp, view_count, comment_count, and categories.
+
+Main extraction flow (_real_extract)
+- Parse identifiers
+  - Extract video_id and secret from the URL using the _VALID_URL regex groups.
+
+- Prepare API request
+  - Build query with:
+    - video_id
+    - key: v0vhrt7bg2xq1vyxhkct (API key)
+    - secret (if present)
+  - Call API: http://api.viddler.com/api/v2/viddler.videos.getPlaybackDetails.json
+  - Include Referer header set to the original URL
+  - Access data['video'] from the JSON response
+
+- Build formats
+  - Iterate over data['files'] and skip entries whose status is not 'ready' (default to 'ready' if absent).
+  - For each file:
+    - format_id: file.get('profile_id') or file['profile_name']
+    - f fields:
+      - format_id
+      - format_note: file['profile_name']
+      - url: proto-relative of file['url'] (self._proto_relative_url)
+      - width, height: int_or_none(...)
+      - filesize: int_or_none(...)
+      - ext: file.get('ext')
+      - source_preference: -1 (default baseline)
+  - Add additional variants if present:
+    - CDN variant if file['cdn_url'] exists
+      - Copy base f
+      - url: proto-relative of cdn_url with http: scheme
+      - format_id: base format_id + '-cdn'
+      - source_preference: 1 (higher priority)
+    - HTML5 variant if file['html5_video_source'] exists
+      - Copy base f
+      - url: proto-relative of html5_video_source
+      - format_id: base format_id + '-html5'
+      - source_preference: 0
+  - After collecting, call self._sort_formats(formats) to order by quality/resolution/preference
+
+- Categories
+  - Extract tags: [t.get('text') for t in data.get('tags', []) if 'text' in t]
+
+- Return video info
+  - id: video_id
+  - title: data['title']
+  - formats: formats
+  - description: data.get('description')
+  - timestamp: int_or_none(data.get('upload_time'))
+  - thumbnail: proto-relative URL of data.get('thumbnail_url')
+  - uploader: data.get('author')
+  - duration: float_or_none(data.get('length'))
+  - view_count: int_or_none(data.get('view_count'))
+  - comment_count: int_or_none(data.get('comment_count'))
+  - categories: categories
+
+Important implementation details
+- Utility helpers used:
+  - int_or_none, float_or_none to safely parse numeric fields.
+  - self._proto_relative_url to convert relative URLs to absolute URLs.
+- Robust handling of optional fields:
+  - secret parameter support for protected videos.
+  - Optional CDN and HTML5 sources per format.
+  - Tags may be absent; categories gracefully becomes an empty list.
+- Metadata extraction aligns with tests:
+  - Exposes id, title, description, uploader, timestamp/upload_date, duration, thumbnail, view_count, comment_count, and categories.
+- API interaction:
+  - Uses a dedicated Viddler API endpoint for playback details with a static API key and optional secret.
+  - Sets Referer header to the original page URL to mimic a browser context.
+
+Overall, the extractor fetches playback details from Viddler, constructs a comprehensive set of video formats (standard, CDN, and HTML5 variants when available), sorts them, and returns a detailed metadata dictionary suitable for downstream processing by youtube-dl.

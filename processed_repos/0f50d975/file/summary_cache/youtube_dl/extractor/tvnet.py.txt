@@ -1,0 +1,72 @@
+Concise summary of youtube-dl extractor file: ./youtube-dl/youtube_dl/extractor/tvnet.py
+
+Purpose
+- Implements TVNetIE, an extractor for TVNet.vn (and subdomains) that provides access to videos, audio (radio), and live channels from the TVNet network.
+
+Main functionality
+- Parses TVNet URLs and extracts a unique video_id.
+- Downloads the page to obtain metadata (title, thumbnail, view count) and a data-file URL that contains stream information.
+- Fetches a JSON data file listing one or more stream sources (HLS/m3u8 URLs).
+- Builds a list of available formats using HLS streams, handling live vs non-live differences.
+- Applies special handling for radio streams (audio-only) and live streams (live title formatting).
+- Returns a structured info dictionary including id, title, thumbnail, is_live, view_count, and formats.
+
+Key components
+
+- Class: TVNetIE(InfoExtractor)
+  - _VALID_URL: Regexp to match TVNet URLs and capture the numeric id.
+  - _TESTS: Multiple test cases covering:
+    - Video (static)
+    - Audio (radio)
+    - Static video with skip_download
+    - Live video
+    - Live radio
+    - A path that should be only_matching (not extracted)
+  - _real_extract(self, url): Core extraction logic
+
+Core extraction flow (_real_extract)
+- video_id = self._match_id(url): extracts the numeric id from the URL.
+- webpage = self._download_webpage(url, video_id): fetches the page HTML.
+- title extraction and cleaning:
+  - Tries OpenGraph title, then HTML meta title, then <title> tag.
+  - Cleans up trailing " - TV Net" suffix.
+- is_live determination based on URL path:
+  - '/video/' or '/radio/' -> is_live = False
+  - '/kenh-truyen-hinh/' -> is_live = True
+  - otherwise is_live = None
+- data_file extraction:
+  - Finds data-file attribute via regex, unescapes the URL.
+- Stream retrieval:
+  - Initialize empty stream_urls set and formats list.
+  - For each stream entry in the JSON at data_file:
+    - Skip non-dict entries or duplicates.
+    - Extract stream_url from stream['url'].
+    - Append available formats using
+      self._extract_m3u8_formats(stream_url, video_id, 'mp4',
+                                entry_protocol='m3u8' if is_live else 'm3u8_native',
+                                m3u8_id='hls', fatal=False)
+  - Sort formats with self._sort_formats(formats).
+- Radio-specific handling:
+  - If title starts with 'VOV' (radio), adjust formats to audio-only:
+    - ext = 'm4a'
+    - vcodec = 'none'
+- Thumbnail extraction:
+  - First try OpenGraph thumbnail, else look for data-image attribute via regex and unescape HTML.
+- Live title formatting:
+  - If is_live, title = self._live_title(title)
+- View count:
+  - Attempts to extract a numeric view count from a div with a class containing 'view-count'.
+  - Uses int_or_none to convert to integer if found.
+- Return dictionary:
+  - id, title, thumbnail, is_live, view_count, formats
+
+Important implementation details
+- HLS formats: Uses _extract_m3u8_formats with:
+  - entry_protocol = 'm3u8' for live streams, otherwise 'm3u8_native'
+  - m3u8_id = 'hls'
+  - fatal = False to avoid failing if a stream cannot be parsed
+- Data source: Relies on a JSON file pointed to by a data-file attribute on the page, which contains a list of stream sources.
+- Title normalization and live handling: Ensures user-friendly titles for live streams and consistent formatting.
+- Radio optimization: Detects VOV radio streams and constrains formats to audio-only with m4a extension.
+
+Overall, TVNetIE is a targeted extractor that handles TVNet’s video, radio, and live streams by locating a data-file with stream URLs, constructing formats from HLS sources, and gathering metadata (title, thumbnail, view count) for both on-demand and live content.

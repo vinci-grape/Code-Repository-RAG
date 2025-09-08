@@ -1,0 +1,34 @@
+Summary of ./youtube-dl/youtube_dl/extractor/krasview.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for KrasView video pages (krasview.ru), handling both direct video and embed pages.
+
+- Main components
+  - KrasViewIE(InfoExtractor): The extractor class.
+  - _VALID_URL: Regex to match KrasView video or embed URLs, capturing the numeric video id.
+  - _TEST: A sample test case with expected metadata and a note that downloading is skipped in CI.
+
+- Core extraction flow (_real_extract)
+  - Extract video_id from the URL using _match_id.
+  - Download the page content with _download_webpage.
+  - Locate a JavaScript object embedded in the page via a pattern like video_Init({...}). Capture the object string.
+  - Convert the embedded JavaScript object string to valid JSON using js_to_json, then parse with json.loads to obtain flashvars.
+  - video_url: obtain from flashvars['url'].
+  - title: prefer OpenGraph title via _og_search_title.
+  - description: prefer OpenGraph description via _og_search_description (default None if missing).
+  - thumbnail: use flashvars['image'] if present; otherwise fall back to OpenGraph thumbnail via _og_search_thumbnail.
+  - duration: parse flashvars['duration'] with int_or_none.
+  - width/height: obtain from OpenGraph video properties (video:width, video:height) using _og_search_property, then convert to int with int_or_none.
+  - Return a dict with: id, url, title, description, thumbnail, duration, width, height.
+
+- Important implementation details
+  - The code relies on a JavaScript-embedded object (video_Init({...})) on the page to retrieve the streaming URL and metadata, which is decoded by converting the JS object to JSON.
+  - Fallbacks are used for robustness: thumbnail can come from flashvars or OpenGraph, and description/width/height use OpenGraph with sensible defaults.
+  - Returns a standard info dictionary suitable for youtube-dl, with ext inferred as mp4 in tests and the main URL set to video_url.
+  - The _TEST entry demonstrates expected metadata for a sample KrasView video, including an MD5 of the downloaded video (for CI test) and a note to skip download in Travis CI.
+
+- Key methods/utilities used
+  - _download_webpage, _match_id, _search_regex, _og_search_title, _og_search_description, _og_search_thumbnail, _og_search_property
+  - json.loads, js_to_json, int_or_none
+
+In short, KrasViewIE extracts video metadata and the actual video URL from KrasView’s pages by decoding a hidden flashvars object and using OpenGraph data as fallbacks, returning a complete info dictionary for the video.

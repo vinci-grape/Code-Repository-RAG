@@ -1,0 +1,61 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/pinterest.py
+
+Purpose
+- Implement Pinterest extractors for youtube-dl: single Pin videos and board/collection playlists, using Pinterest’s internal JSON API.
+
+Key classes
+- PinterestBaseIE (InfoExtractor)
+  - Common utilities and data extraction used by both PinterestIE and PinterestCollectionIE.
+  - _call_api(resource, video_id, options): fetches JSON metadata from Pinterest API endpoint /resource/{resource}Resource/get/ with encoded options.
+  - _extract_video(data, extract_formats=True): core converter that builds a standard video info dict from Pinterest data.
+    - Extracts id, title, description, duration, timestamp, uploader info, counts (reposts, comments), categories, tags.
+    - Builds thumbnails from data.images.
+    - Builds formats from data.videos.video_list; supports both direct URLs and HLS (via _extract_m3u8_formats) with proper format_id, width, height, and duration.
+    - Sorts formats by preferences (height, width, tbr, format_id).
+    - Returns a dict with id, title, description, duration, timestamp, thumbnails, uploader/uploader_id, counts, categories, tags, formats, and extractor_key.
+- PinterestIE (single Pin)
+  - _VALID_URL: matches Pinterest pin URLs like https://www.pinterest.com/pin/NNN/
+  - _real_extract(url): extracts video_id, calls Pinterest API with resource "Pin" and appropriate field_set_key, retrieves data, then delegates to _extract_video for the actual media metadata.
+- PinterestCollectionIE (board/collection)
+  - _VALID_URL: matches user/board URLs like https://www.pinterest.com/<user>/<board>/
+  - Suitable override: only used when PinterestIE is not suitable for the URL.
+  - _real_extract(url):
+    - Parses username and slug from URL.
+    - Calls Board API to fetch board data and get board_id.
+    - Iterates through BoardFeed (paginated) to collect pins:
+      - For each item of type 'pin', extracts video data via _extract_video(item) (loads full details for each pin).
+    - Returns a playlist_result with entries, playlist_id (board_id), and playlist_title (board name).
+
+Important implementation details
+- API interaction
+  - All Pinterest data is fetched via a generic _call_api method that calls:
+    https://www.pinterest.com/resource/{Resource}Resource/get/?data=...
+  - The data payload is a JSON-encoded object with the 'options' key (and other fields like id/slug/username as needed).
+- Video/formats handling
+  - Formats are built from data['videos']['video_list'].
+  - Deduplication of URLs; skips non-dict entries or repeated URLs.
+  - If a format is HLS (format_id contains 'hls') or the file extension is m3u8, _extract_m3u8_formats is used (entry_protocol='m3u8_native', fatal=False).
+  - Otherwise, a standard format dict with url, format_id, width, height, duration is added.
+  - Duration is parsed as seconds (with scale handling as needed).
+  - Formats are sorted with preference: height, width, tbr, format_id.
+- Metadata extraction
+  - Title fallbacks: data['title'] → data['grid_title'] → id.
+  - Description fallbacks: data['description'] → data['description_html'] → data['seo_description'].
+  - Timestamp parsed via unified_timestamp on data['created_at'].
+  - Uploader extraction via closeup_attribution.full_name and closeup_attribution.id when available.
+  - Repost count, comment count, and hashtags are pulled with safe int/try_get handling.
+  - Categories from data['pin_join']['visual_annotation'] and tags from data['hashtags'].
+- Thumbnails
+  - Images are expected as a dict; each entry contributes a thumbnail dict with url, width, and height.
+- Boards/collections
+  - BoardFeed is paginated with bookmarks; board_id is used as playlist_id, and board['name'] as playlist_title.
+  - There are commented-out alternatives suggesting pins could be resolved to individual pin URLs if needed, but the implemented path directly extracts video data from pins.
+- Domain coverage
+  - Base URL regex supports a broad set of Pinterest domains (com, fr, de, ch, jp, cl, ca, it, co.uk, nz, ru, com.au, at, pt, co.kr, es, com.mx, dk, ph, th, com.uy, co, nl, info, kr, ie, vn, com.vn, ec, mx, in, pe, co.at, hu, co.in, co.nz, id, com.ec, com.py, tw, be, uk, com.bo, com.pe).
+
+Tests
+- PinterestIE test: validates a pin with expected id, extension, title, description, duration, timestamp, uploader, and counts.
+- PinterestCollectionIE tests: verify board-based playlists with id/title and counts/mincounts, and skip certain tests if not applicable.
+
+In short
+- The file provides a Pinterest extractor framework that communicates with Pinterest’s API to fetch pin and board data, builds a standard video info dictionary (with robust handling of formats, thumbnails, and metadata), and exposes two extractors: one for individual pins and another for boards/collections as playlists.

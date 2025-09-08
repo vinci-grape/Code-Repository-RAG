@@ -1,0 +1,82 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/khanacademy.py
+
+Overview
+- Implements Khan Academy extractors for youtube-dl:
+  - KhanAcademyIE: extracts individual Khan Academy video pages.
+  - KhanAcademyUnitIE: extracts a unit/playlist of videos within a Khan Academy unit.
+  - Both inherit from KhanAcademyBaseIE, which handles core data retrieval and video wrapping.
+
+Key classes and main functionality
+- KhanAcademyBaseIE(InfoExtractor)
+  - _VALID_URL_TEMPL: Core regex template to match Khan Academy URLs, with a dynamic path depth.
+  - _parse_video(video): Converts a Khan video object into a common youtube-dl format:
+    - Returns a dict with _type 'url_transparent', url from video['youtubeId'] (YouTube video), id (video slug), title, thumbnail, duration, description, and ie_key set to 'Youtube'.
+  - _real_extract(url):
+    - Extracts display_id from URL.
+    - Calls Khan Academy’s internal GraphQL API at https://www.khanacademy.org/api/internal/graphql with:
+      - hash: 1604303425
+      - variables: JSON string containing path (display_id) and queryParams (empty)
+    - Retrieves contentJson from the response, then accesses componentProps.
+    - Delegates further parsing to self._parse_component_props(component_props).
+
+- KhanAcademyIE(KhanAcademyBaseIE)
+  - IE_NAME = 'khanacademy'
+  - _VALID_URL: Uses _VALID_URL_TEMPL with depth '4' and 'v/' to target individual video pages.
+  - _TEST: Sample test case for a Khan Academy cryptography video, checking id, title, duration, uploader, timestamps, license, and that it reuses YouTube as the video extractor (add_ie: ['Youtube']).
+  - _parse_component_props(component_props):
+    - video = component_props['tutorialPageData']['contentModel']
+    - info = self._parse_video(video)  # base video fields
+    - author_names = video.get('authorNames')
+    - Adds:
+      - 'uploader': comma-joined author names (if present)
+      - 'timestamp': parsed from video['dateAdded'] via parse_iso8601
+      - 'license': video['kaUserLicense']
+    - Returns the enriched info dictionary.
+
+- KhanAcademyUnitIE(KhanAcademyBaseIE)
+  - IE_NAME = 'khanacademy:unit'
+  - _VALID_URL: Uses _VALID_URL_TEMPL with depth '2' and empty suffix, targeting unit pages; allows optional query/hash fragments at end.
+  - _TEST: Sample test for a unit page, expecting a playlist with at least 31 videos and basic unit title/description/id.
+  - _parse_component_props(component_props):
+    - Builds a playlist out of the unit’s tutorials:
+      - curation = component_props['curation']
+      - Retrieves tutorials via try_get from curation['tabs'][0]['modules'][0]['tutorials'] (list), defaults to [] if missing.
+      - For each tutorial, constructs a chapter_info dict with:
+        - 'chapter': tutorial.get('title')
+        - 'chapter_number': index in sequence (1-based)
+        - 'chapter_id': tutorial.get('id')
+      - For each content_item in tutorial['contentItems'] (if present) with kind 'Video':
+        - info = self._parse_video(content_item)
+        - info.update(chapter_info) to attach chapter metadata
+        - Append to entries
+    - Returns a playlist_result(entries, title, description) from curation and the unit description.
+
+Important implementation details
+- Data retrieval:
+  - Both extractors fetch contentJson via Khan Academy’s internal GraphQL API (https://www.khanacademy.org/api/internal/graphql) using a fixed hash and a variables payload containing the path and an empty queryParams string.
+  - The response structure is used to obtain componentProps, which is then passed to specialized parsers.
+- Video wrapping:
+  - The base _parse_video maps Khan Academy video data to a YouTube-backed entry by returning _type 'url_transparent' with ie_key 'Youtube'. This defers actual decoding/handling to the YouTube extractor.
+- Field extraction:
+  - Common video fields: id, title, description, thumbnail, duration (int_or_none), and YouTube URL (via youtubeId).
+  - Khan Academy-specific fields:
+    - uploader: built from authorNames array if present.
+    - timestamp: parsed from dateAdded with parse_iso8601.
+    - license: kaUserLicense value from content data.
+- Unit/playlist extraction:
+  - Navigates a nested structure (curation -> tabs -> modules -> tutorials -> contentItems) to collect all Video items.
+  - Each video gets attached chapter metadata (chapter title, number, and id).
+  - The final result for units uses playlist_result with a unit title and description as metadata.
+
+URL pattern and templates
+- Base URL template: r'https?://(?:www\.)?khanacademy\.org/(?P<id>(?:[^/]+/){%s}%s[^?#/&]+)'
+- KhanAcademyIE uses placeholders ('4', 'v/') to target individual video pages within a specific path depth.
+- KhanAcademyUnitIE uses ('2', '') to target unit pages and allows trailing segments like query strings or fragments.
+
+Summary of data produced
+- KhanAcademyIE yields a single YouTube-backed video entry with metadata:
+  - id, title, description, duration, uploader, timestamp, license, and a YouTube URL (via _parse_video).
+- KhanAcademyUnitIE yields a playlist consisting of multiple video entries, each annotated with chapter info (chapter, chapter_number, chapter_id) and the standard video metadata, along with unit-level title/description metadata.
+
+Tests
+- The _TEST blocks demonstrate expected outputs, including a concrete example where the YouTube video is used via add_ie: ['Youtube'], and a unit test that returns a playlist with multiple videos and unit-level metadata.

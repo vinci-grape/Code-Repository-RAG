@@ -1,0 +1,30 @@
+Concise summary of the code
+
+- Purpose
+  - Implement a YouTube-DL extractor for Freespeech.org story pages that embeds a YouTube video. It retrieves the embedded YouTube URL from the Freespeech page and delegates extraction to the YouTube extractor.
+
+- Key class
+  - FreespeechIE (inherits from InfoExtractor)
+    - IE_NAME: 'freespeech.org'
+    - _VALID_URL: Matches Freespeech story pages, capturing the story id from URLs like https://www.freespeech.org/stories/...
+    - _TEST: Provides a test case asserting that a Freespeech story page resolves to a YouTube video with specific metadata (id, title, description, upload_date, uploader, etc.)
+
+- Core functionality (_real_extract)
+  - display_id = self._match_id(url)
+    - Extracts the story id from the URL using the regex.
+  - webpage = self._download_webpage(url, display_id)
+    - Downloads the HTML of the Freespeech story page.
+  - youtube_url = self._search_regex(r'data-video-url="([^"]+)"', webpage, 'youtube url')
+    - Parses the page HTML to find the embedded video URL stored in a data-video-url attribute.
+  - return self.url_result(youtube_url, YoutubeIE.ie_key())
+    - Returns a URL result that points to the YouTube URL, delegating actual video extraction to the YoutubeIE (YoutubeIE.ie_key()).
+
+- Implementation details
+  - The extractor does not directly parse video formats from Freespeech; instead, it relies on the embedded YouTube URL found in the page.
+  - It uses YoutubeIE to perform the actual extraction of video metadata and formats.
+  - The _TEST indicates that the embedded video corresponds to a YouTube video with id waRk6IPqyWM and that the expected extension is mp4, with metadata for title, description, upload date, and uploader information.
+
+- Overall flow
+  - User provides a Freespeech story URL.
+  - FreespeechIE downloads the story page and extracts the data-video-url attribute.
+  - It returns a YouTube URL result, which is then processed by YoutubeIE to produce the final video information and download URLs.

@@ -1,0 +1,29 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/bibeltv.py
+
+- Purpose: Implement a YouTube-DL extractor for BibelTV mediathek videos. The actual media is served via Brightcove, so this extractor delegates to Brightcove’s extractor.
+
+- Class: BibelTVIE (subclass of InfoExtractor)
+
+- URL pattern (_VALID_URL):
+  - Matches bibeltv.de mediathek video pages.
+  - Supports both with and without the crn/ segment: https://www.bibeltv.de/mediathek/videos/(crn/)?<id>.
+  - Captures the numeric id as the group 'id'.
+
+- Constants:
+  - BRIGHTCOVE_URL_TEMPLATE: The Brightcove player URL template used to load the video.
+    - http://players.brightcove.net/5840105145001/default_default/index.html?videoId=ref:%s
+  - The final video URL is formed by substituting the captured numeric id into the template as videoId=ref:<id>.
+
+- _real_extract(self, url):
+  - Extracts the numeric CRN id via self._match_id(url).
+  - Constructs the Brightcove URL using the template and the id: BRIGHTCOVE_URL_TEMPLATE % crn_id.
+  - Returns a url_result pointing to the BrightcoveNew extractor with that URL. This delegates the actual video extraction to Brightcove.
+
+- _TESTS:
+  - Test 1: Valid BibelTV URL, expects an mp4, and a detailed info_dict including id as 'ref:329703', title, description, timestamp, uploader_id, and upload_date.
+  - Test 2: A crn/ URL with only_matching set to True (verifies URL pattern matching without asserting extraction results).
+
+Key implementation details:
+- The extractor does not parse video metadata itself; it simply maps BibelTV video pages to Brightcove’s player using a ref:id (e.g., ref:329703) and delegates to BrightcoveNew for metadata and media extraction.
+- The _match_id method returns the numeric id, which is then prefixed with 'ref:' in the final videoId sent to Brightcove.
+- This mirrors how BibelTV hosts videos on Brightcove, centralizing the heavy lifting to the Brightcove extractor.

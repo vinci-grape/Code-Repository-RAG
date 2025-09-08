@@ -1,0 +1,31 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/lemonde.py
+
+- Purpose
+  - Implement an InfoExtractor for lemonde.fr video pages. It detects Lemonde video pages, and if the page contains a Digiteka delivery URL, delegates extraction to the Digiteka extractor; otherwise falls back to the generic extractor.
+
+- Key class
+  - LemondeIE(InfoExtractor)
+
+- Main API details
+  - _VALID_URL: Regex that matches Lemonde video pages and captures an id from the path ending with .html. This is used to identify the page and provide a display_id.
+  - _TESTS: Test cases to verify behavior
+    - First test: a Lemonde video page with a Digiteka/HTML5 video, expects mp4, duration, uploader_id, etc., and an MD5 for the video. Uses standard extraction path via Digiteka.
+    - Second test: a Lemonde page with a standard iframe embed; expects metadata but uses skip_download to avoid downloading in tests; extraction is via Digiteka when available or Generic otherwise.
+    - Third and fourth tests: URLs that should match the extractor pattern but are not meant to be fully extracted in tests (only_matching).
+
+- Core logic (_real_extract)
+  - Determine display_id from the URL using _match_id.
+  - Download the page HTML with _download_webpage.
+  - Search the page for a Digiteka delivery URL using a regex:
+    - Looks for a JSON-like snippet containing url: "https://.../deliver/..." or similar (including protocol-relative forms).
+    - Uses _proto_relative_url to normalize the URL.
+  - If a digiteka URL is found, return self.url_result(digiteka_url, 'Digiteka') to delegate to the Digiteka extractor.
+  - If no Digiteka URL is found, fall back to self.url_result(url, 'Generic') to let the Generic extractor handle the page.
+
+- Important implementation details
+  - Delegation pattern: prioritizes external Digiteka embeds when present, otherwise uses the generic extractor.
+  - Protocol-relative handling: uses _proto_relative_url to normalize URLs that may be protocol-relative.
+  - Regex-based detection: relies on a specific pattern containing the Digiteka deliver URL embedded in the page for delegating to the specialized extractor.
+  - Minimal in-page parsing: no direct extraction of video metadata from Lemonde pages; metadata is obtained via the downstream Digiteka or Generic extractors.
+
+Overall, LemondeIE serves as a thin wrapper that detects Digiteka-backed Lemonde video embeds and delegates extraction accordingly, with a fallback to a generic extraction path.

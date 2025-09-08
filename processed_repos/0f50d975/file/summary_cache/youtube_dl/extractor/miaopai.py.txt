@@ -1,0 +1,40 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/miaopai.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Miaopai show pages (miaopai.com/show/...).
+  - Extract video metadata and streams and return a structured info dict compatible with YouTube-DL.
+
+- Key class
+  - MiaoPaiIE(InfoExtractor): Inherits from Youtube-DL’s common InfoExtractor.
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?miaopai\.com/show/(?P<id>[-A-Za-z0-9~_]+)'
+  - Captures the video id from Miaopai show pages.
+
+- Testing data
+  - _TEST provides a sample URL, expected MD5 of the video, and an info_dict with:
+    - id: e.g. n~0hO7sfV1nBEw4Y29-Hqg__
+    - ext: mp4
+    - title: e.g. 西游记音乐会的秒拍视频
+    - thumbnail pattern matching a URL ending with _m.jpg
+
+- User-Agent handling
+  - _USER_AGENT_IPAD constant used to emulate an iPad Safari user agent when downloading the page. This can help bypass some anti-scraping measures.
+
+- Main extraction flow (_real_extract)
+  - video_id = self._match_id(url): extract the id from the URL.
+  - webpage = self._download_webpage(url, video_id, headers={'User-Agent': self._USER_AGENT_IPAD}): fetch the page with the iPad UA.
+  - title = self._html_search_regex(r'<title>([^<]+)</title>', webpage, 'title'): parse the page title.
+  - thumbnail = self._html_search_regex(..., fatal=False, group='url'): extract the video thumbnail URL from a div with a class containing video_img and a data-url attribute. The regex uses named groups to tolerate different quote characters.
+  - videos = self._parse_html5_media_entries(url, webpage, video_id): parse HTML5 video entries embedded in the page; returns a list of video entries.
+  - info = videos[0]: take the first parsed media entry as the base info dict.
+  - info.update({'id': video_id, 'title': title, 'thumbnail': thumbnail}): inject the extracted id, title, and thumbnail into the info dict.
+  - return info: output the final dict containing video metadata and media URL(s).
+
+- Important implementation details
+  - Uses _parse_html5_media_entries to obtain the actual media entries (video URLs) from the page.
+  - The thumbnail extraction uses a robust, regex-based approach to pull the data-url value from a div with a class that includes video_img; it’s optional (fatal=False) to avoid failing if not present.
+  - The final info dict includes at least id, title, thumbnail, and the media entry details (e.g., direct video URL and extension, as provided by _parse_html5_media_entries).
+
+- Overall behavior
+  - Given a Miaopai show URL, the extractor downloads the page (pretending to be an iPad), parses the title and thumbnail, retrieves the HTML5 video entries, and returns a consolidated info dictionary containing the video’s identifier, title, thumbnail, and media data (such as MP4 URL and extension).

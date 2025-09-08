@@ -1,0 +1,47 @@
+- Purpose: NuvidIE is a video extractor for the nuvid.com site used by youtube-dl. It retrieves metadata and video formats for a Nuvid video page.
+
+- Key class:
+  - NuvidIE(InfoExtractor): main extractor class handling Nuvid video pages.
+
+- URL pattern:
+  - _VALID_URL = r'https?://(?:www|m)\.nuvid\.com/video/(?P<id>[0-9]+)'
+  - Matches both desktop and mobile URLs with a numeric video ID.
+
+- Tests:
+  - _TESTS contains three examples with expected id, ext (mp4), title, format_id (360p/720p), duration, age_limit (18), thumbnail, and thumbnails. Useful for regression checks.
+
+- Extraction flow (_real_extract):
+  1) Extract video_id from URL using _match_id.
+  2) Define quality mapping:
+     - lq -> 360p
+     - hq -> 720p
+  3) Fetch video configuration JSON:
+     - json_url = https://www.nuvid.com/player_config_json/?vid={video_id}&aid=0&domain_id=0&embed=0&check_speed=0
+     - Use _download_json with headers (Accept, Content-Type). If missing, default to {}.
+  4) Optional page fetch:
+     - Download a mobile page with _download_webpage (fatal=False) to help with title extraction; optional fallback to ''.
+  5) Title extraction:
+     - First try video_data['title'] via try_get.
+     - If missing, fall back to HTML regex search using several patterns to extract a title from the page HTML, then strip whitespace.
+  6) Formats extraction:
+     - Build formats from video_data['files'].items(): for each quality/source where source is truthy, create a dict:
+       - 'url': source
+       - 'format_id': mapped value (e.g., '360p' or '720p')
+       - 'height': integer height derived from format_id (e.g., 360 from '360p')
+     - Call _check_formats(formats, video_id) and _sort_formats(formats) to validate and sort.
+  7) Duration:
+     - Parse from video_data['duration'] or fallback to video_data['duration_format'] using parse_duration.
+  8) Thumbnails:
+     - Build list of thumbnail dicts by extracting image URLs from the downloaded webpage using a regex that finds <div class="video-tmb-wrap"> <img src="..."> patterns.
+     - Each entry is {'url': thumb_url}.
+  9) Return metadata:
+     - id, formats, title, thumbnail (video_data.get('poster')), thumbnails, duration, age_limit: 18.
+
+- Important implementation details:
+  - Uses helper utilities: compat_str, parse_duration, int_or_none, try_get, url_or_none.
+  - The top-level thumbnail is taken from video_data.get('poster'); additional thumbnails come from the HTML.
+  - Formats are derived from the server-provided 'files' mapping for different quality keys (e.g., lq/hq).
+  - The extractor is robust to missing JSON data by falling back to an empty dict and to missing page content by not failing on title extraction.
+  - Returns a standard YouTube-DL info dict with id, formats, title, duration, age_limit, thumbnail, and thumbnails.
+
+- Overall: This file implements a typical extractor pattern for a video site: fetch a JSON config for formats, optionally parse the page for a title or additional data, assemble a formats list with height and format_id, extract duration and thumbnails, and return a structured info dictionary.

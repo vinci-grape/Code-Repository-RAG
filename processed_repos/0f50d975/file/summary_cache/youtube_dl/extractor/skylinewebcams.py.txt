@@ -1,0 +1,34 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/skylinewebcams.py
+
+- Purpose:
+  - Implement a YouTube-DL extractor for Skyline Webcams live streams.
+
+- Main class:
+  - SkylineWebcamsIE (subclass of InfoExtractor)
+
+- URL pattern and testing:
+  - _VALID_URL matches Skyline Webcams live pages, capturing a unique webcam id from URLs like …/webcam/.../<id>.html.
+  - _TEST provides a sample URL, expected info dictionary (id, extension, title pattern, description, is_live), and skips actual download during tests.
+
+- Core extraction flow (_real_extract):
+  - video_id: extracted from URL using _match_id.
+  - webpage: HTML content fetched via _download_webpage.
+  - stream_url: extracted with _search_regex looking for a field named either "url" or "source" that contains an m3u8 URL (regex: (?:url|source)\s*:\s*(['"])(?P<url>(?:https?:)?//.+?\.m3u8.*?)\1). This supports both quoted strings and both http(s) and protocol-relative URLs.
+  - title: obtained via _og_search_title from Open Graph metadata.
+  - description: obtained via _og_search_description from Open Graph metadata.
+  - Return value: a dict with
+    - id: video_id
+    - url: stream_url
+    - ext: 'mp4' (typical for the wrapper; actual stream is an m3u8/HLS manifest)
+    - title: processed through _live_title(title) to indicate live status
+    - description: description
+    - is_live: True
+
+- Implementation details and nuances:
+  - Relies on Open Graph meta tags for title/description.
+  - The stream URL is an HLS (m3u8) playlist, but the declared extension is mp4 in the final metadata.
+  - is_live is set to True, aligning with Skyline Webcams live streams.
+  - Uses common InfoExtractor helpers (_download_webpage, _search_regex, _og_search_title/description, _live_title) for consistency with other extractors.
+
+Overall functionality:
+- Given a Skyline Webcams page URL, it fetches the page, extracts the live HLS stream URL, and returns metadata (id, title, description, live status) suitable for streaming/download via YouTube-DL.

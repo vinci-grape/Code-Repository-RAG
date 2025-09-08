@@ -1,0 +1,81 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/veehd.py
+
+Purpose
+- Implement a YouTube-DL extractor (VeeHDIE) for veehd.com video pages to obtain a direct video URL and metadata (title, uploader, thumbnail, description).
+
+Key components
+- Class VeeHDIE(InfoExtractor)
+  - _VALID_URL: RegEx matching veehd video URLs of the form https?://veehd.com/video/<id>
+  - _TESTS: Three test cases with sample URLs and expected info_dict entries; one test is skipped because the video was removed. Notes that md5 is omitted in tests due to multiple server copies with different checksums.
+
+Main functionality (_real_extract)
+1) Video ID extraction
+   - video_id = self._match_id(url)
+
+2) Workaround for VeeHD page garbage
+   - Downloads the video page twice:
+     - First: self._download_webpage(url, video_id, 'Requesting webpage')
+     - Second: self._download_webpage(url, video_id)
+   - Rationale: handles reported garbage on the first request (referenced issue).
+
+3) Check for removed video
+   - If the page contains "This video has been removed<", raise ExtractorError indicating removal (expected=True).
+
+4) Locate player iframe path and URL
+   - Extracts the player path from the page with:
+     - r'\$\("#playeriframe"\).attr\({src : "(.+?)"'
+   - Builds the full player_url via urljoin with the original URL.
+
+5) Load player page
+   - Downloads the player page twice (again, to ensure content loaded):
+     - First: self._download_webpage(player_url, video_id, 'Requesting player page')
+     - Second: self._download_webpage(player_url, video_id, 'Downloading player page')
+
+6) Resolve the direct video URL
+   - Tries several fallbacks in order:
+     a) Config JSON
+        - Looks for value='config=({.+?})' in the player_page
+        - If found, parses JSON and sets video_url = unquoted config['clip']['url']
+     b) Direct embed
+        - If video_url not found, searches for an embed tag with type="video/divx" and gets its src as video_url
+     c) Iframe fall-back
+        - If still not found, extracts an iframe src from the player_page
+        - Builds iframe_url as 'http://veehd.com/%s' % iframe_src
+        - Downloads the iframe page and extracts video_url from a JavaScript-like structure using:
+          r"file\s*:\s*'([^']+)'"
+        - This sequence handles pages that embed the video inside an iframe or a separate player.
+
+7) Metadata extraction
+   - title: from element with id 'videoName', trimmed to anything before the last '|' character, using clean_html
+   - uploader_id: extracted via regex <a href="/profile/\d+">(.+?)</a> from the page
+   - thumbnail: from img with id "veehdpreview"
+   - description: extracted from a block with a pattern in a table cell:
+     r'<td class="infodropdown".*?<div>(.*?)<ul', using DOTALL mode
+
+8) Return value
+   - A dict with:
+     - '_type': 'video'
+     - 'id': video_id
+     - 'title': title
+     - 'url': video_url
+     - 'uploader_id': uploader_id
+     - 'thumbnail': thumbnail
+     - 'description': description
+
+Implementation details and notes
+- Uses helper utilities from youtube-dl:
+  - _download_webpage for HTTP requests
+  - _search_regex and _html_search_regex for extracting data
+  - get_element_by_id and clean_html for robust text extraction
+  - compat_urlparse.urljoin to construct absolute URLs
+  - compat_urllib_parse_unquote to decode encoded URLs
+- Robust multi-step extraction to accommodate different veehd page structures:
+  - Primary path via the player iframe’s config JSON
+  - Fallback to direct embed URL
+  - Fallback to iframe-contained video URL
+- Error handling:
+  - Raises ExtractorError with expected flag when a video is removed
+- Testing considerations:
+  - MD5 is not asserted in tests due to multiple server copies with different checksums; the code omits md5 in _TESTS as noted in comments.
+
+In short, VeeHDIE navigates veehd.com’s pages and nested players/iframes to extract a direct video URL along with title, uploader, thumbnail, and description, handling several edge cases and page structures along the way.

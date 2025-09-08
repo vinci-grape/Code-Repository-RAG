@@ -1,0 +1,56 @@
+concise summary
+
+- Purpose
+  - A YouTube-dl extractor for Pladform videos. It fetches video metadata and available formats from Pladform and returns a structured info dictionary.
+
+- Key class
+  - PladformIE(InfoExtractor)
+
+- URL matching (_VALID_URL)
+  - Accepts:
+    - out.pladform.ru/player?videoid=...
+    - static.pladform.ru/player.swf?videoid=...
+    - video.pladform.ru/catalog/video/videoid/<id>/...
+  - Extracts the numeric video id from the URL.
+
+- URL extraction helper
+  - _extract_url(webpage): static method that scans a page for an iframe src pointing to the Pladform player and returns the inner URL if found.
+
+- Core extraction (_real_extract)
+  - Parse video_id from the URL.
+  - Parse query string to get pl (default '1').
+  - Request XML data from http://out.pladform.ru/getVideo with videoid and pl.
+  - If XML root tag is 'error', raise ExtractorError with the error text.
+  - Build a quality function for ('ld', 'sd', 'hd').
+  - Build formats:
+    - Iterate over <src> elements in the XML.
+    - If src type is 'hls' or the URL ends with .m3u8, fetch HLS formats via _extract_m3u8_formats with:
+      - entry_protocol='m3u8_native', m3u8_id='hls', fatal=False
+    - Otherwise, add a format dict with:
+      - 'url' from the src text
+      - 'format_id' from the src's 'quality' attribute
+      - 'quality' from the quality() mapping
+  - If no formats found, check for an <cap>error> and fail with that error if present.
+  - Sort formats with _sort_formats.
+  - Fetch the catalog webpage: http://video.pladform.ru/catalog/video/videoid/<video_id>.
+  - Title: try OpenGraph title from the catalog page; if not found, fall back to the <title> tag in the XML document.
+  - Description: extract from the catalog page using a regex looking for </h3> ... <p>...</p>.
+  - Thumbnail: try OpenGraph thumbnail from catalog page; fallback to <cover> tag in XML.
+  - Duration: parse from <time> in XML.
+  - Age limit: parse from <age18> in XML.
+  - Return a dict with:
+    - id, title, description, thumbnail, duration, age_limit, formats
+
+- Important implementation details
+  - Uses compat_urlparse to parse query strings.
+  - Uses _download_xml to fetch getVideo data and _download_webpage for the catalog page.
+  - _og_search_title/_og_search_thumbnail and xpath_text used for metadata extraction.
+  - Determines video formats by inspecting <src> entries; supports both direct HTTP(S) and HLS (m3u8) formats.
+  - Error handling via inner fail(text) helper that raises ExtractorError with the extractor name.
+
+- Tests
+  - _TESTS includes:
+    - A real example URL with expected id, ext, title, description, thumbnail, duration, and md5 for the video file.
+    - Two additional URLs that should just match the extractor pattern (only_matching).
+
+Overall, the file implements a Pladform extractor that retrieves video metadata and available formats from Pladform’s getVideo API and catalog pages, with support for HLS and non-HLS formats, and robust error handling.

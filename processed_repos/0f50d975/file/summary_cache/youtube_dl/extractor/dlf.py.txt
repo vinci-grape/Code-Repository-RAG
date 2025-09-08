@@ -1,0 +1,64 @@
+concise summary of ./youtube-dl/youtube_dl/extractor/dlf.py
+
+- Purpose
+  - Youtube-dl extractors for Deutschlandfunk (DLF): single audio pages and DLF corpus/podcast feeds.
+
+- Main classes
+  - DLFBaseIE (InfoExtractor)
+    - Shared helper for DLF extractors.
+    - _VALID_URL_BASE matches Deutschlandfunk domain.
+    - _BUTTON_REGEX finds the audio play button: a button tag with alt="Anhören" and a data-audio-diraid attribute.
+    - _parse_button_attrs(button, audio_id=None)
+      - Parses the button’s HTML attributes into a rich info dictionary.
+      - Uses extract_attributes to read data-* attributes and audio_id as fallback.
+      - Determines the audio URL from several possible attributes (data-audio-download-src, data-audio, data-audioreference, data-audio-src) via traverse_obj.
+      - Derives file extension and builds formats:
+        - If extension is m3u8, uses _extract_m3u8_formats; otherwise creates a single format with the URL and ext, setting vcodec to 'none'.
+        - Sorts formats with _sort_formats.
+      - Builds metadata fields from data-* attributes using a helper traverse_attrs:
+        - title: from data-audiotitle / data-audio-title / data-audio-download-tracking-title (passed through txt_or_none)
+        - duration: from data-audioduration / data-audio-duration (int_or_none)
+        - thumbnail: data-audioimage (url_or_none)
+        - uploader: data-audio-producer
+        - series: data-audio-series
+        - channel: data-audio-origin-site-name
+        - webpage_url: data-audio-download-tracking-path (url_or_none)
+      - Returns a merged dict:
+        - Base: {'id': audio_id, 'formats': formats}
+        - Plus per-field metadata merged in (title, duration, thumbnail, uploader, series, channel, webpage_url)
+      - Note: some extractor keys are commented out (extractor_key/extractor).
+  - DLFIE (DLF single audio page)
+    - IE_NAME = 'dlf'
+    - _VALID_URL matches a specific audio page pattern: ...-dlf-<8-hex-chars>-100.html
+    - _real_extract(url)
+      - Extracts audio_id via _match_id.
+      - Downloads the page and finds the audio play button with _BUTTON_REGEX.
+      - Returns the dict from _parse_button_attrs(button, audio_id).
+  - DLFCorpusIE (DLF corpus / multi-feed)
+    - IE_NAME = 'dlf:corpus'
+    - IE_DESC = 'DLF Multi-feed Archives'
+    - _VALID_URL matches a corpus page pattern: <slug>-<id>.html where id is a number, with a guard to exclude those matching the single-audio pattern.
+    - _real_extract(url)
+      - Extracts playlist_id via _match_id.
+      - Downloads the page.
+      - Finds all audio play buttons using _BUTTON_REGEX and maps _parse_button_attrs over them.
+      - Returns playlist_result(...) with:
+        - entries: list of per-entry dicts
+        - id: playlist_id
+        - title/description obtained via _html_search_meta from og:title/twitter:title and og:description/twitter:description
+- How it works end-to-end
+  - For a single audio page: fetch page → locate the play button → parse its attributes → build an info dict with id, formats, and metadata (title, duration, thumbnail, etc.).
+  - For a corpus page: fetch page → locate all play buttons → parse each → assemble a playlist with aggregated title/description metadata.
+- Important implementation details
+  - Robust URL/source extraction: audio URL may come from multiple possible data-* attributes; uses a traversal helper to try them in order.
+  - Format handling: supports HLS (m3u8) via _extract_m3u8_formats or a direct URL with a basic format dict if not m3u8.
+  - Metadata extraction: uses a flexible path-driven approach (traverse_attrs) to pull title, duration, thumbnail, uploader, series, channel, and webpage URL from various data-* attributes.
+  - Helper utilities used:
+    - extract_attributes, traverse_obj, determine_ext, int_or_none, url_or_none, variadic
+    - _download_webpage, _search_regex, _html_search_meta, _extract_m3u8_formats, _sort_formats, playlist_result
+- Tests
+  - DLFIE has tests for both m3u8-based audio and direct MP3/other formats with expected fields (id, title, ext, duration, thumbnail, uploader, series, channel).
+  - DLFCorpusIE tests validate playlist generation with multiple entries and metadata, including description in some cases.
+- Output
+  - DLFIE._real_extract returns a single video/info dict for one audio item.
+  - DLFCorpusIE._real_extract returns a playlist, with entries produced by parsing all audio buttons on the page.

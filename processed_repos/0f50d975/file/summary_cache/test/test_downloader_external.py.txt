@@ -1,0 +1,103 @@
+Concise, comprehensive summary of the code in ./youtube-dl/test/test_downloader_external.py
+
+Purpose
+- Implement a suite of unit/integration tests for the external downloaders used by youtube-dl (Aria2cFD, Aria2pFD, AxelFD, CurlFD, FFmpegFD, HttpieFD, WgetFD).
+- Verify both command-line construction (for each downloader) and runtime behavior (for at least Aria2pFD and FFmpegFD when available).
+- Use a local HTTP server to simulate remote content with various response scenarios (content-length, range requests, etc.) and a cookie handling flow.
+
+Main structure and key components
+- Test harness setup
+  - Test helpers: FakeLogger, FakeYDL, http_server_port, try_rm from test.helper.
+  - youtube-dl imports: YoutubeDL, compat utilities, encoding helpers (encodeFilename, join_nonempty), postprocessor (FFmpegPostProcessor).
+  - External downloader classes tested: Aria2cFD, Aria2pFD, AxelFD, CurlFD, FFmpegFD, HttpieFD, WgetFD.
+  - Cookie handling: TEST_COOKIE, TEST_COOKIE_VALUE, cookiejar_Cookie helper.
+
+- HTTP server for tests
+  - HTTPTestRequestHandler serves test content at several endpoints:
+    - /regular: returns content with Content-Length and a full range of payload (size TEST_SIZE).
+    - /no-content-length: returns content without Content-Length.
+    - /no-range: content supports no Range requests.
+    - /no-range-no-content-length: neither Range nor Content-Length is provided.
+  - Range handling support via send_content_range to simulate partial content responses.
+  - The server runs on a dynamic port in a background thread for each test.
+
+- Availability gating helpers
+  - ifExternalFDAvailable(externalFD): skips tests if the named external downloader is not available on the system.
+  - ifFFmpegFDAvailable(externalFD): more complex gate that allows running FFmpeg-based tests only if:
+    - the external FD is available, and
+    - FFmpegPostProcessor.available evaluates to True (best-effort via suppressing exceptions).
+
+Test classes and their focus
+
+- TestAria2pFD (skipped unless Aria2pFD is available)
+  - setUp: spins up the local HTTP server.
+  - download(params, ep): starts aria2c --enable-rpc in a subprocess, runs YoutubeDL with given params, downloads a single endpoint, and asserts:
+    - exit code 0
+    - downloaded file size equals TEST_SIZE
+  - download_all(params): iterates over endpoints: regular, no-content-length, no-range, no-range-no-content-length.
+  - test_regular: uses external_downloader = 'aria2p'.
+  - test_chunked: same as above but with http_chunk_size = 1000 to exercise chunked downloading.
+
+- TestHttpieFD (requires HttpieFD)
+  - test_make_cmd: verifies HttpieFD._make_cmd generates a proper curl-like command:
+    - Basic case: ['http', '--download', '--output', 'test', 'http://www.example.com/']
+    - With cookies: when a cookie is present in ydl.cookiejar, command includes 'Cookie:<cookie-header>'.
+
+- TestAxelFD (requires AxelFD)
+  - test_make_cmd: validates Axel command construction:
+    - Basic case: ['axel', '-o', 'test', '--', 'http://www.example.com/']
+    - With cookies: includes '-H', 'Cookie: <cookie-header>', and adds '--max-redirect=0' before the URL.
+
+- TestWgetFD (requires WgetFD)
+  - test_make_cmd: asserts:
+    - Initial command does not include --load-cookies.
+    - After setting a cookie, the command includes --load-cookies (cookie jar file path embedded by the downloader).
+
+- TestCurlFD (requires CurlFD)
+  - test_make_cmd: asserts:
+    - Initial command does not include --cookie.
+    - After setting a cookie, the command includes --cookie and the cookie value.
+
+- TestAria2cFD (requires Aria2cFD)
+  - test_make_cmd: confirms that:
+    - Before cookies are set, there is no _cookies_tempfile attribute yet.
+    - After adding a cookie, the constructed command includes --load-cookies=<path-to-tempfile> which is produced by the downloader.
+
+- TestFFmpegFD (requires FFmpegFD, conditionally skipped)
+  - Uses a helper to determine availability: only runs if FFmpeg is effectively available or detectable via FFmpegPostProcessor.available.
+  - test_make_cmd:
+    - Uses a FakeYDL instance and a test hook _debug_cmd to capture the FFmpeg command.
+    - For info with ext='mp4', invoking _call_downloader should produce an FFmpeg invocation like:
+      ffmpeg -y -i http://www.example.com/ -c copy -f mp4 file:test
+    - When cookies are present, FFmpeg command includes -cookies followed by the properly formatted cookie header string (TEST_COOKIE_VALUE plus cookie attributes and carriage return line feed).
+
+Implementation details and notable behavior
+- Cookie handling and header formatting
+  - Cookies are created using compat_http_cookiejar_Cookie and converted to a header string with the test helper TEST_COOKIE_VALUE.
+  - Different downloaders include cookies in different ways:
+    - HttpieFD: header value appended directly as 'Cookie:<cookie-value>'.
+    - AxelFD: uses -H 'Cookie: <cookie-value>' and includes a redirect limit.
+    - WgetFD: uses a cookies file via --load-cookies after a cookie is set.
+    - CurlFD: uses --cookie '<cookie-header>'.
+    - Aria2cFD: uses a temporary file referenced by --load-cookies.
+    - FFmpegFD: uses -cookies '<cookie-header>' with the exact formatting including path/domain; includes CRLF sequence as part of header string.
+- Command construction validation
+  - Each external downloader class exposes a _make_cmd method (or equivalent) used to build the system command for download; tests explicitly assert the exact sequence of tokens, ensuring correct integration with youtube-dl’s cookie handling and URL.
+- HTTP server behavior coverage
+  - The server’s various endpoints test different real-world scenarios:
+    - Regular download with Content-Length (normal path).
+    - Download without Content-Length (chunked or unknown size scenarios).
+    - Server that does not support Range requests (for tests that rely on chunked behavior).
+    - End-to-end download tests (Aria2pFD) exercise actual data transfer against these endpoints.
+- FFmpeg-specific gating
+  - The test suite includes a sophisticated gating function for FFmpeg-based tests to avoid false negatives when FFmpeg isn’t installed. It leverages FFmpegPostProcessor.available when possible, otherwise falls back to availability checks.
+- Test execution
+  - The module ends with the standard unittest.main() guard to run tests when executed as a script.
+
+Overall summary
+- This test file provides comprehensive coverage for external downloaders integrated with youtube-dl. It validates:
+  - Correct command-line construction for multiple external downloaders, including proper cookie header handling.
+  - Cookie propagation across different tools (Httpie, Axel, Wget, Curl, Aria2c) and FFmpeg, with attention to nuanced header formatting.
+  - Integration test for aria2p by spinning up a local HTTP server that emulates a real download scenario and verifying file size after download.
+  - Conditional execution based on the availability of external tools and FFmpeg, to ensure tests run in diverse environments without false failures.
+- The tests rely on a local HTTP server simulating content with and without Content-Length, with and without Range support, to exercise the downloader logic under realistic conditions.

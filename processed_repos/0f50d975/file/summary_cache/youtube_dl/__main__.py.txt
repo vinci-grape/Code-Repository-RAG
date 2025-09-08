@@ -1,0 +1,22 @@
+- Purpose: Acts as the command-line entry point for the youtube-dl package. It delegates execution to the library's main() function.
+
+- How it runs:
+  - Supports both direct script execution (python youtube_dl/__main__.py) and module invocation (python -m youtube_dl).
+  - When run as a script, it adjusts the Python path so the package can be imported:
+    - If __package__ is None and the process is not in a frozen/bundled state, it computes the path to the repository root and inserts it at sys.path[0].
+    - Specifically, it inserts the parent directory of the youtube_dl package (i.e., two levels up from __main__.py) to allow imports to resolve correctly.
+  - After path adjustment, it imports the youtube_dl module and calls youtube_dl.main() if executed as the main module.
+
+- Key implementation details:
+  - Path handling:
+    - Uses realpath and abspath to canonicalize __file__.
+    - Inserts os.path.dirname(os.path.dirname(path)) to sys.path to prefer the local package location.
+  - Guard conditions:
+    - The path adjustment block runs only when __package__ is None and sys.frozen is not present, ensuring it only applies to direct script invocation.
+  - Execution flow:
+    - Always imports youtube_dl, then invokes youtube_dl.main() when __name__ == '__main__'.
+  - No specific classes or functions defined here; this file serves as a lightweight CLI bootstrap/entry point that delegates to the library's main() function.
+
+- Notes:
+  - Compatible with both direct script execution and module form, aligning with the usage hints in the comments.
+  - The code is intentionally minimal, focusing on CLI bootstrap rather than implementing download logic itself.

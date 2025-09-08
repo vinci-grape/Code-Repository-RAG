@@ -1,0 +1,42 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/weiqitv.py
+
+What this file does
+- Implements a YouTube-DL extractor for WeiqiTV videos (WeiqiTVIE).
+- It does not directly fetch the video stream. Instead, it extracts a LetvCloud URL from the page and delegates to the LetvCloud extractor to obtain the actual video information.
+- Returns a url_transparent result so the LetvCloud extractor handles the download details, while providing the title and id metadata.
+
+Key components
+- Class WeiqiTVIE(InfoExtractor)
+  - IE_DESC = 'WQTV'
+  - _VALID_URL: regex matching URLs of the form https://www.weiqitv.com/index/video_play?videoId=<id>
+  - _TESTS: 3 test cases with example videoId values and expected metadata (title, id, ext, md5 for first test)
+
+Main functionality (core logic in _real_extract)
+- Extract media_id using self._match_id(url)
+- Download the page HTML with self._download_webpage(url, media_id)
+- Extract a JSON blob embedded in JavaScript:
+  - info_json_str = self._search_regex(r'var\s+video\s*=\s*(.+});', page, 'info json str')
+  - info_json = self._parse_json(info_json_str, media_id)
+  - The code expects a JS variable named video containing metadata, where the title is stored as info_json['name'].
+- Extract the LetvCloud URL from the page:
+  - letvcloud_url = self._search_regex(r'var\s+letvurl\s*=\s*"([^"]+)', page, 'letvcloud url')
+- Return a url_transparent result:
+  - _type: 'url_transparent'
+  - ie_key: 'LetvCloud'
+  - url: letvcloud_url
+  - title: info_json['name']
+  - id: media_id
+
+Important implementation details
+- The extractor does not pull the video directly; it defers to the LetvCloud extractor by returning a url_transparent result with ie_key='LetvCloud'.
+- It relies on two embedded JavaScript variables in the page:
+  - video: a JSON blob assigned to a JS variable, parsed with _parse_json
+  - letvurl: the actual LetvCloud video URL
+- The _search_regex patterns are tailored to extract:
+  - info JSON string: r'var\s+video\s*=\s*(.+});'
+  - LetvCloud URL: r'var\s+letvurl\s*=\s*"([^"]+)'
+- The title used for output is info_json['name']; the internal id is the videoId captured from the URL.
+- Test cases expect the first video to have an MP4 extension and a known MD5; others only verify id, ext, and title via LetvCloud downstream processing.
+
+Overall behavior
+- Given a WeiqiTV video page, this extractor parses embedded JavaScript to obtain video metadata and the LetvCloud source URL, then delegates to LetvCloud for the actual streaming information, while providing a consistent title and id to the user.

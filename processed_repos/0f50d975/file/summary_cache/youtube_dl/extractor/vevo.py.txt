@@ -1,0 +1,74 @@
+- Purpose
+  - Implement YouTube-DL extractors for Vevo videos and Vevo playlists/genres.
+  - Retrieve video metadata, formats (including MPD/HLS), and basic playlist information by using Vevo’s API and page data.
+
+- Key classes
+  - VevoBaseIE (InfoExtractor)
+    - Provides common helper _extract_json to pull JSON data embedded in Vevo pages via the INITIAL_STORE script tag.
+  - VevoIE (Vevo video extractor)
+    - Main extractor for individual Vevo videos (vevo.com/watch URLs, embedded, and vevo: URIs).
+    - Handles API token generation, data retrieval, formats extraction, and metadata assembly.
+  - VevoPlaylistIE (Vevo playlist/genre extractor)
+    - Extracts playlists or genre pages from Vevo’s site (vevo.com/watch/playlist/... or /genre/...).
+    - Supports an index query parameter to fetch a specific video when available, otherwise builds a playlist from the page JSON.
+
+- Important implementation details
+
+  - _extract_json (VevoBaseIE)
+    - Parses JSON embedded in a Vevo page with the pattern window.__INITIAL_STORE__ = { ... }; and returns the parsed data for a given video_id.
+
+  - _initialize_api (VevoIE)
+    - Posts to https://accounts.vevo.com/token to obtain an anonymous OAuth token.
+    - If the page indicates regional unavailability, raises a geo-restriction error.
+    - Parses the response to obtain a legacy token and builds a base API URL template: scheme + '//apiv2.vevo.com/%s?token=' + legacy_token
+
+  - _call_api (VevoIE)
+    - Fetches JSON from the Vevo API path using the API URL template.
+    - If an HTTP error occurs, tries to extract a list of error messages from the response JSON and raises a user-friendly ExtractorError including Vevo’s name; otherwise re-raises.
+
+  - _real_extract (VevoIE)
+    - Extracts the video_id from the URL.
+    - Calls _initialize_api and then fetches:
+      - video info: video/%s
+      - video streams: video/%s/streams (optional, fatal=False)
+    - If streams are not returned, falls back to parsing the page JSON to obtain streams.
+    - Artist handling:
+      - Iterates over video_info['artists'] to assemble artist, uploader, and possible Featured artist.
+    - Formats extraction:
+      - For each video_version in video_versions, determines a version label using _VERSIONS mapping.
+      - Skips URLs containing .ism (Smooth Streaming) and handles:
+        - .mpd: use _extract_mpd_formats
+        - .m3u8: use _extract_m3u8_formats
+        - direct HTTP URLs: parse a filename-embedded pattern to extract vcodec, acodec, vbr, abr, width, height, ext, building a format dict with format_id like http-<version>-<quality>.
+      - The formats are sorted with _sort_formats.
+    - Video metadata assembly:
+      - Title composition: "Artist - Track" or just Track if artist is missing; includes “feat.” if a Featured artist exists.
+      - Genre: taken from video_info['genres'] if available as a list with strings.
+      - Age limit: derived from video_info['isExplicit'] (True -> 18, False -> 0, else None).
+      - Other fields: id, thumbnail, timestamp (parsed via parse_iso8601), duration, uploader, track, artist, genre, etc.
+    - Returns a dict with id, title, formats, thumbnail, timestamp, uploader, duration, view_count, age_limit, track, artist, genre.
+
+  - VevoPlaylistIE
+    - _VALID_URL matches Vevo playlists and genres.
+    - _real_extract flow:
+      - Extracts playlist_id and kind (playlist or genre) from URL.
+      - Downloads the page, parses query string for index.
+      - If index is present and a video id can be found in the page metadata (vevo://video/{id}), returns a single video result (vevo:{id}).
+      - Otherwise, loads the page JSON via _extract_json and obtains the list of videos under '%ss' % kind (playlist or genre).
+      - Builds a list of entries pointing to each video via vevo:{src} and VevoIE
+      - Returns a playlist_result with entries, playlist_id, title, and description.
+    - Also supports a case where index=0 is used to fetch the first item (for some pages), but otherwise relies on the page’s JSON structure.
+
+- Notable data and mappings
+  - _VERSIONS maps numeric video_version versions to human-readable version tags:
+    0: 'youtube', 1: 'level3', 2: 'akamai', 3: 'level3', 4: 'amazon'
+  - The code explicitly skips .ism video manifests and uses MPD/HLS for streaming when available.
+  - When building HTTP-based formats, it relies on a file name pattern containing width, height, vcodec, vbr, acodec, abr, and ext.
+
+- Tests and behavior
+  - The file contains extensive _TESTS for VevoIE to validate various scenarios including age-restricted videos, cases with no video_info, and videos only available via the webpage.
+  - Expected warnings cover failing to download SMIL files or info, and specific cases for missing video versions.
+  - VevoPlaylistIE tests verify playlist/genre extraction and a case of a single-item extraction via index.
+
+- Summary
+  - This file implements Vevo video and playlist extraction by authenticating with Vevo, querying the Vevo API for video metadata and streams, and constructing a unified list of playable formats. It robustly handles various streaming formats (MPD, HLS, and direct HTTP), edge cases where video_versions are unavailable, and metadata assembly (artist, featured artists, track, genre, and age restrictions). The playlist extractor fetches and resolves items from Vevo’s playlist/genre pages, with support for direct item extraction via index when available.

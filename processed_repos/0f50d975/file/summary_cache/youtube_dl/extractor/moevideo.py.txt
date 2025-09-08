@@ -1,0 +1,58 @@
+Summary of MoeVideoIE (youtube_dl/extractor/moevideo.py)
+
+Purpose
+- Implements an InfoExtractor for LetitBit video services: moevideo.net, playreplay.net, videochart.net (and thesame.tv as a host in the URL pattern).
+- Resolves the direct video file URL and metadata by parsing a page and its embedded player data.
+
+Key components
+- Class: MoeVideoIE(InfoExtractor)
+- URL matching: _VALID_URL
+  - Regex captures:
+    - host: e.g., moevideo.net, playreplay.net, videochart.net, thesame.tv
+    - id: video identifier like 00297.0036103fe3d513ef27915216fd29
+  - Example URLs matched include: /video/, /framevideo/, /embed/
+- Constants:
+  - _API_URL and _API_KEY are defined but not used in _real_extract (likely remnants for API-based access)
+- Tests: _TESTS
+  - Two sample URLs with expected info_dict fields
+  - Include md5 checksums, and skip messages if the video has been removed
+
+Main functionality (_real_extract)
+- Parse host and video_id from the URL using the _VALID_URL regex.
+- Download the main video page:
+  - URL: http://{host}/video/{video_id}
+  - Extracts the OpenGraph title via _og_search_title
+- Download the embed page:
+  - URL: http://{host}/embed/{video_id}
+- Extract JSON data from the embed page:
+  - Looks for a JavaScript snippet like mvplayer("#player", ( { ... } ))
+  - Parses the JSON object and selects the 'video' field
+- Build the result dictionary:
+  - id: video_id
+  - title: extracted title from the main page
+  - thumbnail:
+    - video.get('poster') if available
+    - otherwise fallback to the page's OpenGraph thumbnail (_og_search_thumbnail)
+  - description: cleaned OpenGraph description from the main page
+  - duration: int_or_none(_og_search_property('video:duration', webpage))
+  - url: video['ourUrl'] (the direct video file URL)
+
+Implementation details and behavior
+- Metadata extraction
+  - Description is sanitized via clean_html(_og_search_description(webpage))
+  - Duration is read from the page’s OpenGraph property video:duration and converted to int if possible
+  - Thumbnail preference: prefer poster from the video JSON; otherwise use the page’s OG thumbnail
+- Video URL resolution
+  - The embed page contains a JSON blob used to populate the player; the direct video URL is in video['ourUrl']
+- Robustness and edge cases
+  - If the video is removed, tests indicate a skip message (“Video has been removed”)
+  - The code uses standard youtube-dl helper methods: _download_webpage, _og_search_title/description/thumbnail, _search_regex, _parse_json, int_or_none
+  - Regular expression extraction relies on a specific embed page JavaScript pattern mvplayer("#player", { ... })
+
+What you get from this extractor
+- A dict with enough information for youtube-dl to fetch the actual video:
+  - id, title, description, duration, thumbnail, and the direct video URL (url)
+- The code does not explicitly fill fields like ext, width, height, or filesize in the _real_extract method; these may be inferred or filled elsewhere by youtube-dl depending on the final URL and metadata available.
+
+Overall
+- MoeVideoIE is a specialized extractor that navigates to the video and embed pages, extracts a JSON data blob from the embed page, and returns the essential metadata and the direct video URL for download. It handles multiple hosts under the same pattern and uses OpenGraph metadata as fallbacks for missing fields.

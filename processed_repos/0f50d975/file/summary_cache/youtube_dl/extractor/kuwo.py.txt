@@ -1,0 +1,65 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/kuwo.py
+
+Overall purpose
+- Implement multiple extractors for the Kuwo music service, allowing downloading of songs, MV, albums, charts, singers, and categories from kuwo.cn. Reuses a shared base to fetch and organize available formats.
+
+Key classes and main functionality
+- KuwoBaseIE (InfoExtractor)
+  - Central format handling for Kuwo: defines a common _FORMATS list (ape, mp3-320, mp3-192, mp3-128, wma, aac) with format_id, extensions, bitrate/abr, and preference.
+  - _get_formats(self, song_id, tolerate_ip_deny=False): queries Kuwo’s anti-server (http://antiserver.kuwo.cn/anti.s) for each format to obtain a direct media URL. Builds a list of formats with url, format_id, format, abr (when available), and preference. If the server responds with "IPDeny" and tolerance is not enabled, raises ExtractorError signaling region block. Accepts tolerate_ip_deny to allow MV extraction (special case).
+
+- KuwoIE (song extractor)
+  - IE_NAME 'kuwo:song', _VALID_URL for http(s)://www.kuwo.cn/yinyue/<id>.
+  - _real_extract(url): fetches song detail page, handles possible copyright-offline messages, extracts:
+    - song_id, song_name, singer_name, lyrics (lrcContent), and cleaned description.
+    - formats via _get_formats and sorts them.
+    - optional album_id and, if present, album detail page to extract publish_time (YYYY-MM-DD) and convert to YYYYMMDD.
+  - Returns: id, title, creator, upload_date, description, formats.
+
+- KuwoAlbumIE (album extractor)
+  - IE_NAME 'kuwo:album', _VALID_URL for http(s)://www.kuwo.cn/album/<id>/.
+  - _real_extract(url): downloads album page, extracts:
+    - album_id, album_name, intro/description.
+    - a list of track URLs found in the page, builds a playlist of Kuwo song URLs.
+  - Returns a playlist: entries (songs), with album_id, album_name, and album_intro.
+
+- KuwoChartIE (chart extractor)
+  - IE_NAME 'kuwo:chart', _VALID_URL for http(s)://yinyue.kuwo.cn/billboard_<id>.htm.
+  - _real_extract(url): downloads chart page, collects song URLs from the page, returns as a playlist with chart_id.
+
+- KuwoSingerIE (singer/artist extractor)
+  - IE_NAME 'kuwo:singer', _VALID_URL for http(s)://www.kuwo.cn/mingxing/<id>.
+  - _real_extract(url): loads singer page, extracts singer_name and artist_id, and total page_count.
+  - Uses a paging helper (InAdvancePagedList) with a page_func to fetch subsequent pages via Ajax endpoint:
+    - Calls http://www.kuwo.cn/artist/contentMusicsAjax with artistId, pn, rn (PAGE_SIZE = 15).
+    - Extracts per-page track URLs, converts to absolute and returns as Kuwo entries.
+  - Returns a playlist of songs for the singer.
+
+- KuwoCategoryIE (category/genre extractor)
+  - IE_NAME 'kuwo:category', _VALID_URL for http(s)://yinyue.kuwo.cn/yy/cinfo_<id>.htm.
+  - _real_extract(url): loads category page, extracts category_name and category_desc, parses a JSON blob assigned to jsonm (var jsonm = ...), then builds a list of song entries from jsonm['musiclist'] and returns as a playlist with category_id, category_name, category_desc.
+
+- KuwoMvIE (MV extractor)
+  - IE_NAME 'kuwo:mv', _VALID_URL for http(s)://www.kuwo.cn/mv/<id>/.
+  - Overrides _FORMATS to extend with additional formats (mkv, mp4) atop the base formats.
+  - _real_extract(url): fetches MV detail page, extracts song_name and singer_name from the page. Retrieves formats via _get_formats(song_id, tolerate_ip_deny=True) to allow potential regional issues for anti URLs. Then fetches the MV URL from http://www.kuwo.cn/yy/st/mvurl?rid=MUSIC_<song_id> and appends it as a format with format_id 'mv'. Sorts formats and returns id, title, creator, and formats.
+
+Important implementation details
+- Format handling and geo-blocking:
+  - Formats are retrieved by contacting Kuwo’s anti.s convert_url service. If IP-based denial occurs (IPDeny) and not tolerated, extraction fails with a region-block error. MV extraction explicitly tolerates IP-denied cases to ensure MV URL retrieval.
+- Lyrics and metadata:
+  - Lyrics are extracted from the lrcContent element; empty/暂无 becomes None.
+  - Album publish date is optionally parsed from the album detail page; converted to yyyymmdd format.
+- Paging and large collections:
+  - Singer pages use InAdvancePagedList to lazily fetch pages via an Ajax endpoint (artist/contentMusicsAjax) with a fixed PAGE_SIZE (15).
+- XPath/regex extraction:
+  - The code uses precise regexes to pull song titles, artists, album names, and IDs from HTML pages, with careful handling of optional fields (fatal=False when absent).
+- Tests:
+  - Each extractor includes _TEST or _TESTS definitions to verify URL patterns and expected output structure.
+- URL construction utilities:
+  - Uses compat_urlparse for safe URL joining and normalization when building absolute song URLs from relative paths.
+- Output structure:
+  - Songs: id, title, creator, upload_date (YYYYMMDD), description, formats (list with url, format_id, format, abr, and preference).
+  - Albums/Charts/Singers/Categories: provide playlist results with appropriate metadata (ids, titles, descriptions) and collected entries.
+
+In short: this module provides a cohesive set of extractors for Kuwo content, sharing a common format-fetching mechanism and covering songs, MV, albums, charts, singers, and categories, with careful handling of regional blocks, metadata, and paged lists.

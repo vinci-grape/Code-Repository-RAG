@@ -1,0 +1,114 @@
+Here is a concise but comprehensive summary of the Udemy extractor code.
+
+Purpose
+- Extract video/lecture data from Udemy course pages for youtube-dl, supporting both paid and free content, with fallbacks to YouTube when a lecture is hosted there.
+- Provide two extractors:
+  - UdemyIE: extracts a single lecture/video (including all formats, subtitles, and thumbnails).
+  - UdemyCourseIE: treats a Udemy course as a playlist of lectures by iterating the course curriculum and creating transparent entries that point to individual Udemy lecture pages.
+
+Key classes
+- UdemyIE (InfoExtractor)
+  - Core responsibilities:
+    - Resolve a Udemy lecture URL to video metadata and downloadable formats.
+    - Handle login, enrollment (for paid courses), and API interaction with Udemy’s endpoints.
+    - Parse a variety of format sources (direct MP4, HLS/m3u8, assets in nested structures), as well as captions/subtitles (manual and auto-generated).
+    - Provide fallbacks to YouTube if a lecture redirects to a YouTube video.
+  - Important methods:
+    - _real_initialize: triggers login flow on startup.
+    - _login: performs login using stored credentials, handles login form submission, and verifies success.
+    - _real_extract(url): main entry for a lecture URL
+      - Extracts lecture_id, fetches course info via _extract_course_info.
+      - Tries to download the lecture JSON via _download_lecture; on 403, attempts enrollment via _enroll_course and retries.
+      - Validates asset type (must be Video); checks for YouTube redirect in stream_url.
+      - Builds video_id, thumbnail, duration, and caption dictionaries.
+      - Formats extraction:
+        - Handles video formats from various sources:
+          - Direct sources (with format_ids, height, bitrate, codecs, etc.)
+          - HLS (m3u8) sources via _extract_m3u8_formats
+          - React/videojs rendition data present in view_html (add metadata, duration, tracks)
+          - Outputs-based formats (legacy or alternative source lists)
+        - Subtitles and automatic captions (subtitles, automatic_captions)
+        - View HTML sources and text tracks (text tracks and caption extraction from view_html)
+      - Returns a dict with id, title, description, thumbnail, duration, formats, subtitles, and automatic_captions.
+    - _extract_course_info(webpage, video_id): parses course id and title from the page (via ng-init course object or data attributes).
+    - _enroll_course(base_url, webpage, course_id): detects enrollment/purchase URLs; if found, raises a helpful ExtractorError with the checkout URL; otherwise attempts enrollment by fetching and processing the enroll page.
+    - _download_lecture(course_id, lecture_id): calls Udemy’s API to fetch lecture details (title, description, asset, etc.) with specific fields requested (lecture, asset) to populate formats/subtitles.
+    - _download_webpage_handle(...): overrides to set a common browser-like User-Agent; detects CAPTCHA or anti-bot pages and raises an ExtractorError with guidance to login via browser and export cookies.
+    - _download_json(url_or_request, ...): prepares headers with Udemy-specific tokens (X-Udemy-Snail-Case, X-Udemy-Bearer-Token, X-Udemy-Authorization) if cookies are present; passes through to the parent implementation; checks for error payload via _handle_error.
+    - _handle_error(response): if response contains an error dict, raises a descriptive ExtractorError.
+    - _sort_formats(...): sorts formats with a preference order (height, width, tbr, format_id).
+    - _download_webpage_handle uses a custom User-Agent to mimic a real browser and detect CAPTCHA scenarios.
+
+  - Notable data flows and behaviors:
+    - Login is optional: if no credentials are provided, the extractor continues without login.
+    - If a lecture is not free (403 when fetching lecture JSON), enrollment is attempted. If enrollment succeeds, the lecture is retried.
+    - Captions handling supports both user-provided and auto-generated captions with language tagging.
+    - Multiple sources/formats are supported:
+      - Direct video URLs (MP4, etc.)
+      - HLS (m3u8) streams
+      - Outputs dictionary (legacy formats)
+      - React rendition data (videojs-setup-data) in the lecture page
+      - View_HTML-derived sources
+    - YouTube fallback: if a stream URL contains a YouTube URL, the extractor delegates to the YouTube extractor.
+    - Graceful handling for non-video assets (ignored).
+
+- UdemyCourseIE (UdemyIE subclass)
+  - Purpose: expose a Udemy course as a playlist of individual lecture entries, pointing to the lecture pages.
+  - Key attributes:
+    - IE_NAME = 'udemy:course'
+    - _VALID_URL matches Udemy course base pages (with a path after the domain).
+    - _TESTS include example course URLs (both mainstream and a subdomain variant) with only_matching.
+  - Important methods:
+    - suitable(cls, url): returns True only when UdemyIE.suitable(url) is False; ensures course extractor is used only if individual lecture extractor doesn’t match.
+    - _real_extract(url):
+      - Extracts course_id (path segment) and title from the page using _extract_course_info.
+      - Calls _enroll_course to ensure the user is enrolled/prompted to enroll if necessary.
+      - Fetches the course curriculum via API: /api-2.0/courses/{course_id}/cached-subscriber-curriculum-items with fields for chapters and lectures.
+      - Iterates response results:
+        - If _class == 'lecture' and asset is a Video, creates a transparent URL entry:
+          - url: https://www.udemy.com/{course_path}/learn/v4/t/lecture/{lecture_id}
+          - title: lecture title
+          - ie_key: UdemyIE (so the single-lecture extractor handles it)
+          - Adds chapter_number and chapter metadata if available
+        - If _class == 'chapter', stores chapter_number and chapter title to be attached to subsequent lectures.
+      - Returns a playlist_result(entries, course_id, title)
+  - Behavior notes:
+    - Uses the Udemy Course API to assemble a list of lectures. Each lecture in the playlist resolves to a Udemy lecture page handled by UdemyIE.
+    - Enroll step is performed before requesting the curriculum, ensuring access if possible.
+    - This extractor essentially provides a course-wide view into the same content that UdemyIE can fetch for individual lectures, but in a curated playlist format.
+
+Key implementation details
+- Token and header handling:
+  - _download_json injects Udemy-specific headers using cookies (client_id, access_token) to authorize API requests.
+  - Custom headers (X-Udemy-Snail-Case, X-Udemy-Bearer-Token, X-Udemy-Authorization) are added when cookies are present.
+- Error handling:
+  - _handle_error parses error payloads from API responses and raises user-friendly ExtractorError messages.
+  - CAPTCHA detection is implemented in _download_webpage_handle; prompts user to login via browser and export cookies.
+- Data parsing strategies:
+  - Course info extraction uses ng-init embedded course data and alternative patterns (data-course-id) to determine course_id and title.
+  - Lecture data may be embedded in multiple structures:
+    - asset fields: asset_type, stream_url/streamUrl, thumbnail, data.outputs
+    - view_html: videojs setup data, sources, and text tracks
+    - direct outputs map: fallback to formats extracted from outputs
+  - Subtitles and captions:
+    - Captions can be supplied as a list in captions or as text tracks in view_html.
+    - Distinguishes between user-provided subtitles and auto-generated captions.
+- Format extraction details:
+  - HLS and m3u8 support via _extract_m3u8_formats with entry_protocol 'm3u8_native'.
+  - Direct video formats include resolution hints, bitrate, codecs, sample rate, and file sizes when available.
+  - When a video source entry includes a height (format_id like "720p"), metadata from the corresponding output is applied.
+  - View HTML table (videojs setup data) enriches formats with duration and tracks when available.
+- Modules and helpers used:
+  - Uses common InfoExtractor base class.
+  - compat and utils helpers for URL parsing, JSON parsing, escaping, and robust type handling.
+  - Helpers like determine_ext, int_or_none, float_or_none, url_or_none, and js_to_json to normalize data.
+- Tests:
+  - UdemyIE tests validate a known lecture, including a free-lecture scenario with expected metadata (id, ext, title, duration, etc.) and a login-required scenario.
+  - UdemyCourseIE tests validate the course-suitable URL matching behavior.
+
+Overall
+- The file implements a robust Udemy integration for youtube-dl, covering:
+  - Single lecture extraction with support for multiple format sources, captions, and fallbacks.
+  - Course-level extraction as a playlist made from the course curriculum, reusing the single-lecture extractor for each item.
+  - Handling of login, enrollment for paid content, and API-based data retrieval.
+  - CAPTCHA and anti-bot safeguards with helpful user guidance when credentials/cookies are insufficient.

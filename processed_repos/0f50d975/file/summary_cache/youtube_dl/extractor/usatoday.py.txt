@@ -1,0 +1,51 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/usatoday.py
+
+- Purpose: Implement a YouTube-dl extractor for USA Today video pages. It does not download the video directly; instead it discovers the Brightcove video URL embedded in USA Today pages and delegates extraction to BrightcoveNew.
+
+- Main class:
+  - USATodayIE(InfoExtractor)
+
+- Key URL pattern:
+  - _VALID_URL = r'https?://(?:www\.)?usatoday\.com/(?:[^/]+/)*(?P<id>[^?/#]+)'
+  - Captures the last path segment as the page id.
+
+- Brightcove integration:
+  - BRIGHTCOVE_URL_TEMPLATE = 'http://players.brightcove.net/%s/default_default/index.html?videoId=%s'
+  - The final video URL is a Brightcove URL constructed from Brightcove account and videoId.
+
+- Important methods and flow (_real_extract):
+  1. display_id = self._match_id(url)
+     - Derives an identifier from the URL using the regex.
+  2. webpage = self._download_webpage(update_url_query(url, {'ajax': 'true'}), display_id)
+     - Loads the USA Today page with ajax query parameter to fetch dynamic content.
+  3. ui_video_data = get_element_by_attribute('class', 'ui-video-data', webpage)
+     - Extracts the JSON string embedded in an element with class "ui-video-data".
+  4. If ui_video_data is missing, raise ExtractorError('no video on the webpage', expected=True)
+  5. video_data = self._parse_json(ui_video_data, display_id)
+     - Parses the JSON payload containing video metadata.
+  6. item = try_get(video_data, lambda x: x['asset_metadata']['items'], dict) or {}
+     - Attempts to fetch nested asset metadata items; falls back to {} if unavailable.
+  7. Build the Brightcove video URL:
+     - account = item.get('brightcoveaccount', '29906170001')
+     - video_id = item.get('brightcoveid') or video_data['brightcove_id']
+     - url = BRIGHTCOVE_URL_TEMPLATE % (account, video_id)
+  8. Return a dict with:
+     - '_type': 'url_transparent' (delegate to BrightcoveNew)
+     - 'url': constructed Brightcove URL
+     - 'id': compat_str(video_data['id'])
+     - 'title': video_data['title']
+     - 'thumbnail': video_data.get('thumbnail')
+     - 'description': video_data.get('description')
+     - 'duration': parse_duration(video_data.get('length'))
+     - 'ie_key': 'BrightcoveNew'
+     - This delegates the actual video extraction to BrightcoveNew, which will fill in fields like timestamp, uploader_id, etc.
+
+- Key implementation details:
+  - Robust JSON extraction from a dynamic USA Today page via the ui-video-data element.
+  - Uses try_get to safely access nested keys in video_data without raising if intermediate keys are missing.
+  - Falls back to default Brightcove account '29906170001' if not present in the asset metadata.
+  - Uses parse_duration to convert the length field into seconds.
+  - Returns a url_transparent payload, enabling youtube-dl to process the Brightcove video through BrightcoveNew.
+
+- Tests:
+  - _TESTS contains two sample URLs with expected results (id, ext, title, timestamp, description, uploader_id, upload_date) to validate extraction and Brightcove delegation behavior.

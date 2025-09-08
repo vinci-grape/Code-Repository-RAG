@@ -1,0 +1,54 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/c56.py
+
+Overview
+- This module defines a youtube-dl extractor for 56.com videos (class C56IE, subclass of InfoExtractor).
+- It can handle direct 56.com video pages and embedded videos that ultimately point to Sohu as the source.
+
+Key components
+- Class: C56IE(InfoExtractor)
+  - _VALID_URL: Regex to match 56.com video/playlist URLs and capture the text_id portion.
+  - IE_NAME: '56.com'
+  - _TESTS: Two test cases
+    - Test 1: Direct 56.com video page, expects id, title, duration, and format metadata (FLV).
+    - Test 2: Page that results in an external Sohu video; expects a link to Sohu and playlist metadata (playlist_count).
+
+Main functionality (core logic in _real_extract)
+- URL parsing
+  - Uses _VALID_URL to extract text_id from the provided URL.
+  - text_id corresponds to the identifier used to fetch video data.
+
+- Sohu embedded video handling
+  - Downloads the page content.
+  - Attempts to find a JavaScript object variable named sohuVideoInfo via regex: var sohuVideoInfo = ({...});
+  - If found:
+    - Parses the JSON-like content using _parse_json with transform_source=js_to_json to convert JS style to valid JSON.
+    - Returns a URL result pointing to the Sohu extractor (self.url_result(sohu_video_info['url'], 'Sohu')).
+  - This path handles cases where the 56 page is just a wrapper around a Sohu-hosted video.
+
+- 56.com JSON data path (direct video data)
+  - If no Sohu info is found, fetches video metadata from:
+    - http://vxml.56.com/json/{text_id}/
+  - Extracts info = page['info'].
+  - Builds the formats list from info['rfiles']:
+    - Each format dict contains:
+      - format_id: f['type']
+      - filesize: int(f['filesize'])
+      - url: f['url']
+  - Sorts formats via self._sort_formats(formats).
+
+- Return metadata
+  - id: info['vid']
+  - title: info['Subject']
+  - duration: int(info['duration']) / 1000.0  (duration in milliseconds converted to seconds)
+  - formats: the constructed formats list
+  - thumbnail: info.get('bimg') or info.get('img')  (prefers bimg, falls back to img)
+
+Important implementation details
+- Robust handling of two sources: direct 56.com data or embedded Sohu video data.
+- Uses _search_regex with default=None to gracefully skip Sohu path if not present.
+- Uses _parse_json with transform_source=js_to_json to convert JavaScript-style JSON to valid JSON when parsing sohuVideoInfo.
+- Duration conversion assumes the 56 API provides duration in milliseconds; converts to seconds for consistency with youtube-dl conventions.
+- The code returns a single video entry (or delegates to Sohu); playlist behavior is inferred via tests and external handling, not explicit playlist parsing here.
+
+In short
+- The extractor first tries to delegate to Sohu if the 56 page points to a Sohu video. If not, it fetches 56’s own JSON metadata, builds available formats from rfiles, and returns a video entry with id, title, duration, formats, and thumbnail.

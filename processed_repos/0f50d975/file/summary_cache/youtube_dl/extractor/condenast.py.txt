@@ -1,0 +1,80 @@
+Concise summary of CondeNastIE (youtube_dl/extractor/condenast.py)
+
+Purpose
+- Extractors for Condé Nast media group sites (Allure, Architectural Digest, Ars Technica, Bon Appétit, GQ, Vogue, WIRED, etc.) that use a common HTML5/embedded video player.
+- Supports both individual videos and series playlists, with multiple fallback paths to fetch video metadata and media sources.
+
+Main class
+- CondeNastIE(InfoExtractor)
+
+Key components
+- _SITES: mapping of site subdomains to human-friendly names (e.g., 'wired' -> 'WIRED').
+- _VALID_URL: regular expression that matches Condé Nast player URLs for:
+  - Embedded/script/video paths (embed, script/video, inline/video)
+  - Watch/series paths with optional display_id
+  - Uses site keys to build a single regex for all supported sites.
+- EMBED_URL: pattern for embed URLs used by internal helpers.
+- _TESTS: sample URLs to validate extraction (including single videos, series, and JS embed variants).
+
+Core functionality (flow)
+- _real_extract(url):
+  - Parses the URL with _VALID_URL to obtain groups: video_id, player_id, target, url_type, display_id.
+  - If video_id is present: fetch a single video via _extract_video, passing videoId, playerId, target.
+  - Otherwise download the page and:
+    - If url_type == 'series': delegate to _extract_series to build a playlist from the series page.
+    - Else try to reuse preloaded state from the page (__PRELOADED_STATE__); if available, derive video params and info, otherwise fall back to _extract_video_params and _search_json_ld to gather info, then merge with _extract_video(params).
+
+Video extraction paths (_extract_video)
+- _extract_video(params): Given a dict with at least videoId (and possibly playerId/target).
+  - Attempts a New API path: call embed-api.json with videoId and query params (embedType inline, etc.). If found, use video info from response.
+  - Fallbacks (Old API paths):
+    - player/video.js with videoId and params (if playerId present).
+    - loader.js to retrieve a config for video data.
+    - inline/video/<video_id>.js as another JS-based source, with a target override.
+  - If video info not yet obtained, extract from a config snippet in the page (var config = { ... }); then video = config.video.
+  - Title is taken from video['title'].
+  - Formats:
+    - Iterate video['sources'], skipping entries without 'src'.
+    - Determine extension via mimetype2ext(fdata['type']) or determine_ext(src).
+    - If ext == 'm3u8', extract HLS formats via _extract_m3u8_formats with m3u8_native and hls id, non-fatal.
+    - Otherwise, build a format dict with:
+      - format_id: ext plus quality label if present
+      - url: src
+      - ext: ext
+      - quality: 1 if 'high' else 0 (basic prioritization)
+  - Sort formats with _sort_formats.
+  - Subtitles: collect en captions from video_info['captions'] if type is vtt/srt/tml and has a src.
+  - Return a dict with: id, formats, title, thumbnail, uploader, duration, tags, series, season, timestamp, categories, subtitles.
+
+Series extraction (_extract_series)
+- _extract_series(url, webpage):
+  - Extracts series title from <div class="cne-series-info"> ... <h1>...</h1>.
+  - Finds all series episode paths from <p class="cne-thumb-title"><a href="(/watch/...)">.
+  - Deduplicates with orderedSet, builds absolute URLs, and returns a playlist_result containing:
+    - entries: each as url_result(build_url(path), 'CondeNast')
+    - playlist_title: the extracted title
+
+Video parameter extraction (_extract_video_params)
+- _extract_video_params(webpage, display_id):
+  - Tries to parse a JSON-like object from var params = ({...}); using _parse_json with js_to_json.
+  - If found, ensures 'videoId' is set from data-video-id or data-video-id-like source.
+  - If not found, tries to locate an element with data-js="video-player" and reads:
+    - videoId from data-video
+    - playerId from data-player
+    - target from id
+  - Returns a dict with gathered params (videoId, playerId, target, etc.) or an empty dict.
+
+Implementation details and behavior
+- Multi-path resilience: The extractor supports a variety of Condé Nast video delivery endpoints (new embed API, legacy video.js, loader.js, inline JS), attempting to obtain a consistent video_info structure.
+- JS/JSON handling: Uses _parse_json with js_to_json to safely convert embedded JavaScript objects to Python dicts.
+- Format handling: Distinguishes between HLS (m3u8) and other sources, using _extract_m3u8_formats for HLS, and builds standard format dicts for direct video URLs.
+- Subtitles: Only English captions are collected, limited to supported formats (vtt/srt/tml) when a URL is provided.
+- Metadata: Returns a rich info dict including id, title, description (from earlier preloaded state or params), uploader, timestamp (parse_iso8601), duration, tags, series/season, categories, and thumbnail.
+- Error handling: If new API fetch fails, it gracefully falls back to older endpoints; if nothing is found, it propagates through the normal error paths of the parent class.
+
+Usage scope
+- Designed to work across many Condé Nast sites listed in _SITES, covering embedded or watch/video pages from those sites.
+- Produces standard youtube-dl information dictionaries suitable for downstream processing (download, playlists, metadata).
+
+In short
+- This extractor centralizes Condé Nast video extraction by handling both single videos and series, using a hierarchy of endpoints to fetch video metadata and sources, constructing a robust list of formats and subtitles, and returning rich metadata for each video.

@@ -1,0 +1,108 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/awaan.py
+
+What this file does
+- Implements a set of extractors for the AWAA N (awaan.ae / dcndigital.ae) platform. It supports individual videos, live channels, and seasons/playlists. It delegates actual media extraction to Mangomolo-based extractors via url_transparent entries.
+
+Key classes and their purposes
+- AWAANIE (InfoExtractor)
+  - Dispatcher at the top level.
+  - _VALID_URL matches both awaan.ae and dcndigital.ae show pages with an ID and optional video_id or season_id.
+  - _real_extract logic:
+    - If a video_id is present and > 0: redirects to AWAANVideo using the video URL http://awaan.ae/media/{video_id}.
+    - If a season_id is present and > 0: returns a Season entry (AWAANSeason) with show_id passed via smuggled data.
+    - Otherwise: returns a Season entry for the show (AWAANSeason) using the show_id.
+
+- AWAANBaseIE (InfoExtractor)
+  - Shared helper for video data processing.
+  - _parse_video_data(video_data, video_id, is_live)
+    - Extracts title (prefer title_en, fall back to title_ar), description (en/ar), img (thumbnail).
+    - Builds a dictionary with:
+      - id, title (live vs non-live), description, thumbnail (constructed from img), duration, timestamp, is_live, uploader_id.
+
+- AWAANVideoIE (AWAANBaseIE)
+  - IE_NAME = 'awaan:video'
+  - _VALID_URL matches various video-related paths (video, media, catchup) with a numeric id.
+  - _real_extract flow:
+    - Fetches video data from: http://admin.mangomolo.com/analytics/index.php/plus/video?id={video_id}, with Origin header to allow cross-domain access.
+    - Builds a base info dict with _parse_video_data(video_data, video_id, is_live=False).
+    - Constructs an embed URL for Mangomolo: http://admin.mangomolo.com/analytics/index.php/customers/embed/video? plus encoded params (id, user_id, signature, countries, filter).
+    - Returns a final info dict with:
+      - _type: 'url_transparent'
+      - url: embed_url
+      - ie_key: 'MangomoloVideo'
+    - Result is delegated to MangomoloVideo extractor to obtain the actual media URL/format.
+
+- AWAANLiveIE (AWAANBaseIE)
+  - IE_NAME = 'awaan:live'
+  - _VALID_URL matches live channel paths with a numeric id.
+  - _TEST includes example with expected fields and skip_download for m3u8 (download skipped for live).
+  - _real_extract flow:
+    - Fetches channel data from: http://admin.mangomolo.com/analytics/index.php/plus/getchanneldetails?channel_id={id}, with Origin header.
+    - Builds base info dict via _parse_video_data(channel_data, channel_id, is_live=True).
+    - Constructs an embed URL for Mangomolo Live: http://admin.mangomolo.com/analytics/index.php/customers/embed/index? plus encoded params
+      - id: base64(user_id)
+      - channelid: base64(id)
+      - signature, countries, filter
+    - Returns info dict with:
+      - _type: 'url_transparent'
+      - url: embed_url
+      - ie_key: 'MangomoloLive'
+    - Delegates to MangomoloLive extractor for actual media.
+
+- AWAANSeasonIE (InfoExtractor)
+  - IE_NAME = 'awaan:season'
+  - _VALID_URL matches program pages for either a show or a season under awaan/dcndigital.
+  - _TEST includes a sample program URL and an expected playlist with a single season entry (id, title) and mincount.
+  - _real_extract flow:
+    - Unsmuggles any data in the URL to recover show_id if present in smuggled data, and extracts show_id/season_id from URL.
+    - If season_id is provided:
+      - Attempts to resolve show_id from the season info endpoint if not supplied via smuggled data:
+        - Calls http://admin.mangomolo.com/analytics/index.php/plus/season_info?id={season_id}
+      - Uses show_id for subsequent requests.
+    - Calls http://admin.mangomolo.com/analytics/index.php/plus/show with POST data (show_id and season_id) to retrieve show data, including seasons and videos.
+      - Data is sent with appropriate POST encoding and Origin header.
+    - If no season_id is present, uses show['default_season'].
+    - Iterates through show['seasons'] to find the target season by id. Builds:
+      - title: season title_en or title_ar
+      - entries: a list of AWAANVideoIE entries for each video in show['videos'], each pointing to http://awaan.ae/media/{video_id}
+    - Returns a playlist_result(entries, season_id, title)
+  - Note: This extractor is the one that composes a season playlist by discovering all videos in a season and wrapping them as individual AWAANVideo entries.
+
+Important implementation details and behavior
+- URL handling and redirections
+  - AWAANIE acts as the main router, distinguishing between video, season, and show entry points and delegating to the appropriate extractor.
+  - For seasons, show_id is passed through smuggling to the season extractor when needed.
+
+- Data sources and headers
+  - Video and live data are fetched from Mangomolo analytics endpoints:
+    - Plus/video for video metadata
+    - Plus/getchanneldetails for live channel metadata
+    - Plus/season_info and Plus/show for seasons and show details
+  - All fetches include Origin headers (Origin: http://awaan.ae) to satisfy cross-origin requirements.
+
+- Embedding approach
+  - Instead of returning direct video URLs, video and live extractors provide a url_transparent entry pointing to an external embed URL (Mangomolo embed endpoints).
+  - This design delegates actual media URL extraction to MangomoloVideo or MangomoloLive extractor backends (via ie_key).
+
+- Metadata extraction
+  - Title selection prefers English titles, falls back to Arabic.
+  - Thumbnails are formed from an img field if present: http://admin.mangomolo.com/analytics/{img}
+  - Timestamps are parsed using parse_iso8601 with a space separator.
+  - Duration is parsed as an integer when possible.
+  - Uploader_id is carried through from the API data when available.
+  - Description falls back between English and Arabic fields.
+
+- Season logic
+  - If a season_id is supplied, the code resolves the corresponding show_id (via season_info if needed) and fetches the entire show structure to extract a specific season’s details and videos.
+  - The season results are assembled as a playlist, with each video linking to its own AWAANVideo entry.
+
+- Tests
+  - AWAANVideoIE includes _TESTS for a sample video with expected fields (id, ext, title, description, duration, timestamp, upload_date, uploader_id) and an md5 for description.
+  - Another test checks URL pattern matching (only_matching) for a different path.
+
+Summary of main functionality
+- Provide access to AWAA N content (videos, live channels, and seasons) by:
+  - Discovering and normalizing metadata locally
+  - Delegating actual media URL extraction to Mangomolo-based extractors via url_transparent embeds
+  - Building playlist-style season entries when appropriate
+  - Handling cross-host URL forms and season/show resolution with careful data fetching and POST/URL encoding as needed.

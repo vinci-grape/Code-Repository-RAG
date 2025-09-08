@@ -1,0 +1,52 @@
+- Purpose
+  - This file implements two YouTube-DL extractors for Chirbit:
+    - ChirbitIE: for individual Chirbit audio pages (chirb.it/<id>).
+    - ChirbitProfileIE: for Chirbit user profile pages (chirbit.com/<user>), yielding a playlist of their chirbits.
+
+- Key classes
+  - ChirbitIE (InfoExtractor)
+    - _NAME: 'chirbit'
+    - _VALID_URL: matches chirb.it short URLs, including optional wp/pl prefixes or a FB player SWF key variant.
+    - _TESTS: includes a real Chirbit page with expected fields (id, ext, title, description, duration, uploader) and two only_matching tests for other URL formats.
+    - _real_extract(url)
+      - Extracts audio_id from URL via _match_id.
+      - Downloads the page at http://chirb.it/<audio_id>.
+      - Finds the data-fd attribute in the HTML (data-fd="..."), capturing the inner URL string.
+      - Decodes the audio URL by:
+        - Reversing the captured data_fd string,
+        - Base64 decoding it (compat_b64decode),
+        - Decoding as UTF-8 to obtain the actual audio URL.
+        - This is reverse-engineered from chirbit.player.js (soundURL).
+      - Scrapes metadata from the page:
+        - title from an element with class "chirbit-title"
+        - description from a Description block (Description header followed by a pre tag); optional
+        - duration via a numeric string inside an element with class "c-length"; optional (uses parse_duration; fatal=False)
+        - uploader from an element with id "chirbit-username"; optional
+      - Returns a dict with id, url, title, description, duration, uploader.
+
+  - ChirbitProfileIE (InfoExtractor)
+    - _NAME: 'chirbit:profile'
+    - _VALID_URL: matches Chirbit profile pages (chirbit.com/<id>, with optional rss/ prefix)
+    - _TEST: a minimal test for a profile with id and playlist_mincount
+    - _real_extract(url)
+      - Extracts profile_id from URL via _match_id.
+      - Downloads the profile page.
+      - Builds a list of entries by locating inputs with IDs in the form copy-btn-<id> via regex:
+        - For each match, constructs a Chirbit URL using _proto_relative_url('//chirb.it/' + video_id)
+        - Creates a URL result for each video to be resolved by ChirbitIE
+      - Returns a playlist result containing all entries with the profile_id as the playlist id.
+
+- Important implementation details
+  - Data extraction method for ChirbitIE:
+    - The audio URL is embedded in a data-fd attribute and is stored as a base64-encoded string of the reversed URL.
+    - The code reverses the string, base64-decodes it, and decodes to UTF-8 to obtain the final audio URL.
+  - Robust metadata handling:
+    - title extraction uses a specific CSS class pattern.
+    - description and uploader are optional (fatal=False), allowing extracts even if these fields are missing.
+    - duration uses parse_duration with fatal=False to gracefully handle missing or malformed values.
+  - Profile extraction builds a playlist by scraping hidden input elements that store video IDs, then converts those IDs into Chirbit URLs using a protocol-relative scheme, ensuring compatibility across HTTP/HTTPS.
+  - Uses compatibility helpers (compat_b64decode) to handle base64 decoding portably across Python versions.
+
+- Overall functionality
+  - ChirbitIE enables downloading single Chirbit audio files and extracting their metadata.
+  - ChirbitProfileIE enables listing a user’s Chirbits as a playlist by parsing the profile page for video IDs and pointing to their respective Chirbit pages.

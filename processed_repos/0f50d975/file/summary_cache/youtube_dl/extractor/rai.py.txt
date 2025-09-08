@@ -1,0 +1,66 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/rai.py
+
+Overview
+- This module implements extractors for Rai-related video content (RaiPlay, RaiTV/RAI sites, and RaiPlay playlists).
+- It centers on a relinker service to obtain multiple video formats (M3U8, F4M, and direct HTTP) and to assemble a unified info dictionary for each video.
+- It also supports subtitles extraction, thumbnails, metadata (title, description, uploader, duration, dates), and geo/DRM handling.
+
+Main classes
+- RaiBaseIE (InfoExtractor)
+  - Core helper for all Rai extractors. Provides:
+    - _extract_relinker_info(self, relinker_url, video_id): fetches relinker XML data for platforms (mon, flash, native); collects available formats, detects geo-restriction, live status, and duration. Falls back to direct HTTP URLs if needed. Creates final formats by combining relinker-derived formats with HTTP URLs from _create_http_urls.
+    - _create_http_urls(self, relinker_url, fmts): constructs direct HTTP MP4 URLs from the relinker endpoint. Validates URLs via HEAD requests (test_url). Attempts to reuse existing m3u8 format data to improve resolution selection. Returns a list of http-based formats with appropriate format_ids like https-<tbr>.
+    - _extract_subtitles(url, video_data): builds a subtitles dict from video data (subtitlesArray, subtitles, subtitlesUrl). Supports both .stl and .srt, with language handling (default 'it').
+  - GEO and DRM handling: _GEO_COUNTRIES = ['IT'], _GEO_BYPASS = False. If geoprotection is detected and no formats are available, raises geo restricted error.
+
+- RaiPlayIE (RaiBaseIE)
+  - _VALID_URL matches RaiPlay video pages (HTTPS, with a UUID-like id).
+  - _real_extract(url): downloads the video JSON at base_url.json. Detects DRM and raises ExtractorError if DRM is present.
+  - Builds relinker formats via _extract_relinker_info(video['content_url'], video_id) and sorts them.
+  - Collects thumbnails, date/time, subtitles, program info (series/season), and episode data.
+  - Assembles an info dict with fields like id, display_id, title (live-title if live), alt_title, description, uploader, creator, duration, timestamp, thumbnails, series, season/episode data, subtitles, and embeds relinker formats.
+
+- RaiPlayLiveIE (RaiPlayIE subclass)
+  - _VALID_URL for RaiPlay live streams (dirette/...). Inherits RaiPlayIE behavior; marks is_live when relinker data indicates live streaming, using _live_title for live titles.
+
+- RaiPlayPlaylistIE (InfoExtractor)
+  - _VALID_URL for RaiPlay program pages.
+  - _real_extract(url): fetches program JSON, iterates through program blocks/sets to collect content item entries. For each found video item, it builds a video URL and adds it to a playlist using RaiPlayIE as the inner extractor. Returns a playlist_result with id, title, and description.
+
+- RaiIE (RaiBaseIE)
+  - _VALID_URL matches generic Rai content pages (rai.it, rai.tv, rainews.it) with ContentItem UUIDs.
+  - _extract_from_content_id(self, content_id, url): fetches ContentItem JSON. If type indicates Audio, constructs a direct audio format; if Video, uses _extract_relinker_info on mediaUri. Sorts formats, collects thumbnails, subtitles, and builds an info dict (id, title, description, thumbnails, uploader, upload_date, duration, subtitles) then merges relinker formats.
+  - _real_extract(self, url): loads the page, attempts to locate ContentItem-UUID via og meta tags or embedded patterns. If multiple potential IDs found, tries them in order via _extract_from_content_id. If not found, extracts a relinker URL from the page (var videoURL or mediaUri) and uses _extract_relinker_info to build formats. Gets the title from videoTitolo or page title. Returns a complete info dict with merged relinker formats.
+
+Key implementation details
+- Relinker-based format extraction:
+  - The central mechanism is _extract_relinker_info, which queries the relinker service across platforms (mon, flash, native) to gather a list of available formats (HLS, DASH, or direct HTTP). It handles geo protections, live indicators, and duration, and then enriches with direct HTTP URLs via _create_http_urls.
+  - _create_http_urls analyzes the relinker URL structure with a regex, validates generated URLs via HEAD requests, and builds per-quality formats. It tries to reuse the existing m3u8 format data to populate width/height/vcodec/acodec/fps when possible.
+
+- Subtitles:
+  - Subtitles are extracted from subtitlesArray and explicit subtitles/subtitlesUrl fields. Supports multiple languages, falls back to Italian where language is missing, and provides both STL and corresponding SRT if available.
+
+- Metadata and thumbnails:
+  - Titles and descriptions are pulled from JSON data or page metadata. Thumbnails are collected from various image fields, normalized via urljoin.
+
+- DRM and geolocation:
+  - DRM: If DRM is detected in the video JSON (rights_management), extraction is aborted with an ExtractorError.
+  - Geolocation: The base class restricts to IT, and geo-restricted videos raise GeoRestrictedError when the relinker indicates geoprotection without available formats.
+
+- Playlist handling:
+  - RaiPlayPlaylistIE builds a playlist by enumerating program blocks/sets, downloading per-set JSON to collect individual Medias, and appending them as entries with RaiPlayIE as the extractor for each video.
+
+Data flow
+- RaiPlayIE: Retrieve video JSON -> determine relinker_url via video content_url -> extract formats via _extract_relinker_info -> collect metadata (title, thumbnails, date, subtitles) -> merge with relinker formats -> return info dict
+- RaiIE: Attempt ContentItem JSON via multiple IDs (content_id or video_id) -> if video, use relinker path as above; if audio, create direct audio format -> assemble info dict
+- RaiPlayPlaylistIE: Fetch program JSON -> traverse blocks/sets -> fetch per-set JSON -> create video URL entries using RaiPlayIE
+- Subtitles and thumbnails are consistently added to the final info dicts across all extractors.
+
+Notable edge cases covered
+- Direct MMS URLs are treated as not directly downloadable in some cases (only_matching in tests).
+- Multiple potential content IDs are tried with fallback to relinker if needed.
+- Live streams are supported by applying live title formatting when relinker reports is_live.
+- Fallbacks for subtitle formats (STL to SRT) are implemented.
+
+In short
+This file provides a robust, relinker-driven extraction framework for RaiPlay and Rai content, handling live streams, DRM/geo restrictions, multiple format types (HLS, DASH, HTTP MP4), subtitles, thumbnails, and program playlists, with specialized handling for RaiPlay and Rai generic Rai content pages.

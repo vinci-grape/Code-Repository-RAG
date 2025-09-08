@@ -1,0 +1,121 @@
+Concise summary of ARD-related extractors in ./youtube-dl/youtube_dl/extractor/ard.py
+
+Purpose
+- Implement youtube-dl extractors for German ARD/ARD Mediathek content, including the main site, beta/experimental pages, and the Das Erste site.
+- Provide robust handling of formats from various streaming technologies (HLS, HDS, RTMP, direct MP4), as well as subtitles and geolocation/age restrictions.
+
+Key classes and their roles
+1) ARDMediathekBaseIE (InfoExtractor)
+- Shared logic for ARD Mediathek content.
+- _extract_media_info(media_info_url, webpage, video_id)
+  - Downloads a media-info JSON and delegates parsing to _parse_media_info.
+- _parse_media_info(media_info, video_id, fsk)
+  - Builds the final info dict: id, duration, thumbnail, is_live, formats, subtitles.
+  - Detects FSK/age restrictions via fsk flag; raises an ExtractorError if not available yet or geoblocked.
+  - Handles subtitles via media_info['_subtitleUrl'] (German TTML).
+  - Sorts formats after extraction.
+- _extract_formats(media_info, video_id)
+  - Core format extraction from the media info payload.
+  - Iterates over media arrays and each stream:
+    - Normalizes stream URLs to a list.
+    - Skips certain adaptive formats when a fixed quality other than 'auto' is requested.
+    - Handles:
+      - f4m (HDS) via _extract_f4m_formats with hdcore/plugin params.
+      - m3u8 (HLS) via _extract_m3u8_formats with m3u8_native and hls id.
+      - Other direct URLs:
+        - Supports RTMP when a server prefix is provided (rtmp URL and play_path).
+        - Otherwise uses standard URL with format_id composed from index, extension, and quality.
+        - Extracts width/height from filename if present (e.g., _widthxheight.mp4).
+        - If type is 'audio', marks video codec as none (audio-only).
+  - Returns a list of formats.
+
+2) ARDMediathekIE (ARD Mediathek main extractor)
+- Inherits ARDMediathekBaseIE.
+- IE_NAME = 'ARD:mediathek'
+- _VALID_URL regex covers ARD Mediathek, One ARD, Das Erste, etc.
+- _real_extract(url)
+  - Determines video_id from URL (documentId query param or path-based id).
+  - Downloads page HTML.
+  - Handles two major paths:
+    a) Page contains mediaStream entries (mediaCollection.addMediaStream):
+       - Extracts stream URLs and builds a small set of formats with quality mapping (lo/hi/hq) and format_id.
+       - Uses QUALITIES(['lo','hi','hq']) to map to a numeric quality.
+       - Sorts formats and returns info with only formats if streams were found.
+    b) No page streams found: fetches media info JSON via _extract_media_info on /play/media/<video_id>:
+       - If document_id absent, tries to derive a media id from the page.
+       - Builds info via _extract_media_info and returns with id, title, description, thumbnail, and live handling.
+  - Common post-processing:
+    - Extracts title from og:title or fallback heuristics.
+    - Extracts description from og:description or meta fields or teaser text.
+    - Extracts thumbnail from og:thumbnail.
+    - If the content is RSS, delegates to GenericIE RSS extraction.
+  - If live, uses _live_title to adjust the title.
+
+3) ARDIE (Das Erste video extractor)
+- Inherits InfoExtractor.
+- _VALID_URL matches Das Erste video pages.
+- _real_extract(url)
+  - Uses the page URL to derive display_id and loads the player XML at mainurl/~playerXml.xml.
+  - Parses XML:
+    - upload_date from broadcastDate, thumbnail from teaserImage URL.
+    - Iterates over <asset> nodes:
+      - If a valid fileName exists, determines format_type and whether it's a direct URL or a streaming manifest.
+      - For m3u8: adds formats via _extract_m3u8_formats (entry_protocol m3u8_native, m3u8_id = format_type or 'hls').
+      - For f4m: adds formats via _extract_f4m_formats with hdcore parameter.
+      - Otherwise builds a direct format:
+        - width/height from frameWidth/frameHeight
+        - vbr/abr from bitrateVideo/bitrateAudio
+        - vcodec from codecVideo
+        - tbr from totalBitrate
+      - If a serverPrefix is present, uses that as the base URL and playpath for RTMP-like streaming; otherwise uses the direct file URL.
+      - These formats are collected and then sorted.
+    - Subtitles: collects German TTML/VTT from dataTimedText nodes.
+  - Returns a dict with id, formats, subtitles, display_id, title, duration, upload_date, and thumbnail.
+
+4) ARDBetaMediathekIE (Beta/experimental ARD Mediathek)
+- Inherits ARDMediathekBaseIE.
+- _VALID_URL matches ARD Mediathek beta URLs.
+- _TESTS includes a beta URL (only_matching) and other examples.
+- _real_extract(url)
+  - video_id = matched id from URL.
+  - Queries ARD Mediathek public gateway with a GraphQL-like query to fetch playerPage data:
+    - blockedByFsk, broadcastedOn, maturityContentRating, mediaCollection (with _duration, _geoblocked, _isLive, _mediaArray, _previewImage, _subtitleUrl, _type), show title, synopsis, etc.
+  - If mediaCollection is missing, tries to fetch /play/media/<contentId> using contentId obtained from tracking.contentId.
+  - Parses media info using _parse_media_info, passing in blockedByFsk as fsk flag.
+  - Age limit handling:
+    - If maturityContentRating exists, derive age_limit from it (FSK number).
+    - If not provided, attempt to extract age limit from description with a regex looking for "(FSK N)".
+  - Adds additional fields: age_limit, title, description (synopsis), timestamp (uniform from broadcastedOn), and series (show title if present).
+  - Returns the aggregated info dict.
+
+Important implementation details
+- Streaming formats handling:
+  - Supports HLS (m3u8), HDS (f4m) and direct HTTP(S) streams.
+  - For f4m, hdcore/plugin parameters are added to the URL for compatibility.
+  - For HLS, m3u8_native path is used and hls id is set as 'hls' or derived format_type.
+  - Direct streams include support for RTMP by using serverPrefix as url and playpath as the stream URL; otherwise simple url-based formats with a composed format_id.
+  - Width/height extraction from filename patterns when not provided by manifest.
+  - Audio-only streams flagged via vcodec = 'none'.
+- Subtitles:
+  - ARD Mediathek (base) supports German TTML subtitles via _subtitleUrl.
+  - ARD Das Erste collects subtitles from dataTimedText and dataTimedTextNoOffset/Vtt nodes with 'de' as language key.
+- Geolocation and age restrictions:
+  - Base extractor enforces geoblocking for DE with _GEO_COUNTRIES and raises geo restriction errors when appropriate.
+  - ARD Mediathek beta path tries to respect age (FSK) restrictions from maturityContentRating or description parsing.
+- Live handling:
+  - If the media is a live stream, the title is adjusted via _live_title.
+- RSS fallback:
+  - If the URL looks like an RSS feed, ARD Mediathek extractor delegates to GenericIE RSS parsing.
+- Data sources:
+  - ARDMediathekBaseIE works with media info JSON structures provided by ARD APIs, extracting _mediaArray, _mediaStreamArray, _stream, and other fields.
+  - ARDBetaMediathekIE uses a GraphQL-like gateway call to fetch playerPage data, then uses _parse_media_info on the retrieved mediaCollection.
+  - ARDIE uses the Das Erste XML player configuration to extract asset-based formats and subtitles.
+
+Tests and coverage
+- Extensive _TESTS for ARD Mediathek, beta, and ARD/Das Erste pages, including cases with direct formats, audio, and RSS fallbacks.
+- Tests exercise both direct page-based streams and metadata-driven extraction paths.
+
+In short
+- The file implements a set of ARD extractors that cover Mediathek and Das Erste assets, including beta variants.
+- Central logic is in ARDMediathekBaseIE for parsing media info into formats/subtitles, with specialized harvesters in ARDMediathekIE, ARDIE, and ARDBetaMediathekIE to handle site-specific page structures and APIs.
+- It supports multiple streaming technologies, proper handling of age blocks and geolocation, and robust title/description/thumbnail extraction for a variety of ARD content sources.

@@ -1,0 +1,113 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/mailru.py
+
+Overview
+- Provides extraction support for Mail.Ru video and music content.
+- Key extractors:
+  - MailRuIE: Video extractor for various Mail.Ru video pages.
+  - MailRuMusicSearchBaseIE: Shared base for Mail.Ru music search and track extraction.
+  - MailRuMusicIE: Music track extractor (single track) using Mail.Ru music data.
+  - MailRuMusicSearchIE: Music search extractor producing a playlist/all-matching results.
+- Handles multiple data sources (meta URL via page-config, and a legacy API JSON) and graceful fallback.
+- Adds cookie-based authentication header when available to access video streams.
+
+Main functionality and data flow
+
+MailRuIE (Video extractor)
+- URL matching:
+  - Handles multiple Mail.Ru video URL formats, including anchors like #video, embed paths, and meta endpoints. Captures id variants via groups idv1, idv2prefix/idv2suffix, or metaid.
+- Extraction logic (_real_extract):
+  - If a meta ID is present (metaid), constructs meta URL directly: https://my.mail.ru/+/video/meta/{meta_id}.
+  - Otherwise:
+    - Derives video_id from URL groups.
+    - Downloads the page and looks for a script tag with class "sp-video__page-config" to extract a JSON page_config.
+    - Obtains metaUrl from page_config (or nested video.metaUrl) if present.
+  - Tries to fetch video data JSON:
+    - If meta URL found: download meta JSON from that URL (video_data).
+    - Fallback: fetch legacy video JSON at http://api.video.mail.ru/videos/{video_id}.json?new=1.
+  - Cookie header for video_key:
+    - Reads video_key from cookies for https://my.mail.ru and, if present, adds Cookie: video_key=<value> to requests per-format.
+  - Formats extraction:
+    - Iterates video_data['videos'] and builds a formats list with:
+      - url, format_id (from f['key']), height parsed from format_id (e.g., "720p"), http_headers (cookie header if set).
+    - Sorts formats with _sort_formats.
+  - Metadata extraction:
+    - meta_data = video_data['meta']; title = meta_data['title'] with trailing ".mp4" removed.
+    - uploader info from video_data['author'] (name and id or email).
+    - view_count from viewsCount or views_count.
+    - acc_id and item_id used to build a content_id of the form "accId_itemId" when both exist; otherwise falls back to video_id.
+    - thumbnail (poster), duration, timestamp from meta data.
+  - Returns a dict with:
+    - id, title, thumbnail, timestamp, uploader, uploader_id, duration, view_count, formats
+
+MailRuMusicSearchBaseIE (Music data helper)
+- _search(query, url, audio_id, limit=100, offset=0):
+  - Downloads JSON from https://my.mail.ru/cgi-bin/my/ajax with:
+    - Headers: Referer (url) and X-Requested-With: XMLHttpRequest
+    - Query params crafted to call music.search with:
+      - arg_query: search query
+      - arg_extended: 1
+      - arg_search_params: JSON containing limit/offset
+      - arg_limit, arg_offset: pagination controls
+  - Returns the first element of the response that is a dict.
+- _extract_track(t, fatal=True) (static):
+  - Builds track data dict from a music item t.
+  - Requires audio URL (URL) and audio id (File); fatal controls whether to require them.
+  - Collects thumbnail, uploader/uploader_id, duration (seconds or parse from strings), view_count.
+  - Builds title as "Artist - Track" when artist is present; otherwise uses track name or id.
+  - Returns a dict with:
+    - extractor_key (MailRuMusicIE.ie_key()), id, title, thumbnail, uploader, uploader_id, duration, view_count
+    - vcodec: 'none' (audio-only), abr (bitrate), track, artist, album
+    - url (audio URL)
+
+MailRuMusicIE (Single music track)
+- Inherits MailRuMusicSearchBaseIE.
+- _VALID_URL matches Mail.Ru music track pages: /music/songs/...-<id>
+- _real_extract(url):
+  - Extracts audio_id via _match_id.
+  - Downloads page; infers title via OpenGraph (self._og_search_title).
+  - Uses _search to fetch MusicData, selects the track t with t['File'] == audio_id.
+  - Builds info dict via _extract_track(t) and sets info['title'] to the page title.
+  - Returns the track info.
+
+MailRuMusicSearchIE (Music search results)
+- Inherits MailRuMusicSearchBaseIE.
+- _VALID_URL matches /music/search/<query-id>
+- _real_extract(url):
+  - Unquotes the search query from the URL path.
+  - Iteratively fetches results using _search with pagination:
+    - LIMIT = 100, offset increases in a loop.
+    - Accumulates track dicts from MusicData by applying _extract_track(t, fatal=False).
+    - Attempts to read total results from search response to determine when to stop.
+  - Returns a playlist_result containing all collected entries with the search query as the playlist id.
+
+Key implementation details and nuances
+
+- Meta URL vs legacy API:
+  - MailRuIE first attempts to fetch a meta JSON via a metaUrl found in the page-config script tag or embedded in the page data.
+  - If not available, it falls back to the older API endpoint http://api.video.mail.ru/videos/{video_id}.json?new=1 for video data.
+- Page-config extraction:
+  - Uses a regex to pull a script tag with class="sp-video__page-config" and parses its inner JSON safely (defaulting to empty dict if not found).
+- Cookie handling for video streams:
+  - Attempts to attach a video_key cookie to each format request if present on the site, to possibly unlock protected video streams.
+- Video formats:
+  - Builds per-format dictionaries with url, format_id, height (parsed from format_id like "720p"), and http_headers for the request.
+  - Uses _sort_formats to order formats by quality/bitrate.
+- Content identifiers:
+  - Uses accId and itemId from meta data to create a stable content_id; falls back to the video_id if those aren’t present.
+- Music data extraction:
+  - The shared _search helper abstracts the AJAX call for music search, including proper headers and JSON-encoded arguments.
+  - _extract_track builds a consistent track structure with vcodec 'none' for audio-only, and includes typical music metadata fields (artist, track, album, bitrate).
+- Robustness and edge cases:
+  - Several test cases demonstrate handling of different URL schemes and the fact that some videos/music are not accessible in certain environments (noted skip conditions).
+  - The code tolerates missing fields gracefully (e.g., skipping formats without URLs, optional metadata in the JSON).
+- Output fields:
+  - Video: id, title, thumbnail, timestamp, uploader, uploader_id, duration, view_count, formats.
+  - Music track: id, title, thumbnail, uploader, uploader_id, duration, view_count, vcodec, abr, track, artist, album, url.
+  - Music search: returns a playlist of track entries with the same fields as individual tracks.
+
+In short
+- The file implements comprehensive Mail.Ru support for both video and music content, including:
+  - Multiple URL formats for videos and a robust mechanism to obtain video metadata via meta URLs or legacy API.
+  - Cookie-based access considerations and per-format header handling.
+  - A reusable music search base with pagination, and concrete extractors for single tracks and search results.
+- Outputs are standard YouTube-DL style dictionaries containing all typical fields for videos and audio tracks, with careful handling of edge cases and environment-specific limitations.

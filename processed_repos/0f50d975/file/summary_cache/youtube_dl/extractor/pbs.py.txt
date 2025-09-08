@@ -1,0 +1,118 @@
+Concise summary of PBSIE (file: youtube-dl/youtube_dl/extractor/pbs.py)
+
+Overview
+- PBSIE is a YouTube-DL information extractor for PBS and PBS member stations. It recognizes a large set of PBS-related URLs (video pages, embedded players, or direct video endpoints) and returns standardized info for each video or a playlist of videos.
+
+Key components
+- PBSIE(InfoExtractor): Main extractor class.
+- _STATIONS: A long list of host patterns and station names. Each pair maps a station URL pattern (like video.pbs.org) to a human-readable station name. Used to build the _VALID_URL and to describe the extractor.
+- _VALID_URL: A complex regular expression that matches:
+  - Direct video URLs (vir/portal/virtual player paths with an 8+ digit ID)
+  - Article pages with embedded PBS players (with a presumptive_id)
+  - Player URLs (widget/partnerplayer or portalplayer) with a numeric video id
+- _GEO_COUNTRIES: ['US'] – used to enforce geo-restriction checks.
+- _TESTS: A large list of test cases validating extraction for many PBS URLs, including:
+  - Direct videos, Frontline, NOVA, MASTERPIECE, etc.
+  - Playlists (collections with multiple videos)
+  - Embedded videos and 403/Forbidden/skip_download cases
+- _ERRORS: Mapping of HTTP status codes to human-readable error messages (e.g., 101 not yet available, 403 geo-restriction, 404/410 etc.).
+
+Initialization
+- _real_initialize:
+  - Attempts to fetch a cookie from localization.services.pbs.org to set pbsol.station for geo behavior. If a cookie with a station is found, it sets a .pbs.org cookie pbsol.station accordingly.
+  - This helps PBS region detection and geo-restriction handling.
+
+Core extraction workflow
+- _extract_webpage(self, url):
+  - Uses _VALID_URL to extract presumptive_id (from the page URL) and loads the page if needed.
+  - Gathers basic metadata from the page:
+    - description via OpenGraph or meta description
+    - upload_date via a hidden input (air_date_*)
+  - Handles multi-part/tabbed videos:
+    - Looks for video tabs or data-cove IDs and immediately returns a tuple (ids, presumptive_id, upload_date, description) if found (indicating multiple parts or a playlist).
+  - Tries to locate a media_id via multiple regexes covering:
+    - Frontline embeds
+    - Coveplayer data
+    - JWPlayer hidden fields
+    - window.PBS.playerConfig
+    - Data attributes in the page
+    - iframe partnerplayer URLs
+  - Frontline via flp2012.js:
+    - If a video_id is found in the page, computes prg_id and fetches a getdir JSON (getdir%d.json) to obtain the actual media id (mid).
+  - If an iframe with a partnerplayer URL is found, uses that URL as the next page to extract video data.
+  - If no explicit URL found, falls back to og:url from the page.
+  - Once a concrete player context is determined, matches it against _VALID_URL to extract a player_id or video id.
+  - If a player_id is present:
+    - Downloads the corresponding player page from http://player.pbs.org/widget/partnerplayer/{video_id}/ or portalplayer/{video_id}/
+    - Extracts video data with _extract_video_data and collects possible redirects for encodings/redundant formats
+    - Builds a chapters list if available from video data or embedded JS data (chapters.push blocks)
+  - If only a direct id is available, uses it as the video_id/display_id.
+  - Returns a 4-tuple: (video_id, display_id, upload_date, description)
+
+- _extract_video_data(self, string, name, video_id, fatal=True):
+  - Extracts a JSON blob either from PBS.videoData or window.videoBridge in the given string.
+  - Uses transform_source=js_to_json to convert JS-style JSON to proper JSON.
+  - Returns the parsed data via _parse_json.
+
+- _real_extract(self, url):
+  - Calls _extract_webpage(url) to obtain video_id, display_id, upload_date, and description.
+  - If video_id is a list, treats it as a playlist:
+    - Creates entries for each video_id: http://video.pbs.org/video/{vid_id}
+    - Returns a playlist_result with the collected entries and display_id.
+  - Otherwise, processes a single video:
+    - Builds a list of potential redirects by inspecting encoding fields in video data:
+      - Fields like recommended_encoding, alternate_encoding, and encodings lists
+      - Collects redirect URLs and avoids duplicates
+    - Iterates through player pages to collect video data and redirects:
+      - widget/partnerplayer and portalplayer pages
+      - For each, extracts video data and chapters
+    - For each redirect:
+      - Downloads redirect JSON (format=json)
+      - If status is error, raises an appropriate error (including geo restriction handling)
+      - Uses the redirect URL to obtain actual video URL
+      - If the URL ends with an m3u8 manifest, extracts HLS formats via _extract_m3u8_formats
+      - Otherwise, appends a direct URL format
+      - Tracks an http_url candidate (for later HTTP variants)
+    - After collecting formats:
+      - Deduplicates formats and splits out m3u8 formats
+      - If an http_url is available, derives HTTP variants for different bitrates by substituting the bitrate in the m3u8-derived URLs:
+        - Only for bitrates >= 400k
+        - Validates the constructed URL with _is_valid_url
+      - Sorts formats with _sort_formats
+    - Builds subtitles from closed_captions_url if present, supporting:
+      - TTML (primary)
+      - Additional SRT and VTT alternatives inferred from the URL suffix
+    - Title normalization:
+      - If info['program']['title'] exists, combine with the actual title to produce a "program - title" form
+    - Description fallback to program description or prior description
+    - Returns a dict including:
+      - id, display_id, title, description, thumbnail, duration, age_limit, upload_date
+      - formats, subtitles, chapters
+
+Important implementation details
+- Robust URL matching: The _STATIONS list and _VALID_URL regex enable recognition of many PBS-related URLs, including embedded players and article pages.
+- Data extraction techniques:
+  - Multiple fallback regexes for media_id extraction to handle various PBS embedded formats
+  - Frontline-specific handling via flp2012.js to retrieve getdir data
+  - Use of OpenGraph/meta description extraction and hidden upload date fields
+- Video data handling:
+  - _extract_video_data parses JSON-like data embedded in JS using js_to_json
+  - Chapters extraction supports both video data and inline JS blocks (chapters.push)
+- Redirects and encodings:
+  - Collects a list of possible encodings and their URLs to reach actual video formats
+  - Handles both HLS (m3u8) and direct HTTP URLs
+  - Derives additional HTTP formats from available m3u8 information by adjusting bitrates
+  - Geo-restriction handling: raises geo errors with proper messaging when 403 responses indicate regional restrictions
+- Playlists:
+  - If a page points to multiple videos (or a presumed list of media IDs), PBSIE returns a playlist with entries pointing to individual PBS video pages.
+- Subtitles:
+  - Supports closed captions via closed_captions_url, providing TTML plus optional SRT and VTT variants by constructing URLs with incremental suffix IDs.
+- Title handling:
+  - Attempts to create more informative titles by combining program titles with specific episode titles when available.
+
+Output
+- For single videos: a dict with id, display_id, title, description, thumbnail, duration, age_limit, upload_date, formats, subtitles, and chapters.
+- For playlists: a playlist result containing multiple video entries.
+
+Overall purpose
+- The extractor enables youtube-dl to fetch PBS videos (and many member stations) by resolving pages embed data, handling embedded players, extracting direct or HLS video URLs, retrieving metadata, handling geo restrictions, and producing a consistent, richly described video entity or a playlist of videos.

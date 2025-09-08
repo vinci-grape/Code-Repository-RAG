@@ -1,0 +1,54 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/sportbox.py
+
+- Purpose
+  - Implement a video extractor for SportBox (news.sportbox.ru and matchtv.ru) vdl/player pages. It fetches metadata and video formats (including HLS) and returns a standard info dictionary consumable by youtube-dl.
+
+- Main class
+  - SportBoxIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL: Matches SportBox/MatchTV vdl/player pages and captures a numeric id. Handles URLs like news.sportbox.ru/vdl/player/... or matchtv.ru/vdl/player, including query/path variations with an id parameter.
+
+- Helper for discovery
+  - _extract_urls(webpage): Static method that finds iframe src URLs pointing to the SportBox/MatchTV vdl/player pages inside a page. Returns a list of such URLs.
+
+- Core extraction flow (_real_extract)
+  - video_id = self._match_id(url): Extracts the captured id from the URL.
+  - webpage = self._download_webpage(url, video_id): Downloads the page HTML.
+  - sources parsing:
+    - Looks for a JavaScript block assigning playerOptions.sources (or playerOptionsWithRes) to a JSON-like array.
+    - Uses self._search_regex with a regex that captures the array, then self._parse_json with transform_source=js_to_json to convert JS to Python objects.
+  - Formats construction:
+    - Iterate over each source object; skip if no 'src'.
+    - If the source URL ends with .m3u8 (detected via determine_ext): fetch formats via _extract_m3u8_formats with:
+      - video_id, container 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False
+    - Otherwise, add a direct format with {'url': src}.
+    - Sort formats with self._sort_formats(formats).
+  - Player metadata:
+    - player = self._parse_json(self._search_regex(r'(?s)playerOptions\s*=\s*({.+?})\s*;\s*\n', webpage, 'player options', default='{}'), video_id, transform_source=js_to_json)
+    - media_id = player['mediaId']
+  - Metadata extraction:
+    - info = self._search_json_ld(webpage, media_id, default={}) to fetch JSON-LD metadata (e.g., title, description, etc.)
+    - view_count: extract with regex r'Просмотров\s*:\s*(\d+)' from the page, convert to int with int_or_none.
+  - Final info dictionary:
+    - Merge JSON-LD info with additional fields:
+      - 'id': media_id
+      - 'title': OG title if available (_og_search_title(webpage, default=None)) or media_id
+      - 'thumbnail': player.get('poster')
+      - 'duration': int_or_none(player.get('duration'))
+      - 'view_count': view_count
+      - 'formats': formats
+
+- Important implementation details
+  - Transforms JavaScript objects to JSON using js_to_json for safe parsing of playerOptions and sources.
+  - Supports both HLS (m3u8) formats and direct video URLs.
+  - Uses determine_ext to decide how to fetch formats (m3u8 vs direct).
+  - Uses _search_json_ld to enrich metadata with schema.org JSON-LD data.
+  - Uses a Russian label (“Просмотров”) to extract view counts.
+  - Merges extracted metadata with computed fields via merge_dicts; provides robust title selection (OG title or mediaId fallback).
+
+- Tests
+  - _TESTS includes a primary test URL expecting a full info_dict with id, ext, title, description, thumbnail, duration, view_count, timestamp, upload_date, and skip_download for m3u8 download.
+  - Additional tests mark several URLs as only_matching to ensure the _VALID_URL and _extract_urls regexes recognize the pages without requiring a full extraction.
+
+Overall, this extractor robustly parses the SportBox/MatchTV vdl/player pages by extracting sources for formats, handling HLS and direct URLs, and gathering metadata from JSON-LD, OG data, and page content.

@@ -1,0 +1,85 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/xhamster.py
+
+Purpose
+- Implements YouTube-DL extractors for XHamster, including main video extraction, embedded videos, and user video playlists.
+
+Key classes
+- XHamsterIE (InfoExtractor)
+  - Main extractor for XHamster videos (supports both old and new page layouts).
+- XHamsterEmbedIE (InfoExtractor)
+  - Extractor for xembed.php embeds; delegates to XHamster via URL resolution.
+- XHamsterUserIE (InfoExtractor)
+  - Extractor for user profile pages; yields a playlist of the user’s videos.
+
+URL patterns and tests
+- _DOMAINS covers multiple XHamster domains (e.g., xhamster.com, xhday.com, xhamsterdesi variants, etc.).
+- _VALID_URL for XHamsterIE supports both old and new URL schemas:
+  - Old: /movies/{id}/...html
+  - New: /videos/{display_id}-{id} or /movies/{id}/{display_id}.html
+- _VALID_URL for XHamsterEmbedIE matches xembed.php?video={id}.
+- _VALID_URL for XHamsterUserIE matches users/{id} on various domains.
+- _TESTS include representative URLs and expected metadata/behavior (including skip_download in some cases).
+
+Main extraction flow (XHamsterIE)
+- Resolve to desktop page:
+  - Converts mobile subdomain to desktop (removes a leading m.).
+  - Downloads the desktop page with _download_webpage_handle (URL, video_id).
+  - Checks for a “videoClosed” error div and raises ExtractorError if present.
+- Age limit:
+  - Uses _rta_search to determine age restriction when available.
+- New layout path (initials JSON):
+  - Parses window.initials JSON to obtain videoModel, title, and sources.
+  - Builds formats from videoModel.sources:
+    - Iterates through formats and download links, collects format URLs, sizes, and heights.
+    - Skips auto-generated “download” links as they may be slow to generate.
+  - Handles xplayerSettings:
+    - HLS (m3u8): Extracts via _extract_m3u8_formats, uses proper base URL, appends with a Referer header.
+    - Standard sources: resolves URLs, determines ext, height, and filesize, adds formats with Referer headers.
+  - Adds additional formats from hls/standard sources, and sorts with preferences (height, width, tbr, format_id).
+  - Category extraction from videoModel.categories (names only).
+  - Uploader info: from videoModel.author.name and author.pageURL (uploader_id derived from URL).
+  Thumbnail, duration, view_count, like_count, dislike_count, and comment_count from videoModel fields.
+  - Returns a dict with id, display_id, title, description, timestamp/upload_date, uploader/uploader_id, thumbnail, duration, view_count, like_count, dislike_count, comment_count, age_limit, categories, formats.
+- Old layout fallback path:
+  - Title extraction via several patterns (h1, meta itemprop caption, or title edge cases).
+  - Formats from sources JSON on the page (format_id and URL, with height derived from format_id).
+  - Video URL extraction from multiple patterns (e.g., file:, mp4Thumb anchors, video tags) to extend formats.
+  - Description, upload_date, uploader, uploader_id, thumbnail, duration, view_count, like/dislike, comment_count, categories (parsed from a Categories table), and age_limit.
+- Final return (old layout): dict with id, display_id, title, description, upload_date, uploader, uploader_id, thumbnail, duration, view_count, like_count, dislike_count, comment_count, age_limit, categories, formats, and timestamp where applicable.
+
+Important implementation details
+- Robust URL handling:
+  - Desktop vs mobile site handling, and multiple domain variants.
+  - urljoin used for resolving relative URLs (especially for HLS and standard sources).
+- Formats handling:
+  - Supports multiple source types: direct MP4/other URLs, HLS (m3u8), and standard non-HLS lists.
+  - Avoids duplicates via a set of seen URLs (format_urls).
+  - Includes height, filesize (when available), and proper HTTP Referer headers for downloading.
+  - Sorting of formats prioritizes quality attributes (height, width, tbr, format_id).
+- Metadata extraction:
+  - Title, description, upload date (unified_strdate), uploader/uploader_id, thumbnail, duration (parse_duration), view_count, like/dislike, comment_count, categories.
+  - Handles age_limit with a fallback default of 18 if not detected.
+- Fallbacks:
+  - Two layouts supported: a newer page that exposes a window.initials JSON and an older layout with a “sources” JSON and other HTML patterns.
+- XHamsterEmbedIE:
+  - Extracts the actual video URL from embed pages either directly in the anchor href or via a vars JSON object that lists possible links (downloadLink, homepageLink, etc).
+  - Returns the eventual video URL via url_result to XHamsterIE.
+- XHamsterUserIE:
+  - Iterates user video pages (pagination) and yields individual video URLs by reusing XHamsterIE for each video.
+  - Detects next page via data-page attribute on a link to continue paging until no next is found.
+
+Usage flow
+- A user-facing video page on XHamster is processed by XHamsterIE to produce a complete InfoDict with id, title, description, timestamp, uploader, age, and a list of formats for downloading/streaming.
+- Embedded videos route to XHamster via XHamsterEmbedIE when encountered.
+- A user profile page is turned into a playlist of videos by XHamsterUserIE, with each video handled by XHamsterIE.
+
+Utilities and helpers leveraged
+- Regular expressions (_search_regex, _html_search_regex, _parse_json) for extracting data.
+- try_get, dict_get for resilient dictionary access.
+- clean_html, extract_attributes for parsing HTML attributes.
+- parse_duration, unified_strdate, int_or_none, float_or_none for type-safe metadata.
+- determine_ext to infer file extensions, and urljoin/url_or_none for URL handling.
+- _download_webpage_handle, _download_webpage, _extract_m3u8_formats for fetching pages and formats.
+- _sort_formats and public fields in the returned dict (formats, timestamp, upload_date, etc.).
+
+Overall, this file provides a comprehensive, backward-compatible implementation for extracting XHamster video metadata and downloadable/streamable formats, plus support for embedded videos and user video playlists.

@@ -1,0 +1,50 @@
+Here’s a concise, focused summary of the Cracked extractor in ./youtube-dl/youtube_dl/extractor/cracked.py.
+
+Overview
+- Purpose: Extract video information from Cracked.com video pages. Supports both direct video URLs and embedded YouTube videos within Cracked pages.
+- Main class: CrackedIE, subclass of InfoExtractor.
+- Key utilities: Uses YoutubeIE for embedded YouTube videos; uses helpers from youtube_dl.utils for date parsing and integer parsing.
+
+URL matching
+- _VALID_URL: Matches cracked.com video pages of the form http(s)://www.cracked.com/video_<id>_<slug>.html
+- _TESTS: Includes two sample pages
+  - Direct MP4 video with metadata (title, timestamp, etc.)
+  - Cracked page embedding a YouTube video (uses YouTube as the actual source)
+
+Extraction flow (_real_extract)
+1. Determine video_id from URL (via _match_id).
+2. Download the Cracked page HTML (via _download_webpage).
+3. Try to detect a YouTube URL inside the page using YoutubeIE._extract_url(webpage).
+   - If found, delegate extraction to YouTube using url_result(youtube_url, ie=YoutubeIE.ie_key()).
+4. If no YouTube embed is found, try to locate a direct video URL from:
+   - var CK_vidSrc = "..."
+   - or a <video src="..."> tag
+5. Extract metadata from the page:
+   - title: from og:title content or a title element (class="title") using two regex patterns.
+   - description: from og:description or name="description" attribute (optional).
+   - timestamp: from a "date" field in the page (regex '"date": "..."'), parsed with parse_iso8601 after trimming trailing characters (timestamp[:-6]); non-fatal if missing.
+   - view_count: from a span with class "views" and id "viewCounts" containing digits; converted with str_to_int (optional).
+   - comment_count: from a span with id "commentCounts" containing digits; converted with str_to_int (optional).
+6. Video resolution (width/height):
+   - If the direct video URL matches _WIDTHXHEIGHT.mp4 (e.g., _1920X1080.mp4), extract width and height as ints.
+   - If not matched, width and height remain None.
+7. Return a dict with:
+   - id: video_id
+   - url: video_url
+   - title
+   - description (optional)
+   - timestamp (optional)
+   - view_count (optional)
+   - comment_count (optional)
+   - height (optional)
+   - width (optional)
+
+Implementation details
+- Regular expressions are used to robustly extract data from page HTML.
+- The code prioritizes embedded YouTube content, delegating to YoutubeIE when available.
+- For non-YouTube pages, it supports two possible sources for the video URL and attempts to derive richer metadata if present.
+- Tolerant error handling for optional fields via fatal=False in regex lookups.
+
+Notes from tests
+- First test case expects direct MP4 video with id '19070', title, timestamp, and upload_date.
+- Second test case expects a YouTube-based source (with YouTube video id as the extracted id) and includes description, uploader info, and upload date.

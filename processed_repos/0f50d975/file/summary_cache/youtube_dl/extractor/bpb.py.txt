@@ -1,0 +1,55 @@
+Summary of ./youtube-dl/youtube_dl/extractor/bpb.py
+
+Purpose
+- Implement an information extractor (InfoExtractor) for the Bundeszentrale für politische Bildung (BPB) mediathek pages.
+- Retrieve video metadata and multiple available formats from a BPB mediathek page.
+
+Key components
+- Class: BpbIE(InfoExtractor)
+  - IE_DESC: "Bundeszentrale für politische Bildung"
+  - _VALID_URL: Regex matching BPB mediathek pages and capturing the video id from URLs like http://www.bpb.de/mediathek/297/...
+  - _TEST: Contains a sample URL, expected MD5 for the downloaded video, and expected info_dict (id, ext, title, description) for unit testing.
+
+Main functionality (_real_extract)
+1. Extract video_id
+   - video_id = self._match_id(url)
+
+2. Download page
+   - webpage = self._download_webpage(url, video_id)
+
+3. Parse title
+   - title = self._html_search_regex(r'<h2 class="white">(.*?)</h2>', webpage, 'title')
+
+4. Find video sources
+   - video_info_dicts = re.findall(r"({\s*src\s*:\s*'https?://film\.bpb\.de/[^}]+})", webpage)
+   - This searches the page for JS-like objects containing a src URL to BPB film server.
+
+5. Build formats
+   - For each video_info string:
+     - Convert to JSON-like object: video_info = self._parse_json(video_info, video_id, transform_source=js_to_json, fatal=False)
+     - If parsing fails or no 'src', skip.
+     - video_url = video_info.get('src')
+     - Determine quality: 'high' if '_high' in video_url else 'low'
+     - Build a format dictionary:
+       - 'url': video_url
+       - 'preference': 10 if high quality, else 0
+       - 'format_note': quality
+       - 'format_id': f"{quality}-{determine_ext(video_url)}"
+   - Collect all formats in a list and sort them with self._sort_formats(formats)
+
+6. Return metadata
+   - id: video_id
+   - formats: list of extracted formats
+   - title: parsed title
+   - description: self._og_search_description(webpage) (OpenGraph description as fallback)
+
+Implementation details and nuances
+- JSON handling: Uses _parse_json with transform_source=js_to_json to convert potential JavaScript-style objects into valid JSON, enabling robust parsing of the embedded video info.
+- Non-fatal parsing: fatal=False ensures that if some video info blocks fail to parse, the extractor still returns any successfully parsed formats.
+- Multiple formats: The page may contain multiple BPB film URLs; the extractor collects all available sources that match the pattern and exposes them as separate formats, with high vs. low quality distinction based on the URL.
+- Quality signaling: The 'preference' field is set to 10 for high quality and 0 for low quality, guiding format selection by the downstream downloader.
+- Metadata extraction: Title is pulled from an H2 element with class "white"; description uses OpenGraph description as a fallback via _og_search_description.
+- Testing considerations: The _TEST includes an md5 for the downloaded video and an expected info_dict, with a note about Python 2.6 server behavior affecting MD5 in the original test.
+
+Overall
+- The module provides a focused extractor for BPB mediathek pages, pulling the video id, title, description, and one or more video formats (with high/low quality differentiation) by scanning the page for embedded JavaScript-like video source definitions and normalizing them into youtube-dl's standard format structures.

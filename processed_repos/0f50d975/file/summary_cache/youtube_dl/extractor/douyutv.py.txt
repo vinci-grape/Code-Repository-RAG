@@ -1,0 +1,78 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/douyutv.py
+
+Overview
+- This file implements two extractors for Douyu (斗鱼):
+  - DouyuTVIE: extracts live stream information from Douyu TV rooms.
+  - DouyuShowIE: extracts video show information from Douyu shows (v.douyu.com/show).
+
+Key classes and main functionality
+1) DouyuTVIE (live rooms)
+- Purpose: Retrieve live stream metadata and the actual streaming URL for a Douyu room.
+- URL pattern (_VALID_URL): Matches DouYu room URLs, capturing an id (which may be a numeric room ID or a slug).
+- How it resolves a room:
+  - If the captured id is numeric, treat it as the room_id. If not, fetch the page and extract room_id via regex '"room_id": (...),'.
+  - Call the mobile API to get room data: http://m.douyu.com/html5/live?roomId=<room_id>.
+  - If the room shows as offline (show_status == '2'), raise an ExtractorError indicating the live stream is offline.
+  - To obtain the actual streaming URL, Douyu requires a signed request to the PC client API:
+    - Compute current time tt = int(time.time()).
+    - Build signContent = 'lapi/live/thirdPart/getPlay/<room_id>?aid=pcclient&rate=0&time=<tt>9TUk5fjjUjg9qIMH3sdnh' and take its MD5.
+    - Request: http://coapi.douyucdn.cn/lapi/live/thirdPart/getPlay/<room_id> with query rate=0 and headers including auth=<sign>, time=<tt>, aid=pcclient.
+    - The response contains data.live_url, which is the actual video URL (HLS/m3u8 or similar).
+  - Assemble metadata:
+    - title: derived from room['room_name'] using _live_title and unescapeHTML.
+    - description: room.get('show_details')
+    - thumbnail: room.get('room_src')
+    - uploader: room.get('nickname')
+    - is_live: True
+  - Return a dict with: id (room_id), display_id (original video_id/slug), url (video_url), title, description, thumbnail, uploader, is_live.
+
+- Implementation notes and details:
+  - Uses _download_webpage to fetch pages and _download_json to fetch JSON endpoints.
+  - _live_title handles live-title normalization.
+  - Time-based signing (MD5) is necessary because the mobile API’s signed URL expires, and the code documents the need to re-authenticate roughly every 5 minutes.
+  - The code includes robust handling for non-numeric IDs (slugs) and for offline/live-status checks.
+
+2) DouyuShowIE (video shows)
+- Purpose: Retrieve metadata and actual streaming URL for show videos hosted on Douyu (v.douyu.com/show).
+- URL pattern (_VALID_URL): Matches v.douyu.com/show/<id> and also vmobile.douyu.com/show/<id> (the code normalizes vmobile to v).
+- How it resolves a show:
+  - Normalize URL by replacing 'vmobile.' with 'v.' and extract video_id.
+  - Download the show page and extract room info embedded in JavaScript as JSON assigned to a variable: var $ROOM = ({...});
+  - Retrieve video info via a signed API:
+    - Try up to 5 times to fetch https://vmobile.douyu.com/video/getInfo with vid=<video_id>, Referer header set to the show URL and 'x-requested-with' header.
+    - If all attempts fail, raise ExtractorError.
+  - Build formats from the returned video URL using m3u8 formats:
+    - formats = self._extract_m3u8_formats(video_info['data']['video_url'], video_id, entry_protocol='m3u8_native', ext='mp4')
+  - Upload date:
+    - Extract from HTML with regex matching the label “上传时间” and convert to a standard date with unified_strdate.
+  - Uploader info:
+    - Attempt to parse a sponsor/author block in HTML to extract uploader_id and uploader name; construct uploader_url via urljoin(url, '/author/' + uploader_id) if found.
+  - Return a dict with:
+    - id: video_id
+    - title: room_info['name'] (the show’s title)
+    - formats: list of video formats
+    - duration: room_info.get('duration')
+    - thumbnail: room_info.get('pic')
+    - upload_date: parsed date
+    - uploader, uploader_id, uploader_url (if found)
+
+Important implementation details
+- Both extractors rely on a combination of:
+  - Page scraping for initial IDs or embedded metadata.
+  - REST/JSON endpoints provided by Douyu (mobile API for live room data; PC/mobile APIs for video URLs).
+  - Intelligent retry/timeout handling for flaky endpoints (e.g., up to 5 attempts when fetching show video info).
+- Security/URL signing:
+  - Douyu’s PC client video URL requires a time-based MD5 signature. The code constructs signContent with the current timestamp and a specific suffix, then hashes it with MD5 and passes it as the auth header along with time and aid headers.
+- Data handling and formatting:
+  - Uses unescapeHTML to clean up titles.
+  - Uses _live_title to normalize live titles.
+  - Uses _extract_m3u8_formats to convert m3u8 playlist URLs into usable formats for playback.
+  - Uses unified_strdate to normalize upload dates.
+- Robustness tests:
+  - Test cases verify:
+    - Live room extraction with expected id, display_id, title pattern, description, thumbnail, uploader, and is_live status.
+    - Offline/live-offline handling.
+    - Slug-based URLs and non-room URLs hitting the only_matching condition.
+    - Show extraction including md5 for the downloaded content in tests.
+
+In short, this file provides two Douyu extractors: one for live rooms (fetching room metadata and a signed live URL) and one for show videos (parsing room and video data, then assembling playable formats from m3u8).

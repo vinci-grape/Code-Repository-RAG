@@ -1,0 +1,51 @@
+Summary of the file: ./youtube-dl/youtube_dl/extractor/vodplatform.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (VODPlatformIE) for embedded video pages on vod-platform.net and Kwik Motion embeds. It retrieves video metadata and formats from the page.
+
+- Main class
+  - VODPlatformIE(InfoExtractor)
+    - Inherits common extraction utilities from InfoExtractor.
+
+- URL pattern and tests
+  - _VALID_URL: Matches either:
+    - http(s)://vod-platform.net/embed/{id}
+    - http(s)://embed.kwikmotion.com/embed/{id}
+    - Case-insensitive for the “embed” portion via [eE]mbed
+  - _TESTS: Defines two tests
+    1) A real vod-platform.net embed URL with expected id, mp4 ext, title, and md5 of the video.
+    2) An embed.kwikmotion.com URL marked as only_matching (ensures the regex matches but doesn’t fetch in tests).
+
+- Core extraction (_real_extract)
+  - video_id = self._match_id(url): extracts the id from the URL.
+  - webpage = self._download_webpage(url, video_id): fetches the page HTML.
+  - title = unescapeHTML(self._og_search_title(webpage)): gets the title from OpenGraph metadata or page title, then unescapes HTML entities.
+  - hidden_inputs = self._hidden_inputs(webpage): parses hidden input fields present on the page into a dictionary.
+  - formats = self._extract_wowza_formats(
+        hidden_inputs.get('HiddenmyhHlsLink') or hidden_inputs['HiddenmyDashLink'],
+        video_id,
+        skip_protocols=['f4m', 'smil']
+    ):
+    - Builds a list of video formats using Wowza streaming links found in the hidden inputs.
+    - Prefers HiddenmyHlsLink if present; otherwise HiddenmyDashLink.
+    - Skips certain protocols (f4m, smil) during extraction.
+  - self._sort_formats(formats): sorts the extracted formats by quality/bitrate.
+  - Return dictionary:
+    - 'id': video_id
+    - 'title': title
+    - 'thumbnail': HiddenThumbnail if present, else falls back to og:image via _og_search_thumbnail(webpage)
+    - 'formats': formats
+
+- Key implementation details
+  - Uses _hidden_inputs to locate embedded streaming URLs in hidden form fields: HiddenmyHlsLink or HiddenmyDashLink, and HiddenThumbnail for a thumbnail image.
+  - Relies on _extract_wowza_formats to interpret Wowza-based streaming URLs.
+  - Skips f4m and smil protocol formats to limit to compatible/desired formats.
+  - Title extraction uses OpenGraph/title tags with HTML unescaping for clean display.
+  - Careful handling of thumbnail: uses explicit HiddenThumbnail if available, otherwise tries og:image metadata.
+
+- Dependencies / helpers referenced
+  - InfoExtractor (base class)
+  - unescapeHTML (utility to clean HTML entities)
+  - _match_id, _download_webpage, _og_search_title, _og_search_thumbnail, _hidden_inputs, _extract_wowza_formats, _sort_formats (provided by youtube-dl’s extractor framework)
+
+Overall, VODPlatformIE is a targeted extractor for embedded VOD Platform videos, extracting the video ID, title, thumbnail, and Wowza-based streaming formats from the page’s hidden inputs and metadata.

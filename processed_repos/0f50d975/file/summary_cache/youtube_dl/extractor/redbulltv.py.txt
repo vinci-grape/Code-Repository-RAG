@@ -1,0 +1,99 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/redbulltv.py
+
+Overview
+- This module implements multiple extractors for Red Bull content (TV, embeds, and RRn content) to support downloading videos from redbull.tv/redbull.com.
+- Main flow relies on a combination of:
+  - REST/JSON APIs to obtain access tokens and video metadata
+  - HLS (M3U8) playlists for video formats
+  - Subtitles extracted from video resources
+  - GraphQL endpoints (via special embed routes) to resolve embed IDs when direct video IDs aren’t present
+- It includes fallbacks for region/lang combinations to locate content when the region-specific page is not directly available.
+
+Key classes and their responsibilities
+
+1. RedBullTVIE
+- Purpose: Core extractor for Red Bull TV content with IDs like AP-xxxxxxxx (AP- prefix) found on redbull.tv or redbull.com pages (/events, /videos, /live, /films, /episodes).
+- _VALID_URL: Regex matching URLs with path segments containing /videos/ or /live/ or /films/ or /episodes/ and an ID like AP-<word>.
+- _TESTS: Includes sample URLs for a film and an episode, with expected IDs, titles, descriptions, and durations. Some tests request skipping actual download.
+- extract_info(video_id):
+  - Fetches an access token via POST/GET to https://api.redbull.tv/v3/session, with params category=personal_computer and os_family=http.
+  - If session returns code "error", raises a descriptive ExtractorError including the API/IE name.
+  - Uses the token to fetch video metadata from https://api.redbull.tv/v3/products/{video_id}.
+  - 404 handling: If the product fetch raises an HTTP 404, extracts the error message from the response body and raises a user-friendly ExtractorError (marked expected).
+  - title := video['title'] trimmed.
+  - formats: Download and parse the HLS manifest from https://dms.redbull.tv/v3/{video_id}/{token}/playlist.m3u8 using _extract_m3u8_formats with MP4 as format, and entry_protocol 'm3u8_native'. Sort formats afterwards.
+  - subtitles: Build English subtitles from resources that start with 'closed_caption_'. Each resource yields a URL at https://resources.redbull.tv/{video_id}/{resource} with appropriate extension.
+  - subheading: If present, appended to the title as "title - subheading".
+  - Returns a dict with id, title, description (long_description or short_description), duration (converted from ms to seconds using float_or_none with scale=1000), formats, and subtitles.
+- _real_extract(url): Extracts video_id via _match_id and delegates to extract_info.
+
+2. RedBullEmbedIE (inherits RedBullTVIE)
+- Purpose: Handles embedded content via the Red Bull embed route and resolves the actual video via a GraphQL-backed asset fetch.
+- _VALID_URL: Regex for https://www.redbull.com/embed/... where the path encodes an RRN-like id.
+- _TESTS: A single test with only_matching to validate URL pattern handling.
+- _VIDEO_ESSENSE_TMPL: GraphQL fragments for LiveVideo and VideoResource attributes.
+- _real_extract(url):
+  - Extracts rrn_id from the URL.
+  - Calls a GraphQL endpoint at edge-graphql.crepo-production.redbullaws.com/v1/graphql with headers (Accept, API-KEY) and a query that fetches:
+    resource(id: "{rrn_id}", enforceGeoBlocking: false) { <LiveVideo attributes> <VideoResource attributes> }
+  - Reads assetId from the response payload and passes it to extract_info(asset_id) to obtain the final video details (formats, subtitles, etc.).
+
+3. RedBullTVRrnContentIE
+- Purpose: Handles RRn content URLs on redbull.com (region/lang specific) and routes to the embed extractor.
+- _VALID_URL: Matches URLs like https://www.redbull.com/<region>-<lang>/tv/(video|live|film)/rrn:content:... with a content ID.
+- _TESTS: Several only_matching tests to validate URL patterns.
+- _real_extract(url):
+  - Extracts region, lang, and rrn_id from the URL.
+  - Appends ":%s-%s" % (lang, region.upper()) to rrn_id, forming a full RRn embed identifier.
+  - Returns a url_result pointing to https://www.redbull.com/embed/{rrn_id} using RedBullEmbedIE as the extractor.
+
+4. RedBullIE
+- Purpose: Main entry for many Red Bull pages on redbull.com that are not AP IDs or RRn content, including episodes, films, recap/trailer videos, standard videos, and live pages.
+- _VALID_URL: Complex regex capturing region, lang, and a type segment (episode, film, recap-video, trailer-video, videos, live) and an id. Excludes paths starting with AP- or rrn:content: (which are handled by other extractors).
+- _TESTS: Several examples validating extraction for an episode, plus multiple only_matching cases for various content types. The first test checks the returned id, title, and description.
+- Fallback logic:
+  - _INT_FALLBACK_LIST = ['de', 'en', 'es', 'fr'] (languages with international fallbacks)
+  - _LAT_FALLBACK_MAP = ['ar', 'bo', 'car', 'cl', 'co', 'mx', 'pe'] (Latin America/Spanish-language fallbacks)
+- _real_extract(url):
+  - Extracts region, lang, filter_type, display_id from the URL.
+  - Normalizes filter_type: episodes -> 'episode-videos', live -> 'live-videos'; leaves other cases (like 'videos'/'films') as-is.
+  - Builds a regional locale string:
+    - Start with regions = [region.upper()]
+    - If region != 'int':
+      - If region in LAT_FALLBACK_MAP, append 'LAT'
+      - If lang in INT_FALLBACK_LIST, append 'INT'
+    - locale = '>'.join([f'{lang}-{reg}' for reg in regions])
+  - Queries a GraphQL endpoint at https://www.redbull.com/v3/api/graphql/v1/v3/query/{locale} with:
+    filter[type] = filter_type
+    filter[uriSlug] = display_id
+    rb3Schema = 'v1:hero'
+  - Expects response data.id to be the rrn_id or embed id.
+  - Redirects to the embed URL http://www.redbull.com/embed/{rrn_id} and delegates to RedBullEmbedIE for extraction.
+
+Important implementation details
+- Token-based access and error handling:
+  - Access token obtained via /v3/session; used in Authorization header for subsequent video info requests.
+  - 404 handling for video metadata includes reading the error body to present a user-friendly message.
+- Formats extraction:
+  - Uses _extract_m3u8_formats to parse HLS manifests at dms.redbull.tv/v3/{video_id}/{token}/playlist.m3u8 with entry_protocol='m3u8_native' and id 'hls'.
+  - Formats are sorted after extraction.
+- Subtitles:
+  - Subtitles are sourced from video['resources'] entries starting with 'closed_caption_'. Each entry yields an English ('en') subtitle with an URL pointing to resources.redbull.tv/{video_id}/{resource} and an appropriate extension.
+- Title composition:
+  - Main title from video['title']; if a subheading exists, appended as " - subheading".
+- Description and duration:
+  - Description falls back to long_description or short_description.
+  - Duration provided in milliseconds is converted to seconds via float_or_none(scale=1000).
+- Asset resolution via GraphQL:
+  - Several flows (embed, RRn content, regional pages) resolve a final embed ID via GraphQL queries:
+    - RedBullEmbedIE uses assetId to fetch video data.
+    - RedBullIE builds a locale string to fetch an internal ID (rrn_id) to embed.
+- Regional fallbacks:
+  - When resolving IDs for non-AP content, a combination of region/lang with LAT/INT fallbacks is built to query the GraphQL API for the correct embed/rrn id.
+- Reuse and delegation:
+  - RedBullEmbedIE is used as the central embed handler for various content paths; other extractors ultimately delegate to it after resolving an asset/embed ID.
+
+In short
+- The file implements a robust set of extractors to cover Red Bull TV content across redbull.tv and redbull.com, handling both direct AP-based video IDs and embed/rrn content paths.
+- It fetches access tokens, retrieves video metadata, resolves HLS formats and subtitles, and carefully handles errors.
+- It uses GraphQL queries and region/lang fallbacks to locate embed IDs when direct IDs aren’t available, and centralizes actual media extraction through the embed-based extractor.

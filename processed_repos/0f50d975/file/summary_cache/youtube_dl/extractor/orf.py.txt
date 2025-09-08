@@ -1,0 +1,143 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/orf.py
+
+What this file provides
+- A set of extractors for handling ORF (Austrian public broadcaster) content across radio, podcasts, IPTV/video on demand, and TV Thek (ORF.tvthek) platforms.
+- It implements end-to-end logic to discover, fetch, and parse metadata and media formats from multiple ORF APIs and endpoints, producing unified YouTube-DL info dictionaries and playlists.
+
+Key classes and their roles
+- ORFRadioBase (InfoExtractor)
+  - Shared base for ORF radio content.
+  - Maintains STATION_INFO (mapping of station keys to API/loop identifiers) and _ID_NAMES (id, guid, program) helpers.
+  - _get_item_id, _get_api_payload: safe access helpers for API data.
+  - _extract_podcast_upload: parses podcast upload metadata from enclosure data.
+  - _entries(data, station, item_type=None): core generator for individual items.
+    - If item_type is 'upload' or 'podcast-episode', yields a merged dict with podcast upload data (MP3, duration, etc.).
+    - Otherwise, iterates looped streams, constructing MP3 URLs per host and loopStreamId, including title/description/uploader/series and timestamps/durations when available.
+
+- ORFRadioIE (ORF sound)
+  - IE_NAME: orf:sound
+  - _VALID_URL patterns for sound.orf.at/radio/{station}/sendung/{id} and sound.orf.at/player/{station}.orf.at with date-based variations.
+  - _real_extract(url):
+    - Resolves station to internal api_station via STATION_INFO.
+    - If a date variant exists, fetches from audioapi.orf.at/{api_station}/json/4.0/broadcast/{id}/{date} and uses data['id'] as show_id.
+    - Otherwise fetches from audioapi.orf.at/{api_station}/api/json/5.0/broadcast/{id}?_o=sound.orf.at and uses the payload.
+    - Returns a multi_video playlist built from data via ORFRadioBase._entries with the fetched title/subtitle.
+
+- ORFRadioCollectionIE (ORF Sound collections)
+  - IE_NAME: orf:collection
+  - _VALID_URL for sound.orf.at/collection/{coll_id}(/item)
+  - _real_extract(url):
+    - Downloads collection data from collector.orf.at/api/frontend/collections/{coll_id}?_o=sound.orf.at and extracts payload.
+    - yield_items(): iterates items within the collection, selecting those with id/station/item_type, yielding (station, typed_item_id, item_type).
+    - item_playlist(...) loads data for a specific item (upload, podcast-episode, or generic item) and returns a multi_video playlist of its entries.
+    - If a specific item_id is requested, returns that single item; otherwise builds a playlist of all items in the collection.
+
+- ORFPodcastIE (ORF podcasts)
+  - IE_NAME: orf:podcast
+  - _STATION_RE combines all stations and 'tv'.
+  - _VALID_URL for sound.orf.at/podcast/{station}/{show}/{id}
+  - _real_extract(url):
+    - Fetches podcast metadata from audioapi.orf.at/radiothek/api/2.0/podcast/{station}/{show}/{id}
+    - Payload is extracted via _get_api_payload
+    - Returns metadata merged with _extract_podcast_upload(data) to provide a ready MP3 item (ext mp3, vcodec none, durations, etc.).
+
+- ORFIPTVBase (ORF IPTV / TV on ORF)
+  - Base for IR/OTT video extraction.
+  - _TITLE_STRIP_RE = '' (no extra stripping by default)
+  - _extract_video(video_id, webpage, fatal=False):
+    - Pulls data from http://bits.orf.at/filehandler/static-api/json/current/data.json?file=<video_id>, uses first item.
+    - Determines loadBalancerUrl from sources/default.
+    - Tries to fetch a rendition manifest from loadBalancerUrl; if unavailable, builds a redirect to a DASH MPD URL via regex.
+    - Builds a format dict f (abr, vbr, fps, width, height) from rendition data.
+    - Iterates rendition formats: supports RTMP, f4m (HDS), m3u8 (HLS), and mpd (MPEG-DASH). Collects formats, handles audio-only flags (e.g., _vo. in URL means audio-only).
+    - Sorts formats; builds final info with id, title (from OG tags with optional stripping), description, upload_date, formats, and thumbnail/duration if present.
+  - This base is used by IPTV and FM4 story extractors.
+
+- ORFIPTVIE (ORF IPTV)
+  - IE_NAME: orf:iptv
+  - _WORKING = False (explicitly indicates URLs redirect elsewhere)
+  - _VALID_URL for iptv.orf.at/stories/{id}
+  - _real_extract(url): extracts video_id from the page and delegates to ORFIPTVBase._extract_video(video_id, webpage)
+
+- ORFFM4StoryIE (FM4 stories)
+  - IE_NAME: orf:fm4:story
+  - _VALID_URL for fm4.orf.at/stories/{id}
+  - _TITLE_STRIP_RE strips trailing " - fm4.ORF.at..."
+  - _real_extract(url):
+    - Fetches the story page, discovers multiple data-video IDs in the page, and calls _extract_video(video_id, webpage, fatal=False) for each (to collect multiple entries if present).
+    - Deduplicates by video_id, optionally disambiguates titles for duplicates.
+    - Also detects embedded YouTube IDs and adds them as YouTube video results when suitable.
+    - Returns a playlist_result of collected entries with a title derived from the page.
+
+- ORFONBase (TV Thek)
+  - Base for ORF TV Thek content (episodes, live streams, etc.).
+  - _ENC_PFX and _API_PATH used for API URL construction (to decrypt an encrypted ID).
+  - _call_api(video_id, **kwargs):
+    - Creates an encrypted_id by base64-encoding prefix + video_id.
+    - Fetches https://api-tvthek.orf.at/api/v4.3/public/{_API_PATH}/encrypted/{encrypted_id}
+  - _parse_metadata(api_json): maps fields from the API JSON to standard info_dict fields:
+    - id, age_limit, duration, title, description, thumbnail, timestamp, release_timestamp, etc.
+  - _extract_video(video_id, segment_id):
+    - Calls _call_api(video_id) to obtain API JSON for the episode/segment.
+    - Handles DRM: report_drm if needed.
+    - extract_sources(src_json, video_id): iterates through sources (e.g., hls, dash) and builds formats:
+      - For HLS (m3u8): _extract_m3u8_formats; tag acodec='none' for video-only tracks containing _vo. in URL
+      - For DASH: _extract_mpd_formats_and_subtitles
+    - If there is no formats yet, falls back to video segments:
+      - Looks into _embedded.segments; if multiple segments exist, optionally limits to the requested segment via _yes_playlist conditions.
+      - For each segment, extracts sources and metadata, builds a multi_video or playlist entry depending on number of segments.
+    - Adds subtitles from _embedded.subtitle URLs.
+    - Returns merged info including id, formats, subtitles and parsed metadata.
+  - This base class is used by multiple ORFTV Thek related extractors.
+
+- ORFONIE (ORF On-Demand)
+  - ORFONIE(ORFONBase)
+  - IE_NAME: orf:on
+  - _VALID_URL: https://on.orf.at/video/{id}(/{segment})?
+  - Uses ORFONBase machinery with API path 'episode' and the decryption/encryption scheme to fetch and parse segments/episodes.
+  - Metadata is enhanced via ORFONBase._parse_metadata by default (no extra overrides here).
+
+- ORFONLiveIE (Live streams on TV Thek)
+  - ORFONLiveIE(ORFONBase)
+  - _ENC_PFX and _API_PATH overridden for livestre ams
+  - _VALID_URL: https://on.orf.at/livestream/{id}(/{segment})?
+  - _TESTS provided
+  - Overrides _parse_metadata to merge in live-specific information (is_live=True, updated timestamps as needed)
+
+Important implementation details and behaviors
+- Data access and safety
+  - Uses traverse_obj, txt_or_none, url_or_none, int_or_none, parse_iso8601, parse_age_limit, etc., to robustly pull values from nested JSON structures.
+  - _get_item_id and _get_api_payload provide safe ID extraction and payload validation with helpful errors if data is unexpected.
+- Multiple content origins
+  - Radio: audioapi.orf.at endpoints, with variations for date-based or ID-based routes.
+  - Radio collections: collector.orf.at to enumerate items, then per-item radiothek / audioapi endpoints to fetch details.
+  - Podcasts: radiothek API endpoints to fetch podcast data and a separate _extract_podcast_upload for metadata.
+  - IPTV: bits.orf.at and load balancer-based rendition discovery; supports HLS, DASH, MPD, and RTMP.
+  - TV Thek: OFR TVThek API, with encrypted IDs, supports segments and multi-video playlists; DRM handling and live indicators included.
+- Playlist and item construction
+  - ORFRadioBase._entries yields either podcast uploads or live/looped radio streams, building mp3 URLs with appropriate channel and id query parameters.
+  - ORFONBase can generate either a single video, a multi_video playlist (when there are multiple segments), or a simple playlist depending on available segments and formats.
+  - ORFRadioCollectionIE and ORFONLiveIE demonstrate how to assemble nested playlists with metadata and per-item formats.
+- Title/description extraction
+  - Titles are generally pulled from OG/Twitter meta or page content, with optional stripping (e.g., IN FM4 stories).
+  - Descriptions pulled from subtitle fields or OG meta.
+- DRM handling
+  - ORF TVThek content may be DRM-protected; code calls report_drm when is_drm_protected is detected.
+- Testing scaffolding
+  - The file contains numerous _TESTS entries per extractor to validate URL patterns, returned IDs, and sample media information.
+
+High-level flows (examples)
+- ORF radio feed (sendung)
+  - Identify station and id; fetch either date-based or standard broadcast data from audio API.
+  - Build a multi-video playlist from the data’s items using _entries; each item includes mp3 URLs and metadata.
+- ORF podcast
+  - Resolve station/show/id via audio radiothek API, extract podcast upload metadata, return an MP3 item with duration and uploader.
+- ORF IPTV story
+  - Fetch video data.json, extract load balancer URL, fetch rendition manifest, construct formats from HLS/DASH/MPD, return a video with metadata.
+- ORF TV Thek episode
+  - Encrypt video_id, call API to fetch sources and segments, build formats from HLS/DASH; if multiple segments exist and a combined version is available, prefer it; otherwise create multiple entries for each segment; include subtitles.
+
+In short
+- This module provides a comprehensive suite of ORF extractors covering radio (live and on-demand), podcasts, IPTV, FM4 stories, and TV Thek content.
+- It relies on a mix of ORF APIs (audioapi, radiothek, collector, bits, tvthek) and handles complex scenarios: multiple segments, playlists, DRM, various streaming formats (HLS, DASH, MPD, RTMP), and embedded YouTube content.
+- The design emphasizes safe JSON traversal, modular entry generation, and consistent metadata extraction to produce robust, reusable YouTube-DL info dictionaries and playlists.

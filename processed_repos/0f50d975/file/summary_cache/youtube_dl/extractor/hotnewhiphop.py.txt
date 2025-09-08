@@ -1,0 +1,53 @@
+Overview:
+- This is a YouTube-DL extractor for HotNewHipHop (HotNewHipHopIE). It retrieves audio/video URLs from hotnewhiphop.com pages and returns a standard YouTube-like result or a direct URL to the media.
+
+Key components:
+- Class: HotNewHipHopIE(InfoExtractor)
+  - _VALID_URL: Regex to identify HotNewHipHop pages and capture the embedded id from the URL before the .html suffix.
+  - _TEST: Example URL with expected mp3 output and metadata (id, ext, title).
+
+Main functionality (_real_extract):
+- Extract identifier:
+  - video_id = self._match_id(url)
+  - webpage = self._download_webpage(url, video_id)
+
+- Try to locate the media URL in the page:
+  - video_url_base64 = self._search_regex(r'data-path="(.*?)"', webpage, 'video URL', default=None)
+  - If video_url_base64 is None:
+    - Fallback to a YouTube-based URL:
+      - video_url = self._search_regex(r'"contentUrl" content="(.*?)"', webpage, 'content URL')
+      - Return self.url_result(video_url, ie='Youtube') to delegate to the YouTube extractor.
+
+- If data-path is found (base64-encoded redirect URL):
+  - Build a POST request body with mediaType='s' and mediaId=video_id using urlencode_postdata.
+  - Send POST to http://www.hotnewhiphop.com/ajax/media/getActions/ with content-type application/x-www-form-urlencoded.
+  - Parse JSON response with self._download_json(...):
+    - Expect a 'mediaKey' in the response; raise ExtractorError if missing.
+
+  - Decode the final redirect URL:
+    - redirect_url = compat_b64decode(video_url_base64).decode('utf-8')
+  - Resolve final URL via HEAD request:
+    - redirect_req = HEADRequest(redirect_url)
+    - req = self._request_webpage(redirect_req, video_id, note='Resolving final URL', errnote='Could not resolve final URL')
+    - video_url = req.geturl()
+    - If the final URL ends with .html, raise ExtractorError('Redirect failed').
+
+  - Extract metadata:
+    - video_title = self._og_search_title(webpage).strip()
+    - thumbnail = self._og_search_thumbnail(webpage)
+
+  - Return a dict with:
+    - 'id': video_id
+    - 'url': video_url
+    - 'title': video_title
+    - 'thumbnail': thumbnail
+
+Important implementation details:
+- Fallback behavior: If the page doesn’t provide a data-path URL, the extractor falls back to an embedded content URL and delegates to the YouTube extractor.
+- Base64 handling: Uses compat_b64decode to decode the data-path URL before making the final request.
+- Media key requirement: The AJAX getActions call must return a mediaKey; absence triggers an ExtractorError.
+- URL resolution: Uses HEAD requests to resolve a final URL (without following HTML redirects); if the final URL ends with .html, it treats it as a failed redirect.
+- Metadata extraction: Title and thumbnail are pulled from OpenGraph meta tags in the page.
+
+Purpose:
+- Enables downloading of HotNewHipHop media by resolving either a direct YouTube link or a final media URL after a hidden, base64-encoded redirect, with robust error handling and sensible fallbacks.

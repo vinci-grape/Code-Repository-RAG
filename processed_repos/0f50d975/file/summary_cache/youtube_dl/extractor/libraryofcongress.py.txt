@@ -1,0 +1,79 @@
+Concise yet comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/libraryofcongress.py
+
+Overview
+- This is a YouTube-DL extractor for Library of Congress videos.
+- Class: LibraryOfCongressIE, a subclass of InfoExtractor.
+- Purpose: extract video metadata and multiple download formats (and subtitles) from LOC item pages or cyberlc feature pages.
+
+Key components
+- _VALID_URL: Regexp matching LOC item pages and cyberlc feature pages (two main URL styles).
+- _TESTS: Several test cases demonstrating embedded players, direct download links, and non-matching URLs.
+
+Main workflow (_real_extract)
+1. Identify video id
+   - video_id is extracted from the URL using _match_id.
+   - The page is downloaded with _download_webpage.
+
+2. Locate LOC media identifier (media_id)
+   - Uses multiple regex patterns to find a media identifier in the page, accommodating different embed styles:
+     - id=“media-player-<id>”
+     - <video> tag with uuid
+     - data-uuid attribute
+     - mediaObjectId in JS
+     - data-tab implies a specific share-media id
+   - If none matched, an error would be raised by _search_regex.
+
+3. Retrieve media metadata
+   - Fetch JSON from https://media.loc.gov/services/v1/media?id=<media_id>&context=json
+   - Access the top-level 'mediaObject' object.
+
+4. Choose derivative and media URL
+   - derivative = data['derivatives'][0]
+   - media_url = derivative['derivativeUrl']
+   - Title selection order:
+     - derivative.get('shortName') or data.get('shortName') or fall back to the page title via _og_search_title.
+   - Normalize URL: replace 'rtmp' with 'https'.
+
+5. Infer details and prepare formats
+   - is_video determined from data['mediaType'] (default 'v').
+   - ext determined from media_url via determine_ext; if not 'mp4' or 'mp3', append .mp4 (for video) or .mp3 (for audio).
+   - Build formats list with multiple sources:
+     - HLS (if applicable): If '/vod/mp4:' present in media_url, add an HLS format:
+       - URL transformed to an HLS path: '/vod/mp4:' -> '/hls-vod/media/' and appending '.m3u8'
+       - format_id: 'hls', ext: 'mp4', protocol: 'm3u8_native', quality: 1
+     - HTTP base format: Strips internal path fragments to produce a clean base URL
+       - format_id: 'http', quality: 1
+       - If audio (not video), set vcodec: 'none'
+     - Additional download options parsed from HTML:
+       - Scans for option elements with value (download URL) and data-file-download attribute.
+       - Extracts id (format_id) and size, filters out GIF/JPEG, deduplicates by URL.
+       - Adds each as a format with 'url', 'format_id' (lowercased), and 'filesize_approx' parsed from size.
+   - Sort formats with _sort_formats.
+
+6. Subtitles and metadata
+   - duration: float parsed from data.get('duration')
+   - view_count: int parsed from data.get('viewCount')
+   - Subtitles: if ccUrl exists, add English subtitles with ext 'ttml'
+   - thumbnail: obtained via _og_search_thumbnail(webpage, default=None)
+
+7. Return
+   - Dictionary including:
+     - id, title, thumbnail, duration, view_count, formats, subtitles
+
+Important implementation details
+- Robust media_id extraction: supports multiple web page structures to locate the LOC media object.
+- Derivative-based extraction: relies on the first derivative from the LOC media JSON, and uses derivativeUrl as the primary media source.
+- URL normalization and format handling:
+  - Converts RTMP to HTTPS for compatibility.
+  - Infers proper file extension and appends if missing.
+  - Supports HLS (if applicable) and HTTP direct formats, with proper format_id and protocol markers.
+  - Adds additional downloadable formats found in HTML options, with approximate file sizes.
+- Title/thumbnail extraction:
+  - Uses derivative shortName, then data shortName, then page meta as fallback.
+  - Thumbnail pulled from OpenGraph data if available.
+- Subtitles:
+  - Supports English subtitles via a TTML file URL when ccUrl is provided.
+- Testing coverage:
+  - Includes tests for embedded players, web page-based webcasts, direct item downloads, and non-matching entries.
+
+Overall, the extractor comprehensively handles LOC media pages by locating the media object, fetching derivative data, constructing multiple download formats (including HLS and direct HTTP), and gathering related metadata (title, duration, view count, thumbnails, and subtitles).

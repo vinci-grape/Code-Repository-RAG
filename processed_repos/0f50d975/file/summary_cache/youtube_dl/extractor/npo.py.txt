@@ -1,0 +1,129 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/npo.py
+
+- Overall purpose
+  - A collection of extractors for the Dutch public broadcasters (NPO family): npo.nl, ntr.nl, omroepwnl.nl, zapp.nl, npo3.nl, plus related outlets. Handles live streams, on-demand videos, radio fragments, and several playlists. Supports modern token-based API flows as well as legacy metadata endpoints.
+
+- Core architecture
+  - NPOBaseIE
+    - Provides shared token retrieval helper _get_token(video_id) via http://ida.omroep.nl/app.php/auth.
+  - NPOIE (main extractor)
+    - IE_NAME: 'npo'
+    - Handles the primary on-demand video flow and integrates with older and newer NPO endpoints.
+    - _VALID_URL covers multiple NPO domains and formats (NPO sites, NTR, omroepwnl, zapp, NPO3).
+    - _real_extract(url)
+      - Extracts video_id, then delegates to _get_info(url, video_id) or _get_old_info(video_id) (fallback for legacy data).
+    - _get_info(url, video_id)
+      - Fetches a token from https://www.npostart.nl/api/token with proper headers.
+      - Fetches player JSON from https://www.npostart.nl/player/{video_id} with token in POST data.
+      - Iterates through possible streaming profiles (hls, dash-widevine, dash-playready, smooth) by calling https://start-player.npo.nl/video/{video_id}/streams.
+      - For each available stream:
+        - Detects DRM/protection and skips non-playable ones (sets drm flag if protected).
+        - Depending on stream type/URL, extracts formats:
+          - DASH (application/dash+xml or .mpd): _extract_mpd_formats
+          - HLS (application/x-mpegURL or .m3u8): _extract_m3u8_formats
+          - ISML (Smooth Streaming or ISM): _extract_ism_formats
+          - Otherwise, adds a direct URL format entry
+      - If no formats found and DRM detected, raises ExtractorError indicating DRM protection.
+      - Sorts formats, builds minimal info dict (id, title, formats).
+      - If an embed page is provided, downloads and parses it to enrich metadata (title, description, duration, timestamp, subtitles, etc.) and returns enriched info dict.
+    - _get_old_info(video_id)
+      - Legacy path: uses http://e.omroep.nl/metadata/{video_id} (strip JSONP).
+      - Handles errors from metadata endpoint.
+      - Resolves actual video_id via "prid" when needed.
+      - Builds formats from deprecated items API: http://ida.omroep.nl/app.php/{video_id} with adaptive yes and token.
+      - Iterates items, deduplicates by URL, and determines format_id/quality using item labels and format features.
+      - Supports:
+        - Direct URLs (contentType 'url' or 'audio')
+        - Per-item JSON streams (URL from 'url' or 'stream' objects)
+        - M3U8 streams via _extract_m3u8_formats
+        - ASF/ASX handling via XML ASX playlist when present
+      - Detects live via metadata['medium'] == 'live' and processes additional live streams from metadata['streams'] (HDS/F4M, HLS, ASX, or direct URLs).
+      - Subtitles: supports Dutch TT888 subtitles if present (tt888 == 'ja').
+      - Returns a dict with id, title, description, thumbnail, upload_date, duration, formats, subtitles, is_live.
+  - NPOLiveIE
+    - IE_NAME: 'npo.nl:live'
+    - _VALID_URL matches live pages.
+    - _real_extract(url)
+      - Extracts a display_id (defaults to npo-1 if not found).
+      - Downloads the live page, finds live id via data attributes (media-id or data-prid).
+      - Returns a transparent URL to NPOIE: {'_type': 'url_transparent', 'url': 'npo:{live_id}', 'ie_key': NPOIE.ie_key(), 'id': live_id, 'display_id': display_id}
+  - NPORadioIE
+    - IE_NAME: 'npo.nl:radio'
+    - _VALID_URL matches npo.nl/radio/{id}
+    - _TEST demonstrates extraction of live radio streams
+    - _real_extract(url)
+      - Extracts video_id, scrapes data-channel and data-streams attributes from the page.
+      - Parses JSON from data-streams to obtain stream URL and codec.
+      - Returns a live mp3 stream with appropriate acodec/ext and title
+  - NPORadioFragmentIE
+    - IE_NAME: 'npo.nl:radio:fragment'
+    - _VALID_URL matches radio fragment URLs
+    - _real_extract(url)
+      - Extracts audio_id, title, and audio_url from the fragment page.
+  - NPODataMidEmbedIE
+    - A small helper IE to resolve embedded mid-embeded videos to NPO URLs
+    - _real_extract(url)
+      - Reads data-mid attribute from the page to obtain video_id
+      - Returns a url_transparent pointing to 'npo:{video_id}' with display_id
+  - SchoolTVIE
+    - IE_NAME: 'schooltv'
+    - _VALID_URL matches SchoolTV video pages
+    - Inherits from NPODataMidEmbedIE
+  - HetKlokhuisIE
+    - IE_NAME: 'hetklokhuis'
+    - _VALID_URL matches Het Klokhuis pages
+    - Inherits from NPODataMidEmbedIE
+  - NPOPlaylistBaseIE
+    - Base class for extracting playlists
+    - _real_extract(url)
+      - Gets playlist_id from URL, fetches page, extracts playlist entries via _PLAYLIST_ENTRY_RE
+      - Builds entries as url_results: converts video ids to either 'npo:' URLs or uses absolute URLs
+      - Determines playlist_title via _PLAYLIST_TITLE_RE or OpenGraph title
+      - Returns a playlist_result(entries, playlist_id, playlist_title)
+  - VPROIE
+    - Inherits NPOPlaylistBaseIE
+    - _VALID_URL matches VPRO/2doc style playlists
+    - Defines _PLAYLIST_TITLE_RE and _PLAYLIST_ENTRY_RE to extract title and entries
+    - Includes various test cases (video pages, playlists, embedded YouTube, etc.)
+  - WNLIE
+    - Inherits NPOPlaylistBaseIE
+    - _VALID_URL matches omroepwnl video detail pages
+  - AndereTijdenIE
+    - Inherits NPOPlaylistBaseIE
+    - _VALID_URL matches AnderTijden program pages
+  - Various helpers/utilities used across extractors
+    - URL/JSON fetching: _download_json, _download_webpage, _download_xml
+    - JSON parsing: _parse_json, strip_jsonp
+    - Format handling: _extract_mpd_formats, _extract_m3u8_formats, _extract_ism_formats, _extract_f4m_formats
+    - Misc: determine_ext, fix_xml_ampersands, int_or_none, merge_dicts, orderedSet, parse_duration, qualities, str_or_none, unified_strdate, unified_timestamp, url_or_none, urlencode_postdata
+    - _live_title to present live video titles consistently
+
+- Key implementation details
+  - Modern path (NPOIE)
+    - Uses token-based authentication from https://www.npostart.nl/api/token and the player JSON from https://www.npostart.nl/player/{video_id}.
+    - Streams retrieved via https://start-player.npo.nl/video/{video_id}/streams for multiple profiles; supports DRM detection and skips DRM-protected streams unless downloadable formats exist.
+    - Supports several streaming formats (HLS, DASH with multiple DRM/profiles, ISML/Smooth, etc.) and gracefully handles absence of any usable formats (raising DRM error if needed).
+    - If embed page is present, enriches metadata (title, description, duration, timestamp, thumbnails, subtitles) by parsing embedded video JSON.
+  - Legacy path (_get_old_info)
+    - Maintains backward compatibility with older NPO metadata at e.omroep.nl and ida.omroep.nl.
+    - Builds a formats list by iterating metadata items, resolving URLs (including m3u8 when provided), handling ASX playlists, and applying quality hints based on item labels and format types.
+    - Supports live and non-live streams, including HDS, HLS, ASF, and direct URLs, with special handling to avoid duplicates.
+    - Subtitles supported via TT888 if available.
+  - Live and radio support
+    - NPOLiveIE forwards live streams to the main NPO extractor via a url_transparent wrapper, ensuring live metadata is preserved.
+    - NPORadioIE and NPORadioFragmentIE provide dedicated extraction paths for radio streams (mp3) and radio fragments.
+  - Embedded/mid media
+    - NPODataMidEmbedIE, SchoolTVIE, and HetKlokhuisIE enable extracting videos that are embedded via data-mid attributes, resolving them to the central NPO extractor.
+  - Playlist support
+    - Dedicated playlist extractors (VPROIE, WNLIE, AndereTijdenIE) extract playlist entries from their respective sites and return as a standard YouTube-DL playlist structure.
+  - Tests
+    - Extensive _TEST or _TESTS definitions for many extractors to validate ID, title, ext, duration, and live/non-live behavior, as well as skip_download behavior where appropriate.
+
+- Summary of main functionality
+  - Fetches and normalizes video information for a wide range of NPO-related sites.
+  - Handles modern token-based streaming (HLS/DASH/ISM) with DRM awareness.
+  - Maintains backward compatibility with legacy metadata endpoints and formats.
+  - Supports live streams, radio streams, audio-only content, embedded/mid-embedded videos, and playlists across multiple Dutch public broadcasters.
+  - Provides enriched metadata when available (title, description, duration, timestamps, subtitles).
+
+If you want, I can map specific URL patterns to their extractor class or detail how a particular type of media (e.g., a DRM-protected DASH stream vs. an HLS stream) is processed end-to-end.

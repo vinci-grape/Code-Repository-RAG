@@ -1,0 +1,54 @@
+Here is a concise yet comprehensive summary of the KonserthusetPlayIE extractor.
+
+Overview
+- Purpose: YouTube-dl extractor for Konserthuset Play (and rspoplay) video pages.
+- Class: KonserthusetPlayIE, extending InfoExtractor.
+- URL pattern: _VALID_URL matches URLs like http(s)://www.konserthusetplay.se/?m=... or rspoplay.se/?m=..., capturing the m parameter value as the video id.
+
+Main workflow
+1. Identify video_id from the URL.
+2. Download the initial webpage and extract an e parameter from a CSP Picsearch REST URL embedded in the page.
+3. Query the Picsearch REST API with e to obtain a JSON object (rest). The code uses a transform_source function to slice the response to the JSON object only.
+4. Navigate into rest['media']['playerconfig']['playlist'] and pick the first source that contains either 'bitrates' or 'provider'.
+5. Build the available video formats:
+   - If an m3u8 URL is available in the source, extract HLS formats via _extract_m3u8_formats (mp4 container, native HLS, id 'hls').
+   - Determine a fallback URL (fallbackUrl) and attempt to extract a format_id from the URL using FORMAT_ID_REGEX = r'_([^_]+)_h264m\.mp4'.
+   - Determine a connection URL via RTMP or BWCheck plugin; this is used for RTMP formats.
+   - For each entry in source['bitrates'], assemble an RTMP format with:
+     - url: connection_url
+     - play_path: the actual video URL
+     - format_id: 'rtmp-<id>' if a format_id can be extracted, otherwise 'rtmp'
+     - ext: 'flv'
+     - vbr, width, height from the bitrate entry when available
+     - Extend formats with an additional corresponding HTTP format if the video’s format_id matches the fallback_format_id, using the fallback_url and an 'http' format_id (http-<id> when id is available).
+   - If no formats were constructed but a fallback_url exists, add a basic format with just that URL.
+6. Sort formats with _sort_formats.
+7. Extract basic metadata:
+   - title: player_config['title'] or media['title']
+   - description: player_config.get('mediaInfo', {}).get('description')
+   - thumbnail: media.get('image')
+   - duration: media['duration'] converted from milliseconds to seconds using float_or_none(..., 1000)
+8. Subtitles:
+   - If source['captionsAvailableLanguages'] is a dict, create subtitles entries per language, skipping 'none' and invalid URLs.
+9. Return an information dict with id, title, description, thumbnail, duration, formats, and subtitles.
+
+Key implementation details
+- Regexes:
+  - _VALID_URL captures the video id from the m= query parameter.
+  - FORMAT_ID_REGEX = r'_([^_]+)_h264m\.mp4' is used to infer a format_id from video URLs (both RTMP and HTTP fallbacks).
+- Data sources:
+  - The extractor relies on an embedded CSP Picsearch REST API to obtain the media data.
+  - It selects the first playlist item that includes either 'bitrates' or 'provider' to ensure a playable source.
+- Formats handling:
+  - HLS (m3u8) formats are extracted if a valid m3u8 URL is present.
+  - RTMP formats are constructed using a common connection_url and per-bitrate play_path URLs, with ext set to 'flv'.
+  - HTTP fallbacks are added when the format_id matches the fallback_id, enabling a switch between RTMP and HTTP.
+  - If neither RTMP nor HLS formats can be built but a fallback URL exists, the extractor still provides a basic format with the fallback URL.
+- Metadata:
+  - Title preference: player_config title over media title.
+  - Duration is converted from milliseconds to seconds.
+  - Subtitles are gathered from captionsAvailableLanguages when provided as a dict of language: URL, ensuring valid URLs and excluding 'none'.
+- Tests:
+  - _TESTS include a real example with an expected md5 for the mp4 video and a second example with only_matching set to True (validates URL pattern matching for rspoplay).
+
+In short, this extractor fetches a specific configuration from a Picsearch REST API, selects a usable video source, constructs multiple formats (HLS, RTMP, and HTTP fallbacks) with metadata and subtitles, and returns a standard YouTube-dl info dict.

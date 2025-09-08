@@ -1,0 +1,71 @@
+Summary of ./youtube-dl/youtube_dl/extractor/s4c.py
+
+Overview
+- Provides two extractors for the S4C Clic site:
+  - S4CIE: Extracts individual program video metadata and streaming formats.
+  - S4CSeriesIE: Builds a playlist of episodes for a series by reusing S4CIE for each episode.
+- Both extractors inherit from InfoExtractor and use utilities from youtube-dl’s framework (e.g., traverse_obj, merge_dicts, T, etc.).
+
+Key Classes and Core Functionality
+- S4CIE (InfoExtractor)
+  - _VALID_URL: Matches program pages of the form https://www.s4c.cymru/clic/programme/<id>.
+  - _TESTS: Includes two sample program URLs with expected id, title, duration, thumbnail, and optional description.
+  - _real_extract(url):
+    - video_id = extracted program id from URL.
+    - details = download_json('https://www.s4c.cymru/df/full_prog_details', with lang=e and programme_id) with fatal=False (optional data).
+    - player_config = download_json('https://player-api.s4c-cdn.co.uk/player-configuration/prod', with programme_id, lang=en, mode=od, appId=clic, etc.), labeled as “Downloading player config JSON”.
+    - m3u8_url = download_json('https://player-api.s4c-cdn.co.uk/streaming-urls/prod', with mode=od, application=clic, region=WW, extra=false, thirdParty=false, filename from player_config)['hls'].
+    - formats = _extract_m3u8_formats(m3u8_url, video_id, 'mp4', m3u8_id='hls', entry_protocol='m3u8_native').
+    - self._sort_formats(formats) to order formats by quality/priority.
+    - subtitles: built from player_config['subtitles'] by iterating with traverse_obj and url_or_none, organizing by language code (default 'en').
+    - thumbnail: url from player_config['poster'] if present.
+    - Return: a merged dict containing:
+      - id, formats, subtitles, thumbnail
+      - plus title, description, and duration extracted from details via traverse_obj with:
+        - title: from either programme_title or series_title
+        - description: from full_billing
+        - duration: from duration, converted via float_or_none with invscale=60 (minutes to seconds)
+      - merge_dicts with rev=True to prioritize primary data and include fallbacks.
+  - Notes on implementation details:
+    - Uses lazy/fallback data extraction (fatal=False for details).
+    - Duration conversion assumes duration in minutes in JSON and converts to seconds.
+    - Subtitles are gathered from a nested structure in the player config.
+    - Uses merge_dicts and traverse_obj to assemble final info dict cleanly.
+
+- S4CSeriesIE (InfoExtractor)
+  - _VALID_URL: Matches series pages of the form https://www.s4c.cymru/clic/series/<id>.
+  - _TESTS: Includes two sample series URLs with expected id and title; playlist_mincount indicates expected number of episodes.
+  - _real_extract(url):
+    - series_id = extracted series id from URL.
+    - series_details = download_json('https://www.s4c.cymru/df/series_details', with lang=e, series_id, show_prog_in_series=Y).
+    - Returns a playlist built by:
+      - Generating Episode entries as url_result('https://www.s4c.cymru/clic/programme/' + episode_id, S4CIE, episode_id) for each episode_id found at series_details under other_progs_in_series (traverse_obj with Ellipsis, 'id').
+      - Creating playlist_result with:
+        - playlist_id = series_id
+        - playlist_title = series_details[...] series_title parsed via txt_or_none
+  - Notes on implementation details:
+    - Relies on S4CIE to fetch actual episode details/streams.
+    - Efficiently constructs a playlist by scanning the series_details JSON for episode IDs.
+
+Implementation Details and Helpers
+- Utilities used:
+  - _DOWNLOAD_JSON: to fetch JSON data from multiple endpoints.
+  - _extract_m3u8_formats: to parse HLS m3u8 URLs into video formats.
+  - _sort_formats: to order formats.
+  - url_or_none, txt_or_none: safe extractors for strings/URLs.
+  - traverse_obj: robust nested-field access with defaults.
+  - merge_dicts: merge core fields with additional extracted data.
+  - T: helper for safe type-conversion in traversal.
+  - partial_f (alias for functools.partial): used to apply float conversion with invscale for duration.
+- Data traversal:
+  - Uses traverse_obj extensively to extract nested fields, with fallbacks.
+  - Duration conversion uses invscale=60 to convert minutes to seconds when necessary.
+- Error handling:
+  - Some JSON calls are non-fatal (fatal=False) to allow partial extraction if certain data is missing.
+  - Subtitles and thumbnail extraction are guarded by presence checks (url_or_none, get).
+
+Summary of Functionality
+- S4CIE enables YouTube-dl to extract direct video formats (via HLS) and metadata (title, description, duration, thumbnail) for individual S4C program pages.
+- S4CSeriesIE enables YouTube-dl to enumerate a series’ episodes and treat each as its own S4CIE-supported video, assembling a playlist with the series’ title.
+
+Overall, the module provides complete support for both single program extraction and series-based playlists by leveraging S4C’s JSON endpoints and the existing HLS-based format extraction framework.

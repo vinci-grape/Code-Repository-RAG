@@ -1,0 +1,50 @@
+Concise summary of the Metacritic extractor (youtube_dl/extractor/metacritic.py):
+
+- Purpose
+  - Implements an extractor for Metacritic trailer pages, retrieving video formats (MP4), title, description, and duration for a specific trailer.
+
+- Main class
+  - MetacriticIE (subclass of InfoExtractor)
+
+- URL matching
+  - _VALID_URL regex: matches URLs like http(s)://...metacritic.com/<anything>/trailers/<digits>
+  - Captures the trailing numeric trailer ID as id
+
+- Tests
+  - _TESTS contains two example trailer pages with expected info_dict (id, ext, title, description, duration)
+  - The first test is marked to skip with the message “Not providing trailers anymore”, indicating a test skip in current state
+  - The second test uses a different trailer and provides expected output
+
+- Extraction flow (_real_extract)
+  - Extracts video_id from URL using the _VALID_URL pattern
+  - Downloads the HTML webpage for the trailer page (for title/description)
+  - Downloads XML metadata from http://www.metacritic.com/video_data?video=<video_id>
+    - Uses fix_xml_ampersands to sanitize XML before parsing
+  - XML parsing details:
+    - Finds the specific clip element under playList/clip whose id matches video_id
+    - Iterates over videoFile entries under httpURI/videoFile to build video formats
+      - For each videoFile:
+        - rate: string representing bitrate (used as format_id and tbr)
+        - filePath: URL to the MP4 file
+        - Creates a format dict with: url, ext='mp4', format_id=rate, tbr=int(rate)
+    - Sorts the formats using _sort_formats
+  - Description extraction:
+    - Uses _html_search_regex to extract the description from the page HTML by locating <b>Description:</b>... </p> (DOTALL)
+  - Returns an info dictionary with:
+    - id: video_id
+    - title: text inside the clip's <title> element
+    - formats: list of MP4 format dictionaries
+    - description: extracted description text
+    - duration: integer value from the clip’s <duration> element
+
+- Key implementation details
+  - The XML structure is expected as playList/clip with child id, title, duration, and nested httpURI/videoFile entries containing rate and filePath
+  - The code handles multiple video file formats by gathering all videoFile entries
+  - The XML parsing relies on ElementTree-like API (find, findall)
+  - It fixes potential malformed XML ampersands before parsing (transform_source=fix_xml_ampersands)
+
+- Data flow and output
+  - Produces a single video entry with multiple MP4 formats, plus metadata (title, description, duration)
+  - Designed for older Metacritic trailer pages; the presence of the skip in tests suggests changes on Metacritic’s trailer availability
+
+Overall, this extractor targets Metacritic trailer pages, fetches trailer-specific XML metadata, builds MP4 format options from the XML, and returns a structured info dictionary containing id, title, formats, description, and duration.

@@ -1,0 +1,67 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/expotv.py
+
+Purpose
+- ExpoTVIE is a video extractor for the ExpoTV site (expotv.com) used by youtube-dl/stub libraries to fetch video metadata and formats.
+
+Main functionality
+- Recognizes ExpoTV video pages and extracts all usable video formats (streams) along with metadata such as title, description, thumbnail, uploader, upload date, and view count.
+
+Key components
+- Class: ExpoTVIE(InfoExtractor)
+  - _VALID_URL: Regex to match ExpoTV video pages and capture the video id. Example: https://www.expotv.com/videos/.../667916
+  - _TEST: A sample test case including URL, expected MD5 of the video, and an info_dict describing expected extracted fields (id, ext, title, description, thumbnail, uploader, upload_date, view_count).
+  - _real_extract(url): Core extraction logic.
+
+Extraction flow in _real_extract
+1. Identify video_id by matching the URL with _VALID_URL (_match_id).
+2. Download the video webpage (_download_webpage).
+3. Extract the playerKey from the page via regex on a parameter tag:
+   - Pattern: <param name="playerKey" value="([^"]+)"
+4. Fetch video configuration JSON:
+   - URL: http://client.expotv.com/video/config/{video_id}/{player_key}
+   - Uses _download_json to retrieve the configuration and label as 'Downloading video configuration'.
+5. Build formats list from config['sources']:
+   - For each source entry (fcfg):
+     - media_url = fcfg.get('file'); skip if missing.
+     - If fcfg['type'] == 'm3u8':
+       - Use _extract_m3u8_formats(media_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls')
+       - This handles HLS streams.
+     - Else (direct video file):
+       - Create a format dict with:
+         - 'url': media_url
+         - 'height': int_or_none(fcfg.get('height'))
+         - 'format_id': fcfg.get('label')
+         - 'ext': inferred extension from the URL via regex on filename, or fallback to fcfg.get('type')
+   - Append each format to formats and later sort with _sort_formats(formats).
+6. Metadata extraction:
+   - title: _og_search_title(webpage)
+   - description: _og_search_description(webpage)
+   - thumbnail: config.get('image')
+   - view_count: int_or_none of regex on webpage: <h5>Plays: ([0-9]+)</h5>
+   - uploader: optional extraction from page with regex on <div class="reviewer"> <img alt="...">
+   - upload_date: parsed via unified_strdate from regex: <h5>Reviewed on ([0-9/.]+)</h5>, using day_first=False
+7. Return a dict with:
+   - 'id': video_id
+   - 'formats': formats
+   - 'title': title
+   - 'description': description
+   - 'view_count': view_count
+   - 'thumbnail': thumbnail
+   - 'uploader': uploader
+   - 'upload_date': upload_date
+
+Important implementation details
+- Uses a two-step approach for video sources: HLS (m3u8) via _extract_m3u8_formats and direct file URLs with metadata-based format info.
+- Player key is scraped from the page and used to fetch a separate video configuration JSON, which contains the actual sources.
+- Handles potential missing fields gracefully (fatal=False for uploader extraction, etc.).
+- The code relies on common youtube-dl utilities:
+  - int_or_none for numeric fields
+  - unified_strdate for date normalization
+  - _og_search_title/_og_search_description for title/description
+  - _search_regex for extracting various pieces of data
+  - _download_webpage and _download_json for network access
+  - _sort_formats to order the formats by quality
+
+Extensibility and tests
+- The _TEST entry provides a concrete example including expected md5 and info_dict structure, guiding correctness for this extractor.
+- The extractor is designed to accommodate multiple sources and both HLS and direct-file formats.

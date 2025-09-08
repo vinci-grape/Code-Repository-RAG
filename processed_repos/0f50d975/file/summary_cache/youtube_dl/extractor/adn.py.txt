@@ -1,0 +1,111 @@
+Concise but comprehensive summary of ADNIE extractor (youtube-dl/youtube_dl/extractor/adn.py)
+
+Purpose
+- Implement an InfoExtractor for Animation Digital Network (ADN/ANIME Digital Network) video pages on animationdigitalnetwork.fr. Handles login, token-based access to video links, extraction of video formats (via m3u8), metadata, and subtitles (encrypted).
+
+Key classes, functions, and flow
+- ADNIE (InfoExtractor)
+  - Inherits from InfoExtractor; central entry point for ADN video URLs.
+  - _VALID_URL: regex matching ADN FR video pages (animationdigitalnetwork.fr).
+  - _BASE, _API_BASE_URL, _PLAYER_BASE_URL: define API and player endpoints used throughout extraction.
+  - _RSA_KEY: RSA public key (modulus n and exponent e) used to encrypt a request for obtaining video links.
+  - _K: per-request random 16-hex-character key used for subtitle/video link encryption/decryption.
+  - _HEADERS: default HTTP headers; updated after login to include Bearer authorization token.
+  - _REAL initialize/login support via _real_initialize.
+  - _TESTS: sample tests for the extractor, including a case that requires region-locked handling.
+
+Main methods and their responsibilities
+- _ass_subtitles_timecode(seconds)
+  - Formats a time value into ASS (SubStation Alpha) timecode: HH:MM:SS.xx.
+
+- _get_subtitles(sub_url, video_id)
+  - Downloads and decrypts subtitles data if a URL is provided.
+  - Steps:
+    - Fetch initial subtitles location from sub_url; follow redirection to actual data if provided.
+    - Decrypt the encrypted subtitles payload using AES-CBC:
+      - Key: derived from a random K plus a fixed hex suffix, converted to intlist.
+      - IV: derived from the first 24 base64-characters of the payload.
+      - Uses self._K and an IV-derived key to decrypt, then trims PKCS#7 padding.
+    - Parse the resulting JSON to obtain per-language subtitles.
+    - For each language:
+      - Build an ASS (SSA) subtitle track from the startTime, endTime, text, lineAlign, positionAlign using alignment maps (_POS_ALIGN_MAP, _LINE_ALIGN_MAP).
+      - Normalize language code (e.g., 'vostf' -> 'fr').
+      - Attach two formats per language: a JSON dump of the raw sub data and the SSA text.
+  - Returns a dict of subtitles per language, or None if not available.
+
+- _real_initialize()
+  - Handles user authentication if credentials are configured.
+  - Uses _get_login_info() to obtain username/password.
+  - Posts to the ADN authentication endpoint to obtain an accessToken.
+  - If a token is received, updates _HEADERS with Authorization: Bearer <token>.
+  - If login fails (HTTP 401), attempts to read a server message and warns via report_warning rather than failing outright.
+
+- _real_extract(url)
+  - Core extraction workflow for a video:
+  - Resolve video_id from URL; build video_base_url for the video.
+  - Fetch player configuration JSON from video_base_url + 'configuration' (using _HEADERS for auth if present).
+  - Ensure user hasAccess; if not, raise login required.
+  - Obtain a token via the refresh endpoint (either a custom refresh URL from the user data or a default token endpoint). Use header 'x-player-refresh-token' with the user-provided refreshToken.
+  - Determine links URL for video data: prefer options['video']['url'], else fall back to video_base_url + 'link'.
+  - Generate a random 16-hex-character key self._K and prepare a message containing {'k': self._K, 't': token} as JSON, converted to a list of integers.
+  - Encrypt and request the links data:
+    - Pad the message with PKCS#1 v1.5 padding to 128 bytes using pkcs1pad.
+    - Encrypt with RSA public key (n,e) to form the authorization token (base64-encoded).
+    - Call the links URL with header 'X-Player-Token': <authorization> and appropriate query params (freeWithAds, adaptive, withMetadata, source).
+  - Robust error handling with retries:
+    - Up to 3 attempts; if 401, retry with a new padding.
+    - If 403 with specific error code 'player-bad-geolocation-country', trigger geo-restriction with message.
+    - Otherwise raise an ExtractorError with the server message.
+  - Parse links and metadata from the response:
+    - links: contains streaming options and possibly subtitles.
+    - metas: contains title and other metadata.
+    - sub_url: subtitles URL if present.
+    - video_info: video-related data (e.g., duration, image).
+  - Title is taken from metadata; description from metas or video data; thumbnail from video_info or player data.
+  - Build formats:
+    - Iterate over links['streaming'], which maps format_id to a dict of quality -> load_balancer_url.
+    - For each load_balancer_url, fetch its JSON to obtain a final m3u8 URL (location).
+    - Use _extract_m3u8_formats on the m3u8 URL to gather formats (type mp4, m3u8_native).
+    - If format_id is 'vf', mark all formats in that set with language 'fr'.
+  - Sort formats with _sort_formats.
+  - Fetch additional video metadata from API_BASE_URL + 'video/{video_id}' (non-fatal) to enrich the info dict (video, show, etc.).
+  - Build and return the final info dict:
+    - id, title, description, thumbnail, formats, subtitles (via extract_subtitles(sub_url, video_id)), episode, episode_number, series, season_number, duration, release_date, average_rating, comment_count.
+
+Important implementation details
+- Subtitles encryption/decryption:
+  - Subtitles data is stored encrypted. The code decrypts using AES-CBC with:
+    - Key: derived from a random K plus a fixed hex suffix to form a 16-byte key.
+    - IV: derived from the first 24 base64-characters of the ciphertext.
+  - After decryption, PKCS#7 padding is removed using compat_ord on the last byte.
+  - Subtitles JSON maps language codes to sub data; non-English/unnormalized codes map to language keys in the final dict.
+  - Special handling for 'vostf' -> 'fr'.
+  - For each language, two forms are returned: a JSON representation of the subtitles data and an SSA representation built programmatically with proper timing and styles.
+
+- Video link access and authentication:
+  - Requires login/access token flow: fetch player config -> require hasAccess -> obtain a short-lived token via a refresh endpoint -> use RSA-encrypted payload to authenticate requests for the actual streaming links.
+  - RSA encryption uses a fixed 2048-bit public key (n,e). The client pads a JSON payload containing a random key (K) and the token, then RSA-encrypts it; the result is base64-encoded and sent as X-Player-Token.
+  - The implementation includes retry logic to handle intermittent failures (especially 401), attempting new PKCS1 padding to bypass server-side hiccups, up to 3 tries.
+
+- Formats extraction:
+  - The extractor navigates through a nested series of load balancers to ultimately obtain m3u8 URLs, then uses the standard m3u8 handling to populate the formats list.
+  - Special handling for ‘vf’ format to tag language as French.
+
+- Metadata retrieval:
+  - Title is taken from the metadata in the links response.
+  - Description is pulled from metadata or video data.
+  - Episode, series, season, duration, release_date, rating, and comment_count are populated from a mix of video and metadata fields when available.
+
+- Login support:
+  - _real_initialize() supports login via netrc-like credentials (via _get_login_info()) and stores a Bearer token for subsequent requests.
+  - If login fails with 401, the code tries to parse server feedback and issue a warning instead of an outright failure.
+
+- Geo-restriction handling:
+  - If API responds with a 403 and error code indicates country restriction, the extractor calls raise_geo_restricted with the message.
+
+- Robustness:
+  - Uses fatal=False for non-critical steps to avoid failing entirely if some metadata or subtitles are missing.
+  - Uses try_get for safe nested dictionary access.
+
+In short
+- This extractor authenticates to ADN, fetches a protected video link set using RSA-encrypted tokens, collects available streaming formats from m3u8 manifests, and enriches the result with metadata and encrypted subtitles (converted to both JSON and SSA formats). It includes careful error handling (authentication, geolocation, retry logic), and supports region-restriction messaging and login-based access.

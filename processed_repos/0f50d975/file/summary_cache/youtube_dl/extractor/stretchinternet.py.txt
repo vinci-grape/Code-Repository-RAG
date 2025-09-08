@@ -1,0 +1,31 @@
+- Purpose: A youtube-dl extractor for Stretch Internet video portals. It resolves a video URL from a given event page and returns metadata including the media URL and uploader information.
+
+- Key class: StretchInternetIE(InfoExtractor)
+
+- URL matching:
+  - _VALID_URL regex matches URLs like https://portal.stretchinternet.com/{site}/portal.htm?eventId=12345 or similar with full.htm and video streams.
+  - Captures the numeric eventId as id.
+
+- Test data:
+  - _TEST provides a sample URL and the expected info_dict with id, extension, title, and uploader_id. Some fields (timestamp, upload_date) are present but commented out, indicating they are not currently parsed.
+
+- Main functionality (_real_extract):
+  - Extract video_id via self._match_id(url) using the _VALID_URL pattern.
+  - Fetch media URL:
+    - Request: https://core.stretchlive.com/trinity/event/tcg/{video_id}
+    - Expected response: JSON array; uses the first element [0], then ['media'][0]['url'] to obtain media_url.
+  - Fetch event metadata:
+    - Request: https://neo-client.stretchinternet.com/portal-ws/getEvent.json
+    - Query parameters: eventID=video_id, token='asdf' (token looks like a placeholder)
+    - Expected response: JSON with an 'event' object containing metadata.
+  - Return a dict with:
+    - 'id': video_id
+    - 'title': event['title']
+    - 'url': 'https://' + media_url (the actual media URL is prefixed with https)
+    - 'uploader_id': event.get('ownerID')
+  - Note: There is a TODO for parsing time-related fields (timestamp/upload_date); these are not extracted in the current implementation.
+
+- Implementation notes:
+  - Uses _download_json to perform HTTP GET and parse JSON responses.
+  - Relies on two separate endpoints to obtain the streaming media URL and the event metadata.
+  - The final extracted URL points to the media resource; the extractor does not explicitly set 'ext', leaving it to downstream logic to infer from the URL or headers. The _TEST indicates an mp4 expectation.

@@ -1,0 +1,43 @@
+Summary of the code in ./youtube-dl/test/test_unicode_literals.py
+
+- Purpose:
+  - Enforce Unicode handling consistency across the repository by ensuring every Python source file:
+    - Contains the future import: from __future__ import unicode_literals
+    - Does not use Python 2 style Unicode literals (prefixed with u, e.g., u"text" or u'text')
+
+- Structure:
+  - A unittest module with a single test class: TestUnicodeLiterals
+  - The test class has one test method: test_all_files
+
+- Key components:
+  - IGNORED_FILES: a list of specific files to skip (e.g., setup.py, conf.py, buildserver.py, get-pip.py)
+  - IGNORED_DIRS: a list of directories to skip (e.g., .git, .tox)
+  - rootDir computation: rootDir is the repository root (two levels up from this test file)
+  - sys.path adjustment: prepends rootDir to sys.path to allow importing test.helper and youtube_dl.compat
+
+- Important implementation details:
+  - File discovery:
+    - Recursively walks the repository starting at rootDir using os.walk
+    - Prunes IGNORED_DIRS from traversal by removing them from dirnames
+    - Processes only .py files that are not in IGNORED_FILES
+  - File reading:
+    - Uses youtube_dl.compat.compat_open as open to read each file with utf-8 encoding
+    - Skips files that do not contain any quotes (no single or double quotes)
+  - Unicode literals check:
+    - Ensure the file has a unicode_literals future import:
+      - Uses a regex to allow comments and whitespace before the import:
+        (?:(?:#.*?|\s*)\n)*from __future__ import (?:[a-z_]+,\s*)*unicode_literals
+      - If the import is missing, the test fails via assertRegexpMatches
+  - Detection of Python 2 style Unicode literals:
+    - Uses a regex to find occurrences of u' or u" (unicode prefixes):
+      (?<=\s)u[\'"](?!\)|,|$)
+    - If such a match is found, the test fails with a message indicating the file and surrounding code
+    - The code path intentionally triggers a failure when a match is found (the assertion is self.assertTrue(m is None, ...), which fails when m is not None)
+  - Assertion helper:
+    - Uses assertRegexpMatches from test.helper for regex-based assertions
+
+- Execution:
+  - If run as a script, it executes unittest.main()
+
+Overall function:
+- The test ensures code style and compatibility by requiring explicit unicode_literals usage and prohibiting legacy Python 2 Unicode literals across the repository’s Python files, excluding a small set of ignored files and directories.

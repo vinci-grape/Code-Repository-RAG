@@ -1,0 +1,46 @@
+Here is a concise summary of the code in ./youtube-dl/youtube_dl/extractor/nationalgeographic.py:
+
+- Purpose
+  - Adds two extractors for National Geographic content to youtube-dl:
+    1) NationalGeographicVideoIE: handles standard NatGeo video pages under video.nationalgeographic.com.
+    2) NationalGeographicTVIE: handles NatGeo TV watch pages under nationalgeographic.com/tv/watch/ via the FOXIE base extractor.
+
+- Key classes
+  1) NationalGeographicVideoIE (InfoExtractor)
+     - IE_NAME: 'natgeo:video'
+     - _VALID_URL: matches http(s)://video.nationalgeographic.com/ followed by anything
+     - _TESTS: includes two example video URLs with expected metadata (id, ext mp4, title, description, timestamp, upload_date, uploader) and indicates to use ThePlatform for extraction
+     - _real_extract(self, url):
+       - Derives a name from the URL using url_basename
+       - Downloads the page HTML
+       - Extracts a GUID from the page using the regex: data-guid attribute on elements with id "videoPlayer" or "player-container"
+       - Constructs a ThePlatform URL using the GUID:
+         http://link.theplatform.com/s/ngs/media/guid/2423130747/{guid}?mbr=true
+       - Uses smuggle_url to force a SMIL URL (force_smil_url: True)
+       - Returns a url_transparent result with:
+         - _type: 'url_transparent'
+         - ie_key: 'ThePlatform'
+         - url: the constructed ThePlatform URL (smuggled to force SMIL)
+         - id: the extracted guid
+     - Effect: Delegates actual media retrieval to the ThePlatform extractor
+
+  2) NationalGeographicTVIE (inherits FOXIE)
+     - _VALID_URL: matches http(s)://(www.)?nationalgeographic.com/tv/watch/{id}, where id is a hex string
+     - _TESTS: includes one example NatGeo TV watch URL with expected metadata (id, ext mp4, title, description, timestamp, upload_date, age_limit) and requests skip_download to only fetch metadata
+     - _HOME_PAGE_URL: 'https://www.nationalgeographic.com/tv/'
+     - _API_KEY: '238bb0a0c2aba67922c48709ce0c06fd' (likely used by FOXIE to access NatGeo's TV API)
+     - Inherits behavior from FOXIE, which handles the actual extraction logic for NatGeo TV pages (e.g., using the API key and home URL)
+     - The class structure implies it relies on FOXIE’s implementation to fetch video data and metadata without downloading the video when skip_download is requested
+
+- Important implementation details
+  - The NationalGeographicVideoIE does not download the video directly. It extracts a GUID from the page and creates a ThePlatform URL, delegating to the ThePlatform extractor via a url_transparent result.
+  - The GUID extraction targets either data-guid in elements with id="videoPlayer" or id="player-container".
+  - The smuggle_url utility is used to force ThePlatform to use a SMIL URL, which is a common pattern for ThePlatform-based video sources in youtube-dl.
+  - URL validation patterns are narrowly defined to separate desktop video pages (video.nationalgeographic.com) from NatGeo TV pages (nationalgeographic.com/tv/watch/).
+  - The _TESTS sections provide example inputs and expected outputs to validate both extractors’ behavior, ensuring correct URL handling and metadata extraction.
+  - Constants for FOXIE extraction (home page and API key) are included for NatGeo TV to work with the FOXIE-based extraction flow.
+
+- Overall functionality
+  - Enables extraction of NatGeo video streams by:
+    - Locating a GUID on the page and using ThePlatform as an intermediary to obtain the actual video resources (NationalGeographicVideoIE)
+    - Leveraging the existing FOXIE extraction logic (NationalGeographicTVIE) for NatGeo TV content, with the necessary API key and home page configuration.

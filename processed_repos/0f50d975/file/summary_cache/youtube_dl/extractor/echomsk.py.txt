@@ -1,0 +1,56 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/echomsk.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Echo Moscow (echo.msk.ru) sound pages. It discovers the direct MP3 URL and constructs a metadata entry (id, title) for the media.
+
+- Main class
+  - EchoMskIE(InfoExtractor)
+    - Inherits common extraction helpers from youtube-dl.
+
+- Key components
+  - _VALID_URL
+    - Regex: https?://(?:www\.)?echo\.msk\.ru/sounds/(?P<id>\d+)
+    - Captures the numeric sound ID used as the video_id.
+  - _TEST
+    - Contains a test case with:
+      - url: sample Echo Moscow sound page
+      - md5: expected MD5 of the downloaded MP3
+      - info_dict: expected output fields (id, ext, title)
+  - _real_extract(self, url)
+    - Core extraction logic:
+      - video_id = self._match_id(url)
+        - Extracts the numeric ID from the URL.
+      - webpage = self._download_webpage(url, video_id)
+        - Downloads the HTML of the page.
+      - audio_url = self._search_regex(r'<a rel="mp3" href="([^"]+)">', webpage, 'audio URL')
+        - Finds the direct MP3 URL from an anchor tag with rel="mp3".
+      - title = self._html_search_regex(r'<a href="/programs/[^"]+" target="_blank">([^<]+)</a>', webpage, 'title')
+        - Extracts the sound title from a link to the program page.
+      - air_date = self._html_search_regex(r'(?s)<div class="date">(.+?)</div>', webpage, 'date', fatal=False, default=None)
+        - Optionally extracts an air date from a div with class "date". Uses DOTALL mode.
+      - If air_date exists:
+        - air_date = re.sub(r'(\s)\1+', r'\1', air_date)
+          - Collapses multiple whitespace characters into a single one.
+        - If still non-empty, append to title: title = '%s - %s' % (title, air_date)
+      - Return a dict with:
+        - 'id': video_id
+        - 'url': audio_url (direct MP3 link)
+        - 'title': title (potentially suffixed with air date)
+    - Notes:
+      - This extractor returns a direct media URL for downstream handling (e.g., downloading), not the page URL.
+      - It uses regex-based HTML extraction via helper methods (_download_webpage, _search_regex, _html_search_regex) rather than a full HTML parser.
+      - Air date is optional and only added if found and non-empty.
+
+- Implementation details and behavior
+  - Regex-driven extraction tailored to Echo Moscow’s page structure:
+    - Audio found via <a rel="mp3" href="..."> tag.
+    - Title derived from a link to /programs/... with anchor text.
+    - Optional date extracted from a div class="date".
+  - Robustness considerations:
+    - air_date extraction uses fatal=False, so absence won’t fail extraction.
+    - Whitespace normalization ensures clean title formatting when date is present.
+  - Output conforms to youtube-dl extractor expectations: a dict with id, url, and title (ext inferred from the URL’s extension, in test 'ext': 'mp3').
+
+- Summary of behavior
+  - Given a URL like http://www.echo.msk.ru/sounds/1464134.html, it:
+    - Retrieves the page, finds the MP3 URL, builds a descriptive title (optionally including the air date), and returns the media id, direct MP3 URL, and title for downloading.

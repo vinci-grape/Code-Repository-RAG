@@ -1,0 +1,53 @@
+Summary of ./youtube-dl/youtube_dl/extractor/playvid.py
+
+Overview
+- This is an InfoExtractor for Playvid videos. It parses the Playvid watch page, extracts video metadata and available video formats from embedded flashvars, and returns a structured info dict consumable by youtube-dl.
+
+Key components
+- Class: PlayvidIE(InfoExtractor)
+- URL matching: _VALID_URL = r'https?://(?:www\.)?playvid\.com/watch(\?v=|/)(?P<id>.+?)(?:#|$)'
+  - Extracts video_id from the URL using _match_id.
+- Tests: _TESTS contains two scenarios:
+  - A removed video (toS block) expecting an error/skip.
+  - A normal video with expected mp4 format, title, duration, age_limit, and optionally a thumbnail.
+
+Core logic (_real_extract)
+- Download page: Retrieves the HTML of the target video page.
+- Error handling: Looks for a block error HTML snippet (<div class="block-error"> ...) and raises ExtractorError with the displayed message if found.
+- Initialize accumulators: video_title, duration, video_thumbnail, formats (empty list).
+- Discover flashvars: Extracts the flashvars string via _html_search_regex('flashvars="(.+?)"').
+- Decode and split flashvars:
+  - flashvars is URL-encoded; decode with compat_urllib_parse_unquote and split on '&'.
+  - Iterate each info piece, matching lines of the form video_vars[KEY]=VALUE.
+  - Key handling:
+    - title: decode with compat_urllib_parse_unquote_plus and assign to video_title.
+    - duration: parse int(val) and assign to duration (ignore parse errors).
+    - big_thumb: assign to video_thumbnail.
+    - video_urls][<height>p]: extract height and add a format entry {'height': height, 'url': val}.
+- Format sorting: self._sort_formats(formats) to order formats by quality/height.
+- Title fallback: If title not found in flashvars, try to extract from the page <title> tag.
+- Return payload: dict with
+  - id: video_id
+  - formats: list of format dicts (each with at least 'height' and 'url')
+  - title: video_title (from flashvars or <title>)
+  - thumbnail: video_thumbnail (if provided)
+  - duration: duration (if parsed)
+  - description: None
+  - age_limit: 18
+
+Important implementation details
+- Accesses video data primarily from embedded flashvars:
+  - video_vars[...] keys provide metadata (title, duration, big_thumb).
+  - video_urls][<height>p] keys provide direct video URLs for different resolutions.
+- Robustness:
+  - If a flashvars entry cannot be parsed as int for duration, it’s ignored.
+  - If the title isn’t in flashvars, a secondary title extraction from the page is attempted.
+  - If a “block-error” is found, the extractor raises a clean, user-friendly ExtractorError.
+- Decoding utilities:
+  - Uses compat_urllib_parse_unquote and compat_urllib_parse_unquote_plus to properly handle URL-encoded strings.
+  - Uses clean_html to sanitize error messages before surfacing to the user.
+- Output format:
+  - The formats list is populated with dictionaries containing at least height and url; the actual file extension is inferred from the URL (tests expect mp4).
+  - Age limit is hard-coded to 18 for all results.
+
+In short, PlayvidIE parses the video data embedded in flashvars on Playvid watch pages, builds a list of quality-specific video URLs, and returns a structured metadata payload including title, duration, thumbnail, and age restriction.

@@ -1,0 +1,54 @@
+- Location: youtube-dl/youtube_dl/extractor/rentv.py
+- Purpose: Two extractors for REN TV content: a video extractor (RENTVIE) and a news/article extractor (RENTVArticleIE).
+
+Key components
+- RENTVIE (InfoExtractor)
+  - _VALID_URL: Matches either rentv:<id> or https://ren.tv/video/epizod/<id> or /player/<id>.
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Loads the player page at http://ren.tv/player/<video_id>.
+    - Parses a JSON-like config embedded in the page from config = { ... }.
+    - title is taken from config['title']; description, image (thumbnail), and date/duration are read from config as available.
+    - Builds formats from config['src']: for each entry with a valid 'src':
+      - If URL extension is m3u8, expands formats via _extract_m3u8_formats with:
+        - protocol: m3u8_native
+        - m3u8_id: 'hls'
+        - fatal: False (graceful if m3u8 extraction fails)
+      - Otherwise, adds a direct format {'url': src}.
+    - Sorts formats with _sort_formats.
+    - Returns a dict with id, title, description, thumbnail, duration, timestamp, and the formats list.
+  - Notes:
+    - Uses _search_regex to locate the JSON object for config and _parse_json to parse it.
+    - Extensible handling for HLS vs. direct MP4 URLs.
+    - Tests cover a direct URL and a couple of matching URL patterns.
+
+- RENTVArticleIE (InfoExtractor)
+  - _VALID_URL: Matches REN TV news articles, e.g. https://ren.tv/novosti/YYYY-MM-DD/slug
+  - _real_extract(url):
+    - Extracts display_id from URL.
+    - Downloads the article page and reads Drupal settings via jQuery.extend(Drupal.settings, {...}).
+    - Iterates through drupal_settings.get('ren_jwplayer', {}).values():
+      - For each config_profile, reads mediaid; skips if missing.
+      - Converts mediaid to string and creates a RENTV URL using rentv:<mediaid>.
+      - Aggregates these as a list of entries with url_result('rentv:' + media_id, 'RENTV', media_id).
+    - Returns a playlist_result of all collected entries with the display_id.
+  - Tests:
+    - First test loads a news article with a valid mediaid, exposing an mp4 entry.
+    - Second test relates to an invalid/m3u8 case that is marked skip due to m3u8 issues; demonstrates handling of playlist entries that may rely on m3u8 downloads.
+
+Important implementation details
+- The code is designed to work with Python 2/3 compatibility (unicode_literals, compat_str, etc.).
+- RENTVIE relies on a JSON-like config embedded in the page (config = { ... }); it does not rely on a static API endpoint.
+- The formats extraction supports both:
+  - HLS streams (m3u8) via _extract_m3u8_formats with m3u8_native protocol.
+  - Direct file URLs (e.g., mp4) via a simple format dict {'url': src}.
+- Helper utilities used:
+  - determine_ext to detect file extension from a URL.
+  - url_or_none to safely obtain a URL string.
+  - int_or_none to safely parse integer fields (duration, timestamp).
+- Output structure for RENTVIE:
+  - id, title, description (optional), thumbnail (optional), duration (optional), timestamp (optional), formats (list).
+- Output structure for RENTVArticleIE:
+  - A playlist containing one or more RENTV entries, each referencing a RENTV video by its mediaid, enabling the main extractor to fetch individual video details.
+
+In short, RENTVIE extracts individual video data from REN TV’s video/epizod or player pages, handling both direct and HLS formats, while RENTVArticleIE collects multiple REN TV JWPlayer entries from news pages and exposes them as a playlist of RENTV videos.

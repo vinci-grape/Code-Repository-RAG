@@ -1,0 +1,47 @@
+Summary:
+
+This file defines a YouTube-DD extractor for golem.de videos.
+
+Main functionality:
+- Class: GolemIE(InfoExtractor)
+- Purpose: Extract video metadata and available formats from video.golem.de using an XML configuration.
+
+Key components:
+- _VALID_URL: Regex to identify golem.de video URLs and capture the video id. Example pattern matches http://video.golem.de/.../<id>/...
+- _PREFIX: Base URL used to resolve relative URLs found in the XML.
+
+Core workflow in _real_extract(url):
+1) Extract video_id from the URL using _match_id.
+2) Download the XML configuration for the video:
+   - URL: https://video.golem.de/xml/{video_id}.xml
+   - Uses _download_xml with video_id as the display id for errors/tests.
+3) Build basic info dict:
+   - id: video_id
+   - title: from XML at ./title, default 'golem'
+   - duration: parsed float from ./playtime
+4) Build formats:
+   - Iterate over top-level elements in the XML (each representing a format).
+   - For each element e with a <url>, create a format dict:
+     - format_id: the element tag name converted to string
+     - url: absolute URL formed by joining the base prefix (http://video.golem.de) with the relative URL found in <url>
+     - height: int value from e.get('height')
+     - width: int value from e.get('width')
+     - filesize: int value from the child <filesize>
+     - ext: file extension inferred from the filename found in <filename> via determine_ext
+   - Append each format dict to a list, then sort formats with _sort_formats and assign to info['formats'].
+5) Build thumbnails:
+   - Look for all .//teaser elements; for each with a <url>, add a thumbnail dict:
+     - url: absolute URL joined with the base prefix
+     - width: int from teaser’s width attribute
+     - height: int from teaser’s height attribute
+   - Assign the list to info['thumbnails'].
+6) Return the collected info dict.
+
+Important implementation details:
+- Uses compat_str, compat_urlparse for compatibility across Python versions.
+- URL resolution uses _PREFIX to convert relative paths from the XML into absolute URLs.
+- Formats rely on the XML structure where each child element under the root represents a different video format; the tag name serves as format_id, and each contains attributes like height/width and a nested <filesize> and <filename> for extension.
+- Thumbnails are gathered from teaser elements anywhere in the XML via .//teaser.
+- The _TEST entry demonstrates expected metadata for a sample URL, including id, format_id, ext, title, duration, and filesize.
+
+Overall, the extractor fetches an XML config for a given video, converts the available media options into a structured formats list, and collects related thumbnails, returning a complete info dictionary suitable for video playback/downloading.

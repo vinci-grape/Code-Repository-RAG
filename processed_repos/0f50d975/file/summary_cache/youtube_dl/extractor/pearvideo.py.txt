@@ -1,0 +1,44 @@
+- Purpose
+  - A YouTube-dl extractor for Pear Video that retrieves video formats and basic metadata from pearvideo.com.
+
+- Main class and URL pattern
+  - Class: PearVideoIE(InfoExtractor)
+  - _VALID_URL: matches URLs like http(s)://www.pearvideo.com/video_<digits>
+  - _TEST: provides a sample URL and expected info_dict (id, ext, title, description as md5, timestamp, upload_date)
+
+- Core logic (_real_extract)
+  - Extract video_id using _match_id(url) from the _VALID_URL.
+  - Download the webpage HTML with _download_webpage.
+
+- Formats extraction
+  - quality ranking: uses qualities(('ldflv', 'ld', 'sdflv', 'sd', 'hdflv', 'hd', 'src')) to assign numeric quality values.
+  - Collects all available video formats by scanning the page for lines containing a Url assignment:
+    - Regex pattern: (?P<id>[a-zA-Z]+)Url\s*=\s*(["\'])(?P<url>(?:https?:)?//.+?)\2
+    - For each match, creates a format dict with:
+      - 'url': extracted URL
+      - 'format_id': the captured id (e.g., ldflv, ld, sdflv, sd, hdflv, hd, src)
+      - 'quality': quality(mobj.group('id')) to assign the proper ranking
+  - The collected formats are sorted via _sort_formats(formats).
+
+- Metadata extraction
+  - Title:
+    - Tries two patterns to be robust:
+      - <h1 ... class="video-tt" ...>(title)</h1>
+      - an element with data-title attribute containing the title
+  - Description:
+    - Tries two patterns, then falls back to the HTML meta Description:
+      - <div ... class="summary">...</div>
+      - An element with data-summary attribute
+    - If neither is found, uses _html_search_meta('Description', webpage)
+  - Timestamp:
+    - Looks for a div with class "date" and extracts its inner text, then converts it to a Unix timestamp using unified_timestamp.
+    - fatal=False is used so absence of timestamp won’t crash extraction (timestamp can be None).
+
+- Return value
+  - A dict containing:
+    - 'id': video_id
+    - 'title': extracted title
+    - 'description': extracted (or None)
+    - 'timestamp': Unix timestamp or None
+    - 'formats': list of collected format dictionaries
+  - No explicit 'ext' field is added; the extension is inferred from the selected format URLs (tests expect 'mp4' for the example).

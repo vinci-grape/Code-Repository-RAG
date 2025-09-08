@@ -1,0 +1,115 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/qqmusic.py.
+
+High-level overview
+- This file implements multiple extractors for QQ Music within youtube-dl:
+  - QQMusicIE: single song extractor (the main one)
+  - QQPlaylistBaseIE: base helper for playlist-like pages (singer, album, toplist, playlist)
+  - QQMusicSingerIE: singer page (artist) that yields a playlist of songs
+  - QQMusicAlbumIE: album page that yields a playlist of songs
+  - QQMusicToplistIE: toplist page that yields a playlist of songs
+  - QQMusicPlaylistIE: user playlist page that yields a playlist of songs
+
+Key classes and main functionality
+- QQMusicIE (InfoExtractor)
+  - Purpose: extract a single QQ Music song, including metadata, multiple formats, lyrics, and thumbnail.
+  - URL pattern: matches song pages like https://y.qq.com/n/yqq/song/<id>.html
+  - Formats:
+    - Uses a mapping _FORMATS with:
+      - mp3-320: prefix M800, ext mp3, abr 320, preference 40
+      - mp3-128: prefix M500, ext mp3, abr 128, preference 30
+      - m4a: prefix C200, ext m4a, preference 10
+    - Builds actual stream URLs using vkey and a GUID:
+      http://cc.stream.qqmusic.qq.com/{prefix}{songmid}.{ext}?vkey={vkey}&guid={guid}&fromtag=0
+    - vkey retrieval:
+      - Generates a pseudo-random GUID via static m_r_get_ruin() (uses time and random)
+      - Requests vkey from http://base.music.qq.com/fcgi-bin/fcg_musicexpress.fcg?json=3&guid={guid}
+      - Extracts key from returned JSON (strip_jsonp)
+  - Song detail sources:
+    - Downloads detail info from s.plcloud.music.qq.com with songmid
+    - Extracts: song name, release date (YYYY-MM-DD → YYYYMMDD), singer, and lyric content (LRC) if present
+    - Album art thumbnail URL built from albummid if available
+  - Lyrics:
+    - Parses LRC-like lines from the HTML content, reconstructs proper LRC data for subtitles
+  - Output:
+    - info_dict with id, formats, title, release_date, creator, description (LRC), thumbnail
+    - If available, adds subtitles with origin: { ext: 'lrc', data: lyrics }
+  - Helpers:
+    - m_r_get_ruin(): static method to generate a pseudo-random ruin/guid-like number
+    - Uses clean_html, strip_jsonp, unescapeHTML, _download_webpage, _download_json, _download_xml, _html_search_regex
+
+- QQPlaylistBaseIE
+  - Base class for QQ Music playlist-like pages (singer, album, toplist, playlist)
+  - Static helper: qq_static_url(category, mid)
+    - Builds static URL path for a given category and the last two characters of mid
+  - get_singer_all_songs(singmid, num)
+    - Calls QQ’s singer tracks API:
+      https://c.y.qq.com/v8/fcg-bin/fcg_v8_singer_track_cp.fcg
+      with appropriate query parameters
+  - get_entries_from_page(singmid)
+    - Retrieves the singer’s songs, handling pagination:
+      - First fetch with default_num = 1; if code==0, use total to fetch all songs
+      - For each song with a valid songmid, add a URL result for the song page
+
+- QQMusicSingerIE
+  - Extractor for singer pages
+  - URL pattern: https://y.qq.com/n/yqq/singer/<id>.html
+  - _real_extract(url):
+    - Gets entries via get_entries_from_page(mid)
+    - Downloads singer page to get singer name
+    - Fetches a singer description XML via:
+      http://s.plcloud.music.qq.com/fcgi-bin/fcg_get_singer_desc.fcg
+      with singermid and utf8/outCharset/format parameters, Referer header
+    - Returns a playlist_result with entries, id, name, and description
+
+- QQMusicAlbumIE
+  - Extractor for album pages
+  - URL pattern: https://y.qq.com/n/yqq/album/<id>.html
+  - _real_extract(url):
+    - Downloads album data via:
+      http://i.y.qq.com/v8/fcg-bin/fcg_v8_album_info_cp.fcg?albummid=<mid>&format=json
+    - Builds entries as song links to individual QQ Music song pages
+    - Uses album name as title and album desc as description
+    - Returns a playlist_result with entries, id, title, and description
+
+- QQMusicToplistIE
+  - Extractor for toplists
+  - URL pattern: https://y.qq.com/n/yqq/toplist/<id>.html
+  - _real_extract(url):
+    - Retrieves toplist data from:
+      http://i.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?type=toplist&topid=<id>&format=json
+    - Builds entries from toplist songs (songmid)
+    - Returns a playlist_result with entries, id, title, and description from topinfo
+
+- QQMusicPlaylistIE
+  - Extractor for user playlists
+  - URL pattern: https://y.qq.com/n/yqq/playlist/<id>.html
+  - _real_extract(url):
+    - Retrieves list data from:
+      http://i.y.qq.com/qzone-music/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg
+      with type=1, json=1, utf8=1, onlysong=0, disstid=<id> and transform_source strip_jsonp
+    - Error handling:
+      - If cdlist is empty and there is a code, raise ExtractorError with the QQ Music error code
+      - If still no data, raise a generic ExtractorError
+    - Builds entries from each song’s songmid
+    - Title and description come from the cdlist data (dissname, desc)
+    - Description is cleaned via clean_html and unescapeHTML
+    - Returns a playlist_result with entries, id, title, and description
+
+Supportive and implementation details
+- Encoding and parsing:
+  - Song detail page fetched with encoding='gbk' (GBK)
+  - Lyrics extracted and converted to proper LRC format
+  - Description fields may be HTML; cleaned with clean_html and unescapeHTML
+- Error handling:
+  - QQMusicPlaylistIE handles API error codes gracefully, raising ExtractorError with helpful messages
+- Test coverage:
+  - _TESTS provide sample URLs and expected metadata (ids, titles, release dates, etc.)
+  - Some tests expect md5 checks for certain fields (e.g., description, thumbnail)
+- URL construction and endpoints:
+  - Many QQ endpoints are used (song detail, vkey service, album info, toplist, singer tracks, qzone playlists)
+  - vkey and GUID are used to authorize/construct streaming URLs
+- Subtitle support:
+  - If LRC lyrics are found, they are exposed as a subtitle track with ext 'lrc' and data containing the lyrics
+
+In short
+- The file provides a comprehensive QQ Music extraction suite: a primary song extractor (QQMusicIE) that assembles multiple audio formats and lyrics, plus a set of playlist-based extractors (singer, album, toplist, playlist) built on a shared QQPlaylistBaseIE foundation. It interacts with several QQ endpoints to fetch metadata, song lists, and streaming keys, handles potential API errors, and surfaces structured info dictionaries including optional subtitles.

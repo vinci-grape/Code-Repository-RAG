@@ -1,0 +1,80 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/adobetv.py
+
+What it does
+- Implements a set of extractors for Adobe TV (tv.adobe.com), handling embedded videos, individual videos, shows, channels, and show playlists.
+- Uses Adobe TV API endpoints under http://tv.adobe.com/api/v4/ to fetch metadata and stream information.
+- Produces standardized YouTube-DL info dictionaries with id, title, description, thumbnail, upload_date, duration, view_count, formats, and subtitles.
+- Normalizes formats from various sources (including S3 originals), parses durations and dates, and resolves subtitles with proper language codes.
+
+Key classes and main functionality
+- AdobeTVBaseIE (InfoExtractor)
+  - _call_api(path, video_id, query, note=None): Calls the Adobe API and returns the data list element.
+  - _parse_subtitles(video_data, url_key): Builds a subtitles dict by iterating video_data translations, computing language via language_w3c or ISO639Utils.long2short, and collecting VTT URLs.
+  - _parse_video_data(video_data): Core parser that converts a video_data payload into a standard info dict:
+    - Extracts id, title, description, thumbnail.
+    - Parses start_date to upload_date and duration via parse_duration.
+    - Converts playcount to view_count.
+    - Builds a list of formats from video_data['videos']:
+      - Each source → dict with format_id, fps, height, tbr, width, url.
+      - If original_filename exists and height/width are missing, extracts dimensions from filename via regex _(\d+)x(\d+).
+      - Handles S3-origin files: if original_filename starts with s3://, adds a separate format with format_id 'original', preference 1, and converts the URL to https://s3.amazonaws.com/.
+    - Sorts formats via _sort_formats.
+    - Returns a dict with id, title, description, thumbnail, upload_date, duration, view_count, formats, subtitles.
+
+- AdobeTVEmbedIE (AdobeTVBaseIE)
+  - IE_NAME = 'adobetv:embed'
+  - _VALID_URL matches Adobe TV embed URLs.
+  - _real_extract(url): Extracts video_id, fetches episode data via _call_api('episode/' + video_id, ...), and returns _parse_video_data(video_data).
+
+- AdobeTVIE (AdobeTVBaseIE)
+  - IE_NAME = 'adobetv'
+  - _VALID_URL supports watch pages with optional language (fr/de/es/jp) and show_urlname/id.
+  - _real_extract(url): Extracts language (default 'en'), show_urlname, and urlname; fetches episode/get with language/show_urlname/urlname, then returns _parse_video_data(video_data).
+
+- AdobeTVPlaylistBaseIE (AdobeTVBaseIE)
+  - Helps implement paginated playlist extraction.
+  - _PAGE_SIZE = 25
+  - _fetch_page(display_id, query, page): Increases page, calls API, yields processed entries via _process_data.
+  - _extract_playlist_entries(display_id, query): Returns an OnDemandPagedList using a partial of _fetch_page.
+
+- AdobeTVShowIE (AdobeTVPlaylistBaseIE)
+  - IE_NAME = 'adobetv:show'
+  - _VALID_URL matches show pages; _RESOURCE = 'episode'
+  - _process_data = AdobeTVBaseIE._parse_video_data (reuses the video data parser)
+  - _real_extract(url): Fetches show data via 'show/get', builds a paged playlist of episodes via _extract_playlist_entries, and returns playlist_result with show id, name, and description.
+
+- AdobeTVChannelIE (AdobeTVPlaylistBaseIE)
+  - IE_NAME = 'adobetv:channel'
+  - _VALID_URL matches channel pages (with optional category)
+  - _RESOURCE = 'show'
+  - _process_data(show_data): Returns a URL result pointing to AdobeTVShow with the appropriate id.
+  - _real_extract(url): Builds a query with language and channel_urlname (and optional category_urlname), and returns a playlist_result of entries from _extract_playlist_entries(channel_urlname, query).
+
+- AdobeTVVideoIE (AdobeTVBaseIE)
+  - IE_NAME = 'adobetv:video'
+  - _VALID_URL matches direct video URLs under video.tv.adobe.com/v/{id}
+  - _real_extract(url): Downloads the page, extracts bridged data from a JavaScript variable bridge (var bridge = ...), via _search_regex and _parse_json.
+  - Builds formats from video_data.get('sources'), where each source contributes:
+    - url, filesize (kilobytes scaled by 1000), format_id (combining format and label), height, tbr (bitrate), width.
+  - Sorts formats, computes duration as the max per-source duration (scaled to seconds if present), and returns an info dict with id, formats, title, description, poster thumbnail, duration, and subtitles parsed via _parse_subtitles(video_data, 'vttPath').
+
+Important implementation details
+- Language handling:
+  - For watch pages, language is optional in the URL; default to 'en' if not provided.
+  - Subtitles language is derived from translations using either language_w3c or a fallback conversion via ISO639Utils.long2short.
+- Formatting and quality:
+  - Formats are gathered from video data and include resolution, frame rate, bitrate, and URLs.
+  - Special case: s3:// original_filename is exposed as a separate original format with URL translated to https://s3.amazonaws.com/ and a high preference to favor the original file.
+  - If height/width are missing but an original_filename encodes dimensions (e.g., _640x360), those values are parsed and filled in.
+  - Formats are sorted with _sort_formats to ensure a proper quality order.
+- Data extraction:
+  - All video data is normalized to YouTube-DL’s standard info_dict structure: id, title, description, thumbnail, upload_date, duration, view_count, formats, subtitles.
+  - Upload date uses unified_strdate to parse dates like 20091109.
+  - Durations use parse_duration for ISO8601/seconds representations and per-source duration where applicable.
+- Pagination and playlists:
+  - Show and Channel use OnDemandPagedList with a page size of 25 and a helper _fetch_page that calls the API with an incremented page number.
+  - Show entries are pulled from the 'episode' resource; Channel entries reference 'show' resources and are converted to show entries via url_result.
+- Reuse of parsing logic:
+  - _parse_video_data is reused for individual video items in shows and channels via _process_data linkage, ensuring consistent format substructure across lists and individual videos.
+
+Overall, the file provides a complete set of Adobe TV extractors for embeds, individual videos, shows, channels, and playlist pages, all orchestrated around a shared API integration and a centralized video-data parser.

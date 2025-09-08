@@ -1,0 +1,57 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/nhk.py
+
+- Purpose
+  - Implement NHK World (nhkworld) extractors for youtube-dl: individual video/audio episodes (NhkVodIE) and programs consisting of multiple episodes (NhkVodProgramIE). A shared base class NhkBaseIE handles API interaction and common episode data extraction.
+
+- Key classes
+  - NhkBaseIE (InfoExtractor)
+    - Provides common API access and data extraction helpers for NHK World content.
+    - _API_URL_TEMPLATE: Builds the NHK API endpoint used to fetch episode data.
+    - _BASE_URL_REGEX and _TYPE_REGEX: Regex patterns to recognize NHK World URLs (language and type video/audio).
+    - _call_api(self, m_id, lang, is_video, is_episode, is_clip):
+      - Constructs the API URL using _API_URL_TEMPLATE and fetches JSON data with an API key.
+      - Returns the list of episodes from data['episodes'] (or empty list).
+    - _extract_episode_info(self, url, episode=None):
+      - Core logic to create an info dictionary (InfoDict) for a single episode.
+      - Determines language, type (video/audio), and episode_id from the URL (using NhkVodIE._VALID_URL for consistency).
+      - If episode data isn’t provided, fetches it via _call_api with is_episode=True and is_video determined by URL.
+      - Builds common fields: id (episode_id-lang), title (series - episode title when available), description, thumbnails (two sizes if image paths exist), and series/episode labels.
+      - If video:
+        - Uses vod_id to return a transparent URL via Piksel player: url = https://player.piksel.com/v/refid/nhkworld/prefid/<vod_id>, _type = 'url_transparent', ie_key = 'Piksel', id = vod_id.
+      - If audio:
+        - If episode data was fetched (fetch_episode=True), constructs audio formats from an m3u8 stream using _extract_m3u8_formats and assigns language to each format.
+        - If not fetching the episode (i.e., coming from a program listing), returns a url_transparent pointing to the current url using NhkVodIE’s extractor as the handler.
+
+  - NhkVodIE (NhkBaseIE)
+    - _VALID_URL: Matches individual NHK World on-demand items (video or audio) by combining _BASE_URL_REGEX and _TYPE_REGEX with an id pattern that supports 7-character IDs or complex ids like "name-YYYYMMDD-abc".
+    - _TESTS: Contains several sample URLs (video clip, audio clip, and edge cases) with expected results to validate extraction.
+    - _real_extract(self, url): Delegates to _extract_episode_info(url) to build the InfoDict.
+
+  - NhkVodProgramIE (NhkBaseIE)
+    - _VALID_URL: Matches program pages (video or audio programs) with optional type filter (clip, tvEpisode, radioEpisode, etc.).
+    - _TESTS: Example program URLs with expectations, including playlist size hints.
+    - _real_extract(self, url):
+      - Extracts language, type, program_id, and episode_type from the URL.
+      - Calls _call_api(program_id, lang, is_video, False, is_clip) to fetch the list of episodes for the program.
+      - Iterates episodes, skipping ones without a 'url', and builds entries by calling _extract_episode_info(urljoin(url, episode_path), episode) for each episode, passing the episode data to avoid re-fetching.
+      - Program title derives from the first episode’s 'series' field when available.
+      - Returns a playlist via self.playlist_result(entries, program_id, program_title).
+
+- Important implementation details
+  - API interaction:
+    - _CALL_API uses a single API endpoint template with parameters encoding video/audio, clip vs. esd, episode vs. program, and language. It appends /all for video content and omits it for non-video.
+    - Uses a hardcoded API key (apikey) to access NHK’s API.
+  - Episode handling:
+    - Episode IDs can be 7 characters; when 7, they are reformatted as 4-3 (yyyy-xxx) for consistency with API/URL expectations.
+    - For video episodes, Piksel is used as the player, and the internal ID is vod_id.
+  - Thumbnails:
+    - Builds two thumbnails if image paths exist: a 640x360 and a 1280x720 variant, prefixed with https://www3.nhk.or.jp.
+  - Audio handling:
+    - Audio formats are retrieved from an m3u8 playlist hosted on Akamai; m3u8_native is used; formats are labeled with language.
+  - Model of extraction:
+    - Video and audio episodes: extract_episode_info can return either a fully resolved InformationDict (for the current episode) or a url_transparent proxy pointing to another extractor (in non-fetch cases), depending on how the data is requested (individual vs program context).
+  - Program extraction:
+    - Builds a playlist of episode entries by resolving each episode’s URL and metadata; uses the first episode’s series as the program title if available.
+
+- Overall functionality
+  - Enables YouTube-dl to fetch and parse NHK World on-demand content, including standalone videos/audios (NhkVodIE) and programs consisting of multiple episodes (NhkVodProgramIE), with proper handling of language, thumbnail metadata, and appropriate fetching of streaming formats via direct m3u8 or external players.

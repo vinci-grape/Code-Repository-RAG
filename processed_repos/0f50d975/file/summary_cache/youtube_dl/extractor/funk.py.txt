@@ -1,0 +1,43 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/funk.py
+
+- Purpose
+  - Implement an extractor (FunkIE) for funk.net videos, mapping Funk video pages to the Nexx video extractor.
+
+- Core class
+  - FunkIE: Subclass of InfoExtractor.
+
+- URL pattern
+  - _VALID_URL matches funk.net channel or playlist pages with a display_id and a numeric id at the end:
+    https://www.funk.net/(channel|playlist)/<anything>-<id>
+
+- Tests
+  - _TESTS contains:
+    - A real channel video URL with expected id, title, description, duration, timestamp/upload_date, etc.
+    - A playlist URL used with only_matching to ensure the URL pattern matches.
+
+- Main extraction flow (_real_extract)
+  - Extracts display_id and nexx_id from the URL using the _VALID_URL regex.
+  - Fetches video metadata from Funk API:
+    - GET https://www.funk.net/api/v4.0/videos/{nexx_id}
+    - Uses _download_json to retrieve a JSON blob (stored as video).
+  - Returns a url_transparent result that delegates to the Nexx extractor:
+    - _type: 'url_transparent'
+    - url: 'nexx:741:' + nexx_id
+    - ie_key: NexxIE.ie_key() (delegate extractor)
+    - id: nexx_id
+    - title: video.get('title')
+    - description: video.get('description')
+    - duration: int_or_none(video.get('duration'))
+    - channel_id: str_or_none(video.get('channelId'))
+    - display_id: the display_id captured from the URL
+    - tags: video.get('tags')
+    - thumbnail: video.get('imageUrlLandscape')
+
+- Important implementation details
+  - Dependencies: NexxIE is used to handle the actual video extraction, with a Nexx-specific URL format ('nexx:741:<id>').
+  - Data mapping: Pulls title, description, duration, channelId, imageUrlLandscape, and tags directly from Funk API response.
+  - Helpers: Uses int_or_none and str_or_none to safely coerce types.
+  - The final info dict exposes display_id and delegates the heavy lifting of video URL retrieval to NexxIE, enabling consistent handling with other Nexx-based sources.
+  - The created URL structure ('nexx:741:' prefix) is Finland-specific (741) and signals NexxIE to process the video.
+
+In short: FunkIE parses funk.net video pages, fetches video metadata from Funk’s API, and delegates actual video URL extraction to NexxIE by returning a url_transparent entry that points to the Nexx backend with the Funk video’s id.

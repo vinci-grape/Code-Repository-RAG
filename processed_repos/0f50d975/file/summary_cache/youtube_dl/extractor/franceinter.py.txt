@@ -1,0 +1,35 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/franceinter.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for France Inter emissions pages, extracting audio URL and metadata.
+
+- Main class and URL pattern
+  - FranceInterIE extends InfoExtractor.
+  - _VALID_URL matches URLs like https://www.franceinter.fr/emissions/<show-name>.
+  - _TEST provides a sample URL, expected MD5, and a representative info_dict (id, ext, title, description, thumbnail, upload_date).
+
+- Core extraction flow (_real_extract)
+  - video_id: extracted from the URL using _match_id.
+  - webpage: downloaded via _download_webpage.
+  - video_url: located with a regex targeting a div with class "page-diffusion" and a button containing a data-url attribute. The regex uses a multiline dotall mode to robustly capture the URL inside the data-url attribute.
+  - title: obtained via _og_search_title from Open Graph metadata.
+  - description: obtained via _og_search_description from Open Graph metadata.
+  - thumbnail: obtained via _html_search_meta for og:image or twitter:image.
+  - upload_date: parsed from a French date string inside a tag with class "cover-emission-period" (format like "7 septembre 2016").
+    - If found: the day-month-year parts are reversed, the month name is converted to a number using month_by_name(lang='fr'), and each part is zero-padded to produce YYYYMMDD.
+    - If not found: upload_date is None.
+  - Returns a dict with:
+    - id: video_id
+    - title, description, thumbnail, upload_date
+    - formats: a list with a single format entry containing:
+      - url: video_url
+      - vcodec: 'none' (indicating audio-only content or that the video codec is not specified)
+
+- Key implementation details
+  - Uses _download_webpage, _search_regex, and _og_search_* helpers from the base class.
+  - Metadata is sourced from Open Graph (and fallback for thumbnail on Twitter).
+  - Upload date parsing handles French month names via month_by_name to convert to numeric month.
+  - The returned format specifies vcodec as 'none', implying the format is audio (e.g., mp3 as per the test) rather than video.
+
+- Notes on test data
+  - The _TEST entry expects an MP3 extension and includes fields for id, title, description (with an MD5 reference as placeholder), thumbnail URL pattern, and an upload_date.

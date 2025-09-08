@@ -1,0 +1,36 @@
+Concise summary:
+
+- Purpose: Implement a YouTube-DL extractor for Pornoxo video pages.
+
+- Class: PornoXOIE (inherits InfoExtractor)
+
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?pornoxo\.com/videos/(?P<id>\d+)/(?P<display_id>[^/]+)\.html'
+  - Matches URLs like http(s)://www.pornoxo.com/videos/7564/striptease-from-sexy-secretary.html
+  - Captures video_id (digits) and display_id (slug) for later use
+
+- Test data: _TEST provides a real URL, expected md5 of the video file, and an info_dict with fields including id, ext, title, display_id, description (md5), categories (list), thumbnail pattern, and age_limit.
+
+- Main functionality: _real_extract(self, url)
+  - Parse URL to obtain video_id and display_id using the _VALID_URL regex.
+  - Download the webpage with _download_webpage(url, video_id).
+  - Extract JWPlayer data from the page via _extract_jwplayer_data(webpage, video_id, require_title=False). This returns a base video_data dictionary with streaming info.
+  - Derive title from the HTML: _html_search_regex(r'<title>([^<]+)\s*-\s*PornoXO', webpage, 'title').
+  - Parse view count: _html_search_regex for [vV]iews:\s*([0-9,]+), then convert with str_to_int. If not found, fatal=False allows None.
+  - Derive categories from the meta description: look for <meta name="description" content=".*featuring\s*([^"]+)" and split by comma if present; if not found, categories = None.
+  - Update video_data with:
+    - id: video_id
+    - title: extracted title
+    - display_id: display_id
+    - description: value from _html_search_meta('description', webpage)
+    - categories: derived list or None
+    - view_count: parsed integer or None
+    - age_limit: 18
+  - Return the enriched video_data dictionary
+
+Key implementation details:
+- Uses JWPlayer data extraction to obtain core streaming URLs, then enriches with HTML-derived metadata.
+- title is taken from the page title tag rather than JWPlayer data (require_title=False used in extraction).
+- view_count handling is tolerant (fatal=False) to avoid failing on missing data.
+- categories are parsed from the meta description’s “featuring” phrase and split into a list; if not found, categories remains None.
+- age_limit is hard-coded to 18, reflecting adult content.
+- Maintains a consistent data structure with other extractors by updating the base video_data dictionary with standardized keys (id, title, display_id, description, categories, view_count, age_limit, etc.).

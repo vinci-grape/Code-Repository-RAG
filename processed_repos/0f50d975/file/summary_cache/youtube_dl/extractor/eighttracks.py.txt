@@ -1,0 +1,52 @@
+Summary of ./youtube-dl/youtube_dl/extractor/eighttracks.py
+
+- Purpose:
+  - Implement an InfoExtractor (EightTracksIE) for extracting playlists from 8tracks.com.
+
+- Key class and identifiers:
+  - EightTracksIE(InfoExtractor)
+  - IE_NAME: '8tracks'
+  - _VALID_URL: matches URLs of the form http(s)://8tracks.com/{user}/{id}
+  - _TEST: provides a representative test case including playlist metadata and per-track info.
+
+- Core workflow (_real_extract):
+  1. Parse URL to obtain playlist_id using _match_id.
+  2. Download the playlist page and locate a JSON payload assigned to PAGE.mix using a regex. Parse this JSON into data.
+     - Expected fields in data: id (mix_id), tracks_count, duration, user.login (uploader/owner), name (title), description.
+  3. Compute an average track duration: avg_song_duration = duration / tracks_count.
+     - If average is non-positive, fallback to 300 seconds.
+  4. Create a random session id (as string) and construct the first API endpoint:
+     - first_url = http://8tracks.com/sets/{session}/play?player=sm&mix_id={mix_id}&format=jsonh
+  5. Iterate over each track (track_count times):
+     - Download the next track’s API JSON from next_url with retries (up to 3 attempts).
+     - On failure after retries, raise or continue based on logic (retries trigger a sleep using avg_song_duration between attempts).
+     - Parse the JSON to extract:
+       - track id (track_data['id'])
+       - track file stream URL (track_data['track_file_stream_url'])
+       - title as "performer - name" and raw_title as "name"
+       - uploader_id from data['user']['login']
+       - extension ext: 'm4a'
+     - Append an entry dict with these fields to entries.
+     - Update next_url to the next track using:
+       http://8tracks.com/sets/{session}/next?player=sm&mix_id={mix_id}&format=jsonh&track_id={track_id}
+  6. Return a playlist dictionary:
+     - _type: 'playlist'
+     - entries: collected track dictionaries
+     - id: mix_id
+     - display_id: playlist_id (from URL)
+     - title: data.get('name')
+     - description: data.get('description')
+
+- Important implementation details:
+  - JSON extraction from page relies on the PAGE.mix variable via a non-greedy regex.
+  - Per-track information is retrieved in sequence via a “play” endpoint and subsequent “next” endpoints, all returning JSON structures.
+  - Each track entry includes:
+    - id (as string), url (stream URL), title, raw_title, uploader_id, ext ('m4a')
+  - Uses random session ID to form endpoints, likely to avoid caching issues.
+  - Robustness: retries up to 3 for each track information fetch, with delays based on avg_song_duration (sleep between retries).
+  - Uses compat_str to normalize IDs to strings.
+
+- Notes on behavior and limitations:
+  - The extractor is dependent on 8tracks’ internal JSON structure (PAGE.mix and the /play and /next endpoints). If 8tracks changes their API or page layout, parsing may fail.
+  - The code optimizes for a consistent average track duration but falls back safely if computed duration is invalid.
+  - The test data in _TEST includes expected MD5s for each track and representative titles, illustrating how titles are formed and encoded.

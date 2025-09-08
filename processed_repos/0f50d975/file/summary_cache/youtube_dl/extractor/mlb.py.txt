@@ -1,0 +1,98 @@
+Below is a concise, structured summary of the code in ./youtube-dl/youtube_dl/extractor/mlb.py.
+
+Overview
+- Purpose: Implement YouTube-DL extractors for MLB video content. It handles both general MLB video pages and direct MLB video URLs, extracting formats, metadata, thumbnails, timestamps, and subtitles.
+
+Key classes
+- MLBBaseIE (InfoExtractor)
+  - Core shared logic for MLB video extraction.
+  - _real_extract(url):
+    - Determines display_id from URL and downloads the video data via _download_video_data.
+    - Extracts video_id, title, and a feed (via _get_feed(video)).
+    - Formats:
+      - Iterates over feed['playbacks'].
+      - If playback URL has m3u8 extension, uses _extract_m3u8_formats (HLS) with m3u8_native.
+      - Otherwise, builds a format dict with format_id and url, and tries to infer:
+        - From name: width, height, tbr (bitrate) via regex on name: _(K)_(X) format.
+        - From playback_url: fps, width, height, tbr via another regex.
+      - Collected formats are sorted (_sort_formats).
+    - Thumbnails:
+      - Extracts from feed['image']['cuts'] if present, building dicts with height, width, and src.
+    - Language: language = video.get('language') or 'EN', lowercased.
+    - Returns a dict with id, title, formats, description, duration, thumbnails, timestamp, and subtitles.
+      - duration is parsed with parse_duration(feed.get('duration')).
+      - timestamp uses parse_iso8601(video.get(self._TIMESTAMP_KEY)).
+      - subtitles built via _extract_mlb_subtitles(feed, language).
+  - _TIMESTAMP_KEY is provided by subclasses (e.g., 'date' or 'timestamp') for timestamp extraction.
+  - _get_feed(video) and _extract_mlb_subtitles(feed, language) are implemented in subclasses to adapt to data structures.
+  - _download_video_data(self, display_id): fetches JSON from MLB’s item details endpoint:
+    - http://content.mlb.com/mlb/item/id/v1/%s/details/web-v1.json
+
+  - _extract_mlb_subtitles(feed, language):
+    - Reads feed keywordsAll and collects any location-based closed captions under languages.
+    - Subtitles keyed by language code with URL(s) for captions.
+
+- MLBIE (MLB Base Video Extractor)
+  - Inherits MLBBaseIE.
+  - _VALID_URL: Complex regex capturing MLB video pages with embedded content_id in path.
+  - _TIMESTAMP_KEY = 'date' (used by MLBBaseIE to extract timestamp).
+  - _get_feed(video): returns video (the top-level video object from MLB item endpoint).
+  - _extract_mlb_subtitles(feed, language):
+    - Scans feed['keywordsAll'] for items with type starting with 'closed_captions_location_'.
+    - Adds corresponding caption URLs under the target language.
+  - _download_video_data(display_id): calls the MLB item details endpoint:
+    - http://content.mlb.com/mlb/item/id/v1/%s/details/web-v1.json
+
+  - _TESTS: Several test cases for typical MLB video URLs, validating id, title, duration, timestamp, thumbnails, etc.
+
+- MLBVideoIE (Direct MLB video URL extractor)
+  - Inherits MLBBaseIE.
+  - _VALID_URL: Regex matching direct video URLs under mlb.com (e.g., .../video/VIDEO_ID).
+  - _TIMESTAMP_KEY = 'timestamp' (different from MLBIE’s date).
+  - suitable(cls, url):
+    - Returns False if MLBIE.suitable(url) is True, otherwise delegates to superclass suitability.
+    - Ensures this extractor handles only URLs not matched by MLBIE.
+  - _get_feed(video): returns video['feeds'][0] (the first feed in the GraphQL payload).
+  - _extract_mlb_subtitles(feed, language):
+    - Reads feed['closedCaptions'] and adds URLs under the language key.
+  - _download_video_data(self, display_id):
+    - Uses GraphQL endpoint to fetch mediaPlayback(ids: "%s") with a query that retrieves:
+      - description, feeds (CMS) including closedCaptions, duration, image cuts, playbacks (name, url), id, timestamp, title
+    - Returns the first item of data['mediaPlayback'].
+
+  - How the data source differs:
+    - MLBIE uses MLB’s REST item/details endpoint and a feed structure with image cuts and playbacks.
+    - MLBVideoIE uses a GraphQL endpoint (fastball-gateway.mlb.com) and a feed structure that includes closedCaptions, image cuts, and playbacks similarly, but accessed via GraphQL.
+
+Important implementation details
+- Formats gathering:
+  - HLS (m3u8) formats are added via _extract_m3u8_formats with m3u8_native handling and a specific m3u8_id.
+  - Progressive MP4 formats are collected as dictionaries with:
+    - format_id (name)
+    - url
+    - Optional: width, height, fps, tbr inferred from regular expressions on the format name or on the playback URL.
+  - Two regex patterns are used to infer dimensions and bitrate:
+    - r'_(\d+)K_(\d+)X(\d+)' on the format name (tbr, width, height)
+    - r'_(\d+)x(\d+)_(\d+)_(\d+)K\.mp4' on the playback URL (width, height, fps, tbr)
+- Thumbnails:
+  - Derived from image.cuts (for MLBIE) with height/width and src URL.
+- Subtitles:
+  - MLBIE: subtitles are extracted from keywordsAll entries with type starting with 'closed_captions_location_' and mapped by language.
+  - MLBVideoIE: subtitles are taken from feed['closedCaptions'] (GraphQL field) per language.
+- Timestamps:
+  - MLBIE uses _TIMESTAMP_KEY = 'date'
+  - MLBVideoIE uses _TIMESTAMP_KEY = 'timestamp'
+  - The code converts timestamps via parse_iso8601.
+- Data sources:
+  - MLBIE: REST endpoint http://content.mlb.com/mlb/item/id/v1/%s/details/web-v1.json
+  - MLBVideoIE: GraphQL endpoint https://fastball-gateway.mlb.com/graphql with a specific query to fetch mediaPlayback
+- Compatibility handling:
+  - MLBVideoIE.suitable(url) returns False if MLBIE.suitable(url) is True, ensuring non-conflicting handling of different MLB URL patterns.
+- Tests:
+  - Both extractors include _TESTS (MLBIE) and _TEST (MLBVideoIE) to validate ids, titles, durations, timestamps, thumbnails, etc.
+
+In short
+- This file provides two main extractors for MLB video content:
+  - MLBIE: handles standard MLB video pages via a REST item/details endpoint, extracting formats, thumbnails, and subtitles from the item data.
+  - MLBVideoIE: handles direct MLB video URLs via a GraphQL endpoint, extracting similar information from the feeds payload.
+- A common base class, MLBBaseIE, implements the shared logic for parsing formats (including m3u8), thumbnails, language, and subtitles, while both subclasses tailor feed access and timestamp fields to their data structures.

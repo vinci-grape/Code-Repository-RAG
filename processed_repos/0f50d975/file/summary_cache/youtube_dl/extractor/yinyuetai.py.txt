@@ -1,0 +1,37 @@
+- Purpose: A youtube-dl video extractor for YinYueTai (音悦Tai). It retrieves video metadata and available formats for a given YinYueTai video ID.
+
+- Class and interface:
+  - Class: YinYueTaiIE(InfoExtractor)
+  - Name/Description: IE_NAME = 'yinyuetai:video', IE_DESC = '音悦Tai'
+  - URL pattern: _VALID_URL = r'https?://v\.yinyuetai\.com/video(?:/h5)?/(?P<id>[0-9]+)'
+    - Accepts both /video/{id} and /video/h5/{id} paths
+  - Tests: _TESTS include a real video URL with expected metadata and a variant URL that is only_matching (regex match check but not extraction)
+
+- Core functionality (_real_extract):
+  - Extract video_id from URL using _match_id.
+  - Fetch MV info via JSON API:
+    - Endpoint: http://ext.yinyuetai.com/main/get-h-mv-info?json=true&videoId=<video_id>
+    - Uses _download_json to download and parse JSON; retrieves info from ['videoInfo']['coreVideoInfo'].
+  - Error handling:
+    - If info['error'] is true, raise ExtractorError(info['errorMsg'], expected=True)
+  - Formats extraction:
+    - Build a list of formats from info['videoUrlModels']:
+      - url: format_info['videoUrl']
+      - format_id: format_info['qualityLevel']
+      - format: format_info.get('qualityLevelName')
+      - filesize: format_info.get('fileSize')
+      - ext: 'mp4' (note: URLs may end with .flv, but actual files are mp4)
+      - tbr: format_info.get('bitrate')
+    - Sort formats with _sort_formats(formats)
+  - Return metadata dict:
+    - id: video_id
+    - title: info['videoName']
+    - thumbnail: info.get('bigHeadImage')
+    - creator: info.get('artistNames')
+    - duration: info.get('duration')
+    - formats: formats
+
+- Important implementation details:
+  - The extractor relies on the external API response structure: videoInfo.coreVideoInfo with fields like videoName, bigHeadImage, artistNames, duration, and videoUrlModels (list of formats).
+  - It consistently reports mp4 as the extension for all formats, even if the source URL ends with .flv.
+  - Error handling is performed early if the API returns an error, raising an ExtractorError with the provided message.

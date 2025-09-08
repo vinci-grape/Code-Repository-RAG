@@ -1,0 +1,52 @@
+This file is a unit test module for the compatibility helpers in youtube-dl, located at youtube_dl.compat. It exercises a broad set of wrapper utilities designed to bridge Python 2/3 differences and Unicode handling.
+
+Key points
+
+- Setup
+  - Adds the repository root to sys.path to import youtube_dl.compat.
+
+- Test suite
+  - TestCompat(unittest.TestCase): contains all tests.
+
+- Environment and path utilities
+  - test_compat_getenv: verifies compat_getenv/getenv-like behavior via compat_setenv and compat_getenv.
+  - test_compat_setenv: ensures setting a variable with compat_setenv is retrievable via compat_getenv.
+  - test_compat_expanduser: validates tilde expansion against a controlled HOME value.
+
+- Compatibility surface and presence
+  - test_all_present: ensures the module exports (.__all__ plus legacy) align with actual module attributes that contain '_' in their names (excluding 'unicode_literals').
+
+- URL quoting/unquoting
+  - test_compat_urllib_parse_unquote: extensively tests percent-decoding with various inputs, including empty strings, stray percent signs, Unicode sequences, and embedded HTML/JS-like content. Ensures correct handling of case-insensitive hex escapes and Unicode characters.
+  - test_compat_urllib_parse_unquote_plus: ensures plus signs are decoded as spaces where appropriate.
+
+- URL encoding
+  - test_compat_urllib_parse_urlencode: checks encoding of mappings with string/bytes keys and values, and lists of key/value tuples, ensuring consistent output as percent-encoded query strings.
+
+- Shell-like argument parsing
+  - test_compat_shlex_split: verifies splitting respecting quotes, newlines, and Unicode characters (e.g., Chinese).
+
+- XML/HTML and XML tree compatibility
+  - test_compat_etree_Element: asserts compat_etree_Element is a type and has an items attribute (compatibility wrapper for element-like types).
+  - test_compat_etree_fromstring: parses XML/HTML-like content and asserts that text and attribute values are of type compat_str (Unicode-compatible), including Chinese characters.
+  - test_compat_etree_fromstring_doctype: ensures DOCTYPE-aware XML strings don’t crash when parsed.
+
+- Binary/struct utilities
+  - test_compat_struct_unpack: confirms correct unpacking using format strings (e.g., '!B' on a single byte).
+
+- String case folding
+  - test_compat_casefold: if the environment already provides str.casefold, the test is skipped; otherwise, it validates a Python-2-like fallback:
+    - ASCII normalization: 'hello' -> 'hello', 'hELlo' -> 'hello'
+    - Special chars: 'ß' -> 'ss', 'ﬁ' -> 'fi'
+    - Unicode case mappings: Greek sigma and mixed strings (e.g., 'A\u0345\u03a3' -> 'a\u03b9\u03c3')
+
+- urllib.request compatibility
+  - test_compat_urllib_request_Request: verifies that a Request constructed with method='PUT' returns 'PUT' via get_method. Also tests subclassing behavior where get_method is overridden to return 'PUT'.
+
+Main functionality and purpose
+
+- The tests validate the compatibility layer provided by youtube_dl.compat, which abstracts differences between Python 2/3 and normalizes Unicode behavior.
+- They cover environment handling, path expansion, robust URL quoting/unquoting, URL encoding, shell-style parsing, XML tree handling with Unicode, binary unpacking, and HTTP request method handling.
+- They also include a guard to skip certain tests if the runtime already provides modern equivalents (e.g., str.casefold), reflecting cross-version compatibility goals.
+
+Overall, this file ensures the compatibility utilities behave consistently across Python versions and Unicode scenarios, which is critical for the cross-version nature of youtube-dl.

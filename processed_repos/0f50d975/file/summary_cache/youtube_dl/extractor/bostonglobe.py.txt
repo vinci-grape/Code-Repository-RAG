@@ -1,0 +1,51 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/bostonglobe.py
+
+What it does
+- Implements a YouTube-dl extractor for Boston Globe articles that contain Brightcove video players, and gracefully falls back to the Generic extractor if no Brightcove videos are found or if multiple embedded players are notBrightcove.
+- Detects Brightcove video embeds on a Boston Globe article page and emits either a BrightcoveNew video or a playlist of BrightcoveNew videos, or delegates to Generic when appropriate.
+
+Key components
+- BostonGlobeIE (subclass of InfoExtractor)
+  - _VALID_URL: Regex to match Boston Globe article URLs and extract a page id (the slug segment just before the final path segment, e.g., h1b4lviqzMTIn9sVy8F3gP/story.html).
+  - _TESTS: Two tests:
+    - Test 1: A standard article with a single Brightcove video. Expected to extract:
+      - id: 5320421710001
+      - ext: mp4
+      - title, description, upload_date, timestamp, uploader_id
+    - Test 2: An article containing an embedded YouTube video. Expected to hand off to the Generic extractor (and a 404 warning is expected in this test).
+  - _real_extract(self, url): Core extraction logic
+    - page_id = self._match_id(url): derives the id from the URL using _VALID_URL.
+    - webpage = self._download_webpage(url, page_id): downloads the page content.
+    - page_title = self._og_search_title(webpage, default=None): attempts to read the page’s Open Graph title.
+    - Scans for all <video ...> tags with regex: (?i)(<video[^>]+>)
+      - For each video tag, uses extract_attributes to parse tag attributes into a dict.
+      - Reads attributes:
+        - data-brightcove-video-id -> video_id
+        - data-account -> account_id
+        - data-player -> player_id
+        - data-embed -> embed
+      - If all four attributes are present, constructs a Brightcove player URL:
+        http://players.brightcove.net/{account_id}/{player_id}_{embed}/index.html?videoId={video_id}
+      - Collects all such URLs in entries.
+    - Post-processing of entries:
+      - If len(entries) == 0: returns a Generic extractor result for the original URL (self.url_result(url, 'Generic')).
+      - If len(entries) == 1: returns a BrightcoveNew extractor result for the single URL (self.url_result(entries[0], 'BrightcoveNew')).
+      - If len(entries) > 1: returns a playlist of BrightcoveNew videos (self.playlist_from_matches(entries, page_id, page_title, ie='BrightcoveNew')).
+
+Implementation details and behavior
+- Uses extract_attributes helper to parse HTML tag attributes from the video tag.
+- Focuses on Brightcove-based embeds via data-brightcove-video-id, data-account, data-player, and data-embed attributes found in the video tag.
+- Provides robust handling for:
+  - No Brightcove entries -> fall back to Generic extractor.
+  - A single Brightcove entry -> directly uses BrightcoveNew extractor.
+  - Multiple Brightcove entries -> returns a BrightcoveNew-based playlist.
+- Open Graph title is used as the playlist/video title when available; otherwise None.
+- The code is designed to work with a variety of Boston Globe article structures, as long as Brightcove video tags follow the expected data- attributes pattern.
+
+Main functionality in short
+- Parse Boston Globe article pages.
+- Detect and extract Brightcove video embeds.
+- Return either:
+  - A single Brightcove video (BrightcoveNew),
+  - A playlist of BrightcoveNew videos (if multiple),
+  - Or fall back to Generic if no Brightcove embeds are found.

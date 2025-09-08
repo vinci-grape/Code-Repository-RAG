@@ -1,0 +1,128 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/francetv.py
+
+Purpose
+- Implement multiple information extractors (IEs) for France Télévisions sites and their video assets, enabling YouTube-DL to fetch metadata, formats, subtitles, and thumbnails for a wide range of France TV content.
+
+Main components and their roles
+
+- FranceTVBaseInfoExtractor
+  - Helper base class with _make_url_result(video_or_full_id, catalogue=None).
+  - Builds a canonical URL result using the FranceTVIE extractor, encoding the video id as francetv:<id> and appending @catalogue when provided. Used by several specific IEs to synthesize feed results consistently.
+
+- FranceTVIE (main extractor)
+  - _VALID_URL:
+    - Supports multiple entrypoints:
+      - Sivideo API: tools/getInfosOeuvre/v2 with idDiffusion parameter
+      - Video pages: videos.francetv.fr/video/ or francetv:<id> forms
+  - _extract_video(video_id, catalogue=None)
+    - Downloads video information from Sivideo API (idDiffusion + optional catalogue).
+    - Handles errors: raises ExtractorError if API reports NOK.
+    - Geo-restriction: if geoblocage present, fetches edgescape geo info and enforces country whitelist; raises if location is not allowed.
+    - Manifest signing: defines sign(manifest_url, manifest_id) that queries two signing hosts to obtain a signed manifest URL (for Akamai/HDS and other streams). Falls back to original URL if signing fails.
+    - Live detection: determines if the content is live from fields like plages_ouverture, is_live, or live URL indicators.
+    - Collects available video entries (videos with status ONLINE and a non-empty url). If none, uses fallback desktop/mobile endpoints from player.webservices.francetelevisions.fr.
+    - Formats extraction:
+      - Supports f4m (HDS): uses _extract_f4m_formats on signed URL unless georestricted (skips due to known issues).
+      - Supports m3u8 (HLS): _extract_m3u8_formats on signed URL.
+      - Supports mpd (DASH): _extract_mpd_formats on signed URL.
+      - RTMP: creates a flv format entry.
+      - Other direct URLs: adds if _is_valid_url passes.
+    - Sorts formats with _sort_formats.
+    - Metadata assembly:
+      - title from info['titre'] and optional subtitle from info['sous_titre'].
+      - description from info['synopsis'] (HTML-cleaned).
+      - thumbnail from info['image'].
+      - duration from real_duration or duree.
+      - timestamp from diffusion.timestamp.
+      - is_live flag, and subtitles from info['subtitles'] (fr).
+    - Returns a dict: id, title, description, thumbnail, duration, timestamp, is_live, formats, subtitles.
+  - _real_extract(url)
+    - Parses id and optional catalogue from URL via _VALID_URL; if missing, falls back to query params idDiffusion and catalogue.
+    - Delegates to _extract_video(video_id, catalogue).
+
+- FranceTVSiteIE
+  - _VALID_URL matches FranceTV site article pages (www/france.tv, mobile.france.tv) with a path ending in .html.
+  - _real_extract(url)
+    - Downloads page; tries to extract a video id via data-main-video or videoId patterns.
+    - If not found, looks for a direct reference in the page to a video URL under videos.francetv.fr/video/([^@]+@.+).
+    - Calls _make_url_result(video_id, catalogue=None) to delegate to FranceTVIE.
+
+- FranceTVEmbedIE
+  - _VALID_URL matches embed.francetv.fr with ue parameter containing the video id.
+  - _real_extract(url)
+    - Fetches the embed key from http://api-embed.webservices.francetelevisions.fr/key/<video_id>.
+    - Uses the response to call _make_url_result(video['video_id'], video.get('catalog')).
+
+- FranceTVInfoIE
+  - IE_NAME 'francetvinfo.fr'
+  - _VALID_URL matches francetvinfo.fr article/replay pages.
+  - _TESTS include replay JT pages with subtitles and a Dailymotion embed example.
+  - This IE uses FranceTVBaseInfoExtractor to convert francetvinfo pages into FranceTVIE-compatible video IDs and then delegates to that IE for the actual extraction. It supports embedding Dailymotion videos via the add_ie entry.
+
+- FranceTVInfoSportIE
+  - IE_NAME 'sport.francetvinfo.fr'
+  - _VALID_URL matches sport.francetvinfo.fr content.
+  - _real_extract(url)
+    - Downloads page, finds data-video attribute, builds a FranceTV URL result with catalogue 'Sport-web' to reuse FranceTVIE extraction.
+
+- GenerationWhatIE
+  - IE_NAME 'france2.fr:generation-what'
+  - _VALID_URL for generation-what.francetv.fr video pages
+  - _real_extract(url)
+    - Fetches page, extracts a YouTube video ID from window.videoURL variable.
+    - Returns a YouTube-based result (ie='Youtube') using that video ID.
+
+- CultureboxIE
+  - _VALID_URL matches culturebox.francetvinfo.fr
+  - _TESTS include a Culturebox video page.
+  - _real_extract(url)
+    - Downloads page; checks for a specific "live not available" message to raise an ExtractorError.
+    - Extracts video_id and catalogue from a video URL present in the page.
+    - Delegates to _make_url_result(video_id, catalogue) to use FranceTVIE for formats.
+
+- FranceTVJeunesseIE
+  - _VALID_URL matches ZouZous/Ludo hero pages.
+  - _real_extract(url)
+    - Builds a playlist by requesting a playlist JSON from <base_url>/playlist.
+    - If playlist has no count, raises ExtractorError (not available).
+    - Iterates items; for each item with an identity string, adds a URL result for that identity via _make_url_result(identity).
+    - Returns a playlist_result with the list of video entries.
+
+Key implementation details and notable behavior
+
+- Unified URL results
+  - The code centralizes URL construction via FranceTVBaseInfoExtractor._make_url_result, which prefixes IDs with francetv: and optionally appends a catalogue after @. This enables consistent handling across multiple entrypoints and allows FranceTVIE to treat many sources as a single downstream extractor.
+
+- Geo-blocking handling
+  - If the API reports allowed_geoblocage, the extractor fetches edgescape.json to determine the country code and enforces geoblock rules, raising an ExtractorError when access is not allowed from the user’s location.
+
+- Signed manifests
+  - For protected streams, the code attempts to obtain a signed manifest URL via two signing hosts (akamaihd.net and francetv.fr). This helps to access HDS/HDS-like streams that require signed URLs.
+
+- Live vs VOD
+  - The extractor detects live content through several cues (live schedules, is_live flag, or live URLs) and sets is_live accordingly. Live content uses the live title style through _live_title.
+
+- Fallbacks and resilience
+  - If no usable video array is found from the primary API, the code falls back to desktop/mobile fallback endpoints to discover videos.
+  - Supports multiple streaming formats (f4m, m3u8, mpd) and direct URLs; also handles RTMP as a special case.
+
+- Formats and parsing
+  - For f4m: skips when georestricted (to avoid known issues) or uses _extract_f4m_formats with a signed URL and extra core/plugin parameters.
+  - For m3u8: uses _extract_m3u8_formats with m3u8_native and an m3u8_id.
+  - For mpd: uses _extract_mpd_formats with mpd_id.
+  - For other URLs: validates and includes as direct formats if valid.
+  - Subtitles: builds a fr subtitles list from info['subtitles'] where available.
+
+- Metadata extraction
+  - title assembled from titre and optional sous_titre.
+  - description cleaned with clean_html(info.get('synopsis')).
+  - thumbnail built from info['image'] and base URL.
+  - duration derived from real_duration or duree (parsed with parse_duration).
+  - timestamp pulled from diffusion.timestamp.
+  - duration, timestamp, and subtitles are included in the final output when available.
+
+- Diverse entry points covered
+  - Sivideo API, direct francetv.fr video pages, francetv:id shorthand, site pages (France.tv), embeds, francetvinfo.fr, sport.francetvinfo.fr, culturebox, jeunesse (Zouzous/Ludo), and a Generation-What cross-link to YouTube.
+
+Overall
+- This file implements a comprehensive suite of extractors for France Télévisions content, all feeding into a common framework to produce rich metadata and a consolidated list of downloadable formats. It handles geo-restrictions, live streams, manifest signing, multiple delivery formats, and various France TV sub-sites (FranceTV, francetvinfo, sport, jeunesse, culturebox, etc.), with fallbacks and Dailymotion/Youtube integrations where appropriate.

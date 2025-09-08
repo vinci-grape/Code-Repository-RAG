@@ -1,0 +1,84 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/einthusan.py
+
+What it does
+- Implements an InfoExtractor for Einthusan movie pages. Given an Einthusan movie watch URL, it fetches the page, interacts with Einthusan’s AJAX endpoint to obtain video link data, decrypts embedded link information, builds a list of available video formats (HLS and direct MP4), and returns a structured info dictionary (id, title, formats, thumbnail, description).
+
+Key components
+
+- EinthusanIE(InfoExtractor)
+  - _VALID_URL: Regexp that matches movie watch URLs on einthusan.tv, einthusan.com, or einthusan.ca
+    - Pattern: https?://host/movie/watch/{id}
+  - _TESTS: Examples used for testing:
+    - A real page with expected mp4/hls formats, title, description, and thumbnail
+    - Several “only_matching” tests to ensure URL pattern recognition works without downloading
+  - _decrypt(self, encrypted_data, video_id)
+    - Implemented as a reversal of a specific JavaScript-based encryption used by Einthusan
+    - Builds a string from encrypted_data by taking:
+      encrypted_data[:10] + encrypted_data[-1] + encrypted_data[12:-1]
+    - Base64-decodes that constructed string
+    - Decodes to UTF-8 and parses as JSON via _parse_json, returning the resulting dict
+    - Purpose: obtain the actual EJLinks (video links) data
+  - _real_extract(self, url)
+    Main extraction flow:
+    - Parse URL to extract:
+      - host (e.g., einthusan.tv, .com, .ca)
+      - video_id (the numeric/alphanumeric id in the path)
+    - Download the webpage
+    - Extract title from an <h3> tag
+    - Extract player parameters from the UIVideoPlayer section:
+      - Locate the <section id="UIVideoPlayer"...> element
+      - Use extract_attributes to convert its HTML data- attributes into a Python dict (player_params)
+    - Obtain page_id from the data-pageid attribute on the page (used for CSRF token)
+    - POST request to https://{host}/ajax/movie/watch/{video_id}/ with form data:
+      - xEvent: V IVideoPlayer.PingOutcome
+      - xJson: JSON-encoded object with:
+        - EJOutcomes: value from player_params['data-ejpingables']
+        - NativeHLS: False
+      - arcVersion: 3
+      - appVersion: 59
+      - gorilla.csrf.Token: page_id
+    - Parse the response JSON and take the 'Data' field as video_data
+    - If video_data is a string starting with '/ratelimited/', raise ExtractorError indicating rate limit
+    - Decrypt EJLinks: ej_links = self._decrypt(video_data['EJLinks'], video_id)
+    - Build formats:
+      - If ej_links contains 'HLSLink', fetch HLS formats via _extract_m3u8_formats with:
+        - ext='mp4', entry_protocol='m3u8_native'
+      - If ej_links contains 'MP4Link', add a direct MP4 format with {'url': mp4_url}
+      - Sort formats with _sort_formats
+    - Description: extract the inner text of the element with class 'synopsis'
+    - Thumbnail: attempt to extract a thumbnail URL via a regex that finds an img src matching /moviecovers/...; if found, convert to absolute URL using urljoin
+    - Return a dict with:
+      - id: video_id
+      - title: extracted title
+      - formats: list of available formats
+      - thumbnail: absolute URL of thumbnail (if found)
+      - description: synopsis text (as extracted)
+
+Implementation details and notable behavior
+
+- Encryption/decryption
+  - The code decrypts EJLinks using a custom method (_decrypt) that mirrors a JS-based scheme referenced as reversed from jsoncrypto.prototype.decrypt() in einthusan-PGMovieWatcher.js.
+  - The subtle reassembly of the string before base64 decoding is critical to obtain a valid JSON blob describing the video links.
+
+- Data extraction and HTTP flow
+  - The extractor first scrapes the static page to get title, synopsis, and a UIVideoPlayer data-attributes block.
+  - It then performs an authenticated-looking AJAX POST to retrieve dynamic data (EJLinks) required to assemble formats.
+  - It gracefully handles rate limiting by checking if the response Data is a string starting with '/ratelimited/' and raising a user-friendly ExtractorError.
+
+- Formats
+  - Supports both:
+    - HLS streaming via an m3u8 manifest (converted to mp4-containing formats with m3u8_native handling)
+    - Direct MP4 links (MP4Link)
+  - Formats are sorted before returning, ensuring best-quality first.
+
+- Metadata extraction
+  - Title is taken from <h3> on the page.
+  - Description is taken from an element with class 'synopsis'.
+  - Thumbnail is inferred from an image under a /moviecovers/ path and made absolute via URL joining.
+
+- Robustness and compatibility
+  - Uses standard helper utilities from youtube-dl (extract_attributes, get_elements_by_class, _download_webpage, _download_json, _html_search_regex, _search_regex, etc.).
+  - Handles multiple host variants (tv, com, ca) via the _VALID_URL pattern and host substitution in the AJAX URL.
+  - Tests cover typical success cases as well as URL pattern matching for non-extracted cases.
+
+In short, EinthusanIE fetches an Einthusan movie page, retrieves and decrypts dynamic link data, constructs available video formats (HLS and MP4), and returns a complete video info dictionary with metadata.

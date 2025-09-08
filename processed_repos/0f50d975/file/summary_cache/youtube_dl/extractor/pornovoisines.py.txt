@@ -1,0 +1,52 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/pornovoisines.py
+
+What it does:
+- Implements an information extractor (InfoExtractor) for pornovoisines.com videos.
+- Retrieves video formats, metadata (title, description, upload date, duration, views, rating), categories, thumbnail, and subtitles from the site.
+
+Key components:
+- Class: PornoVoisinesIE(InfoExtractor)
+  - _VALID_URL: Regex to match URLs like https://www.pornovoisines.com/videos/show/{id}/{display_id}
+  - _TEST: Sample test case with expected fields (id, display_id, ext, title, description, thumbnail, upload_date, duration, view_count, average_rating, categories, age_limit, subtitles)
+
+Main functionality in _real_extract:
+1) URL parsing
+   - Extracts video_id and display_id from the URL using _VALID_URL.
+
+2) Settings retrieval
+   - Calls API endpoint: http://www.pornovoisines.com/api/video/{video_id}/getsettingsurl/ to obtain a settings URL (video_settings_url).
+   - Downloads the JSON from that URL and reads settings = data['data'].
+
+3) Formats extraction
+   - Iterates settings['variants']:
+     - If kind == 'HLS': uses _extract_m3u8_formats to fetch formats from the HLS manifest (ext mp4, entry_protocol m3u8_native, m3u8_id 'hls').
+     - If kind == 'MP4': iterates items and adds direct MP4 format entries with 'url', 'height', and 'bitrate' (if present).
+   - Sorts the formats with _sort_formats.
+
+4) Webpage metadata
+   - Downloads the main video webpage.
+   - title: via _og_search_title(webpage).
+   - description: via _og_search_description(webpage).
+   - thumbnail: uses a regex to extract the thumbnail src from an img tag with class "thumb"; handles a known webpage bug (no space between "thumb" and src=); optional (fatal=False).
+
+5) Additional metadata extraction
+   - upload_date: parsed from a pattern like Le <b>dd/mm/yyyy</b> using the unified date helper.
+   - duration: from settings['main'].get('duration').
+   - view_count: extracted from the page with a regex capturing digits before "vues"; converted to int if found.
+   - average_rating: extracted from a pattern like "Note : X.XX" (comma decimal in French); converted to float if found.
+   - categories: extracted from the "Catégories" section on the page; split by comma and stripped.
+   - subtitles: builds fr subtitles list from settings['main']['vtt_tracks'] values, mapping to URLs.
+
+6) Return value
+   - Returns a dict with: id, display_id, formats, title, description, thumbnail, upload_date, duration, view_count, average_rating, categories, age_limit (18), subtitles.
+
+Important implementation details:
+- _VALID_URL and regex usage ensure proper extraction of id and display_id from the URL.
+- Uses two sources for formats: HLS (via M3U8) and direct MP4 URLs.
+- Uses _download_json to fetch dynamic settings data and _download_webpage for the HTML page.
+- Handles potential missing fields gracefully by using fatal=False in several regex searches.
+- Upload date normalization via unified_strdate.
+- Ratings and view counts are type-casted when present; categories are parsed from HTML and cleaned.
+- Subtitles are taken from the VTT tracks listed in the main settings data.
+
+Overall, the extractor combines API-provided streaming variants with on-page metadata to build a complete video object suitable for youtube-dl.

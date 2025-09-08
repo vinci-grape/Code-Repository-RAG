@@ -1,0 +1,82 @@
+Summary of the MDRIE extractor (youtube-dl/youtube_dl/extractor/mdr.py)
+
+Purpose
+- Implement an InfoExtractor for MDR.DE and KiKA sites to download and list available video/audio formats from MDR/KiKA pages.
+
+Key classes and functions
+- MDRIE(InfoExtractor): Main extractor class.
+  - IE_DESC: Description used by youtube-dl for this extractor.
+  - _VALID_URL: Regex that matches MDR.de and kika.de video pages and captures the numeric id.
+  - _GEO_COUNTRIES: Restricts access to Germany (DE).
+  - _TESTS: example test cases including audio, video, and various URL formats (with some 404 skips).
+
+Core extraction flow (_real_extract)
+1) video_id = self._match_id(url)
+   - Extracts the ID from the URL using the _VALID_URL pattern.
+
+2) webpage = self._download_webpage(url, video_id)
+   - Downloads the page HTML.
+
+3) data_url extraction
+   - Uses _search_regex to find a data URL pointing to an avCustom.xml file, matching patterns like dataURL or playerXml that end in -avCustom.xml.
+   - Normalizes the URL (replacing escaped slashes) and joins it to the page URL with compat_urlparse.urljoin.
+
+4) data XML loading
+   - data_doc = self._download_xml(data_url, video_id)
+
+5) metadata extraction
+   - title: from ./title or ./broadcast/broadcastName (fatal if missing)
+   - type_: from ./type (e.g., 'audio' or None)
+   - description: later pulled from ./broadcast/broadcastDescription
+   - timestamp: parsed from possible date fields ./broadcast/broadcastDate, ./broadcast/broadcastStartDate, ./broadcast/broadcastEndDate
+   - duration: parsed from ./duration
+   - uploader: from ./rights
+
+6) formats collection
+   - Iterate over all assets at ./assets/asset.
+   - For each asset, try multiple source URL fields in order:
+     downloadUrl, progressiveDownloadUrl, dynamicHttpStreamingRedirectorUrl, adaptiveHttpStreamingRedirectorUrl
+   - For each available URL:
+     - Normalize and deduplicate (avoid duplicates via processed_urls)
+     - ext = determine_ext(video_url)
+     - If ext == 'm3u8':
+       - Use _extract_m3u8_formats to collect HLS formats (entry_protocol 'm3u8_native', m3u8_id 'HLS', fatal False)
+     - If ext == 'f4m':
+       - Use _extract_f4m_formats with a specific hdcore/plugin pattern (f4m_id 'HDS', fatal False)
+     - Else:
+       - mediaType (default 'MP4'), vbr (bitrateVideo), abr (bitrateAudio), filesize (fileSize)
+       - Build format_id as media_type plus bitrate if available
+       - Construct a format dict:
+         - url: video_url
+         - format_id: joined format_id
+         - filesize, abr, vbr
+         - If vbr present: include width/height from frameWidth/frameHeight
+         - If type_ == 'audio': set vcodec to 'none'
+       - Append this format
+   - After processing all assets, sort formats with self._sort_formats(formats)
+
+7) Return info dict
+   - id: video_id
+   - title, description, timestamp, duration, uploader
+   - formats: list of collected formats
+
+Implementation details and nuances
+- XML-driven format discovery: The extractor relies on a secondary avCustom.xml (data_url) that lists assets and their sources. It supports multiple streaming/format options per asset.
+- Supported format types:
+  - HLS (m3u8) via _extract_m3u8_formats
+  - HDS (f4m) via _extract_f4m_formats
+  - Progressive/direct downloads via explicit URL, with metadata-driven format_id construction.
+- Metadata extraction uses XPath helpers (xpath_text) with fallbacks:
+  - Title may come from either ./title or ./broadcast/broadcastName
+  - Timestamp uses parse_iso8601 on several possible date fields
+  - Duration uses parse_duration on ./duration
+  - Uploader comes from ./rights
+- Audio handling: If the asset type is audio, the extractor marks vcodec as 'none' to indicate there is no video stream.
+- Deduplication: processed_urls avoids duplicating the same video URL across multiple asset sources.
+- Edge cases:
+  - Some test cases in _TESTS are expected to be skipped due to 404s or unavailable content.
+  - The code robustly handles missing bitrate fields by using int_or_none with defaults.
+- Geo restriction: _GEO_COUNTRIES = ['DE'] indicates the content is restricted to Germany.
+
+Overall
+- This extractor fetches an auxiliary XML manifest for MDR/KiKA pages, enumerates available asset URLs, builds a list of supported formats (including HLS/HDS and direct downloads), and collects standard metadata (title, description, timestamp, duration, uploader) to return a complete info dictionary for youtube-dl.

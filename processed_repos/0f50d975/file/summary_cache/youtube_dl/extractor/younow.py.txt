@@ -1,0 +1,84 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/younow.py
+
+Overview:
+- This module implements YouNow extractors for youtube-dl to handle live streams, channel moments, and individual moments from YouNow.
+- It defines three main extractors and a helper function to parse moment items into playable entries.
+
+Key components:
+
+1) YouNowLiveIE (live streams)
+- Purpose: Extracts currently live broadcasts from a YouNow user page.
+- URL pattern: https://www.younow.com/<username>
+- Behavior:
+  - Fetchs broadcast info from https://api.younow.com/php/api/broadcast/info/curId=0/user=<username>.
+  - If API returns errorCode != 0, raises an ExtractorError with the provided message.
+  - Determines uploader from data.user.profileUrlString or falls back to the username.
+  - Returns a video info dict with:
+    - is_live = True
+    - id, uploader, uploader_id, uploader_url, title (via _live_title), thumbnail (awsUrl), tags, categories, view_count, like_count
+    - formats: one MP4/HD format via HLS (m3u8) path constructed using CDN_API_BASE and broadcastId/userId
+- Notable implementation details:
+  - suitable() avoids handling URLs that belong to channels or moments (delegates to YouNowChannelIE/YouNowMomentIE if applicable).
+  - Uses try_get to safely extract uploader string.
+  - _live_title inherited utility to generate a live title when needed.
+
+2) _extract_moment (helper function)
+- Purpose: Converts a moment item dict into a standard entry dict for both live moments and channel collections.
+- Behavior:
+  - Extracts momentId; if missing and fatal, raises ExtractorError; if not fatal, returns None.
+  - Builds title from text or a default based on momentType/titleType.
+  - Extracts uploader and uploader_id from item.owner if present, constructs uploader_url.
+  - Returns an entry dict with:
+    - extractor_key = 'YouNowMoment'
+    - id, title, view_count, like_count, timestamp, uploader/creator/uploader_id/uploader_url
+    - formats: HLS URL at https://hls.younow.com/momentsplaylists/live/<momentId>/<momentId>.m3u8
+      (mp4 extension, protocol m3u8_native)
+
+3) YouNowChannelIE (channel moments playlist)
+- Purpose: Extracts a channel's moments as a playlist.
+- URL pattern: https://www.younow.com/<username>/channel
+- _TEST provides a sample with an expected playlist of multiple moments.
+- _entries(username, channel_id):
+  - Paginates over moments with requests to CDN_API_BASE/moment/profile/channelId=<channel_id>/createdBefore=<created_before>/records=20
+  - For each item:
+    - If item.type == 'moment': yield _extract_moment(item, fatal=False)
+    - If item.type == 'collection': iterate momentsIds and fetch each moment via MOMENT_URL_FORMAT; if valid, yield its _extract_moment(item)
+  - Updates created_before with item.created to paginate
+- _real_extract(url):
+  - Resolves username, fetches channel_id from https://api.younow.com/php/api/broadcast/info/curId=0/user=<username> (userId)
+  - Returns a playlist_result of the generator _entries(username, channel_id) with title "<username> moments"
+- Notable details:
+  - Uses a generator-based approach to stream moments.
+  - Handles both direct moments and collections of moments.
+
+4) YouNowMomentIE (individual moment)
+- Purpose: Extracts a single YouNow moment by ID.
+- URL pattern: https://www.younow.com/<username>/<id> (the <id> is the moment id)
+- _TEST demonstrates extraction with fields like id, title, view_count, like_count, timestamp, uploader, and uploader_id.
+- suitable() ensures it’s not a channel URL (i.e., layered behavior with ChannelIE).
+- _real_extract(url):
+  - video_id = captured id from URL
+  - item = _download_json(MOMENT_URL_FORMAT % video_id, video_id)
+  - Returns _extract_moment(item['item'])
+- Details:
+  - MOMENT_URL_FORMAT points to CDN API moment fetch endpoint: https://cdn.younow.com/php/api/moment/fetch/id=<momentId>
+  - Expected output is a standard YouNow moment entry with fields including formats (mp4 via HLS native: https://hls.younow.com/momentsplaylists/live/<momentId>/<momentId>.m3u8)
+
+Important implementation details:
+- Data sources:
+  - Live info: api.younow.com/php/api/broadcast/info/curId=0/user=<username>
+  - Moments: CDN API endpoints for moment fetch and profiles
+- Formats:
+  - Live: HLS (m3u8) stream with URL pattern based on broadcastId and userId
+  - Moments: HLS native stream at a structured URL using momentId
+- Robustness:
+  - Uses int_or_none to safely parse numeric fields (view_count, like_count, etc.)
+  - Uses try_get for optional nested fields (e.g., uploader/profileUrlString)
+  - Handles missing momentId gracefully in _extract_moment when fatal is False
+- Interaction rules:
+  - YouNowLiveIE will not run for channel or moment URLs, deferring to YouNowChannelIE or YouNowMomentIE as appropriate
+- Utilities:
+  - _live_title(uploader) is used to generate a live title when a specific title isn’t provided
+  - _download_json is used for all API calls with descriptive notes for progress
+
+In short, this file provides a cohesive set of extractors for YouNow: a live stream extractor, a channel moments playlist extractor, and a single moment extractor, with a shared helper to convert moment items into a consistent output format.

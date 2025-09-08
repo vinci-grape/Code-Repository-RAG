@@ -1,0 +1,59 @@
+Summary of EyedoTVIE extractor
+
+Purpose
+- EyedoTVIE extracts video information and streaming formats from EyeDo.tv live streams and replays by querying EyeDo’s API and constructing the appropriate HLS (m3u8) playlist URL.
+
+Key components
+- Class EyedoTVIE(InfoExtractor): Youtube-dl extractor for EyeDo.tv.
+- _VALID_URL: Regular expression to identify EyeDo.tv live detail pages and capture the video id.
+- _ROOT_URL: Base URL used to build replay/live m3u8 playlist paths.
+- _TEST: Example URL and expected metadata for testing the extractor (id, title, description, uploader, etc.).
+
+Main workflow in _real_extract(url)
+1. Retrieve video_id
+   - video_id = self._match_id(url)
+
+2. Download video metadata (XML)
+   - video_data = self._download_xml('http://eyedo.tv/api/live/GetLive/%s' % video_id, video_id)
+
+3. XML namespace handling
+   - Defines _add_ns(path) to apply the EyeDo namespace: http://schemas.datacontract.org/2004/07/EyeDo.Core.Implementation.Web.ViewModels.Api
+
+4. Extract basic metadata
+   - title = xpath_text(video_data, _add_ns('Titre'), 'title', True)
+   - state_live_code = xpath_text(video_data, _add_ns('StateLiveCode'), 'title', True)
+
+5. Availability check
+   - If state_live_code == 'avenir', raise ExtractorError with a user-friendly message that the video is not yet available.
+
+6. Determine live vs. replay and build m3u8 URL
+   - is_live = (state_live_code == 'live')
+   - If live:
+     - If Cdn tag (non-namespaced) == 'true':
+       - m3u8_url = 'http://rrr.sz.xlcdn.com/?account=eyedo&file=A{video_id}&type=live&service=wowza&protocol=http&output=playlist.m3u8'
+     - Else:
+       - m3u8_url = ROOT_URL + 'w/{video_id}/eyedo_720p/playlist.m3u8'
+   - If not live (replay):
+     - m3u8_url = ROOT_URL + 'replay-w/{video_id}/mp4:{video_id}.mp4/playlist.m3u8'
+
+7. Build result dictionary
+   - id: video_id
+   - title: as extracted
+   - formats: self._extract_m3u8_formats(m3u8_url, video_id, 'mp4', 'm3u8_native')
+   - description: xpath_text(video_data, _add_ns('Description'))
+   - duration: parse_duration(xpath_text(video_data, _add_ns('Duration')))
+   - uploader: xpath_text(video_data, _add_ns('Createur'))
+   - uploader_id: xpath_text(video_data, _add_ns('CreateurId'))
+   - chapter: xpath_text(video_data, _add_ns('ChapitreTitre'))
+   - chapter_id: xpath_text(video_data, _add_ns('ChapitreId'))
+
+Key implementation details
+- Namespace-aware XML parsing: Since the API returns elements in a specific namespace, _add_ns is used for most fields to correctly extract data (e.g., Titre, Description, Duration, Createur, etc.).
+- CDN handling for live streams: If the XML Cdn tag is 'true', the code uses an external CDN URL; otherwise, it uses EyeDo’s internal path under ROOT_URL.
+- Two modes: live and replay
+  - Live: either CDN-based HLS or internal HLS path (eyedo_720p).
+  - Replay: uses a replay path with the pattern mp4:{video_id}.mp4/playlist.m3u8.
+- Error handling for unavailable content: If the video is not yet available (state_live_code == 'avenir'), an ExtractorError is raised with a clear message including the extractor name.
+- Format extraction: Uses _extract_m3u8_formats with 'mp4' as extension and 'm3u8_native' as the format extractor backend.
+
+Overall, the extractor fetches EyeDo.tv live/replay metadata, determines the correct streaming playlist URL based on live vs. replay and CDN usage, parses metadata with proper namespace handling, and returns a standard youtube-dl info dictionary with id, title, description, duration, uploader info, and available formats.

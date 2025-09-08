@@ -1,0 +1,105 @@
+Summary of code in ./youtube-dl/youtube_dl/downloader/fragment.py
+
+Overview
+- This module provides a base downloader for fragmented media (e.g., DASH, HLS native) used by youtube-dl. It handles per-fragment HTTP requests, resume logic, fragment assembly, progress reporting, and optional on-disk fragment retention.
+- The main class, FragmentFD, extends FileDownloader and implements the lifecycle for downloading and assembling fragments, including state persistence via a .ytdl file.
+
+Key classes
+- HttpQuietDownloader(HttpFD)
+  - A lightweight HTTP downloader variant used for fragment downloads.
+  - Overrides to_screen to suppress terminal output during fragment fetches (quiet mode).
+
+- FragmentFD(FileDownloader)
+  - Base class for downloading fragmented media. Handles:
+    - Fragment-specific retries, skipping unavailable fragments, and keeping fragments on disk (configurable).
+    - A bookkeeping .ytdl JSON file that stores downloader state (current_fragment index, fragment_count) for resuming and consistency checks.
+  - Main responsibilities:
+    - Prepare and start fragment downloads
+    - Manage per-fragment download and append to destination
+    - Persist and read resume state
+    - Progress reporting and finalization of fragments
+
+Key methods and implementation details
+- report_retry_fragment(err, frag_index, count, retries)
+  - Notifies user about HTTP error for a specific fragment and retry attempt.
+
+- report_skip_fragment(frag_index)
+  - Notifies user when a fragment is skipped.
+
+- _prepare_url(info_dict, url)
+  - If HTTP headers are provided in info_dict, wraps the URL in a sanitized Request with those headers; otherwise returns the URL as-is.
+
+- _prepare_and_start_frag_download(ctx)
+  - Convenience method to run _prepare_frag_download and then _start_frag_download.
+
+- __do_ytdl_file(ctx)
+  - Determines whether to use the ytdl state file for the current download.
+  - Returns True when not a live stream and the temporary filename is not '-'.
+
+- _read_ytdl_file(ctx)
+  - Reads the current fragment index from the .ytdl state file and stores it in ctx['fragment_index'].
+  - Sets a flag if corruption is detected (ctx['ytdl_corrupt']).
+
+- _write_ytdl_file(ctx)
+  - Writes the current fragment index (and optional fragment_count) to the .ytdl state file.
+
+- _download_fragment(ctx, frag_url, info_dict, headers=None)
+  - Downloads a single fragment into a temp file named "<tmpfilename>-Frag<index>".
+  - Builds a fragment_info_dict with url and HTTP headers (from headers or info_dict).
+  - Computes frag_resume_len based on existing partial download if continuedl is enabled.
+  - Invokes the downloader associated with ctx['dl'] to fetch the fragment.
+  - If successful, records filetime (if any) and reads the fragment content into frag_content.
+  - Returns (success, frag_content).
+
+- _append_fragment(ctx, frag_content)
+  - Appends the fragment content to the destination output stream.
+  - If using .ytdl state tracking, updates the state file.
+  - If not keeping fragments on disk, deletes the temporary fragment file after appending.
+  - Cleans up the fragment filename sanitization reference.
+
+- _prepare_frag_download(ctx)
+  - Prepares the environment for fragment downloading:
+    - Displays total fragments (including ad fragments if applicable) and destination filename.
+    - Creates an HttpQuietDownloader instance (quiet and non-interactive) configured with continuedl, retries, ratelimit, etc.
+    - Determines resume length by checking existing temp file size; sets open mode to append if resuming.
+    - Initializes context with tmpfilename, fragment_index, and state for resuming.
+    - Handles ytdl state logic:
+      - If continuedl and a .ytdl file exists, reads it and checks for corruption or inconsistency (corruption or inconsistent resume state triggers a restart from the beginning and ytdl update).
+      - If not continuedl, optionally reads existing ytdl state and resets to 0 if applicable.
+      - Writes the ytdl state file and ensures fragment_index starts at 0.
+    - Opens the destination (tmpfilename) for writing, in 'wb' or 'ab' mode depending on resume.
+    - Populates ctx with the downloader (dl), destination stream, tmpfilename, and initial complete_frags_downloaded_bytes (resume_len).
+
+- _start_frag_download(ctx)
+  - Sets up a live progress tracker for the fragment download:
+    - Maintains a state dict with status, downloadedBytes, fragmentIndex, totalFragmentCount, filename, tmpfilename, and other timing/speed metrics.
+    - Defines frag_progress_hook(s) to react to progress updates from the fragment download:
+      - Updates elapsed time, total bytes estimate for non-live streams, speed, and ETA.
+      - On finished, increments fragment index, updates total downloaded bytes and speed, and reinitializes for the next fragment.
+      - On progress, updates downloaded bytes and speed, and notifies via _hook_progress.
+    - Attaches the progress hook to the fragment downloader (ctx['dl']).
+
+- _finish_frag_download(ctx)
+  - Finalizes after a fragment has been downloaded:
+    - Closes destination stream and removes the .ytdl state file if used.
+    - Computes elapsed time for the fragment download.
+    - If tmpfilename is not '-', renames the temporary file to the final filename, applying updatetime (modification time) with fragment_filetime if provided.
+    - Estimates downloaded bytes and notifies via _hook_progress with a finished status.
+
+Additional notes and behavior
+- Fragment naming and temp handling:
+  - Each fragment is downloaded to a separate temp file named "<tmpfilename>-Frag<index>".
+  - Fragments can be kept on disk if keep_fragments is True; otherwise, they are deleted after being appended to the final file.
+- State persistence (ytdl file):
+  - The .ytdl file stores the current_fragment.index and optionally fragment_count to enable robust resumption across restarts.
+  - The code handles possible corruption or inconsistent states in the .ytdl file and restarts downloads from a safe point when needed.
+- Live vs VOD:
+  - The code distinguishes live streams (unknown total fragments) from VOD, adjusting progress reporting (ETA, total size estimation) accordingly.
+- Resuming logic:
+  - Continuedl controls whether to attempt resuming partial fragments and uses fragment resumes length to pick up where left off.
+  - The resume length is derived from existing fragment temp files if available.
+- Output and user feedback:
+  - The module provides granular progress updates for each fragment, overall download progress, speed, and estimated time of arrival (ETA).
+  - It prints messages for retries and skipped fragments to the user.
+
+In short, FragmentFD orchestrates fragment-based downloading with per-fragment HTTP handling, robust resume support via a .ytdl state file, careful management of temporary fragment files, and detailed progress reporting, assembling fragments into the final output file.

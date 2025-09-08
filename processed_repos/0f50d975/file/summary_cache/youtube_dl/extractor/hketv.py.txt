@@ -1,0 +1,85 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/hketv.py
+
+What it does
+- Implements a YouTube-DL extractor for HK Education City TV (HKETV) videos hosted under hkedcity.net.
+- Retrieves video metadata, formats, subtitles, thumbnail, and engagement metrics (like count).
+- Handles geo-restrictions for HK, and uses the HK government’s apps API to fetch streaming information and media tracks.
+- Aggregates information into a standard YouTube-DL info_dict.
+
+Key classes, constants, and data structures
+- Class HKETVIE(InfoExtractor): Main extractor class.
+- IE_NAME: 'hketv'
+- IE_DESC: Description of HKETV (Hong Kong Educational Bureau Educational Television)
+- Geo settings: _GEO_BYPASS = False, _GEO_COUNTRIES = ['HK'] (geo-restricted to Hong Kong)
+- _VALID_URL: Regex matching video resource URLs: https:// (www.)?hkedcity.net/etv/resource/<id>
+- _TESTS: Two sample tests including geo-restricted cases and expected metadata (title, id, ext, duration, subtitles, etc.)
+- _CC_LANGS: Mapping from site language labels to standard ISO codes (e.g., 中文繁體 -> zh-Hant, English -> en, etc.)
+- _FORMAT_HEIGHTS: Mapping of labeled formats to heights: {'SD': 360, 'HD': 720}
+- _APPS_BASE_URL: Base URL for Hong Kong Education City apps domain (https://apps.hkedcity.net)
+
+Main functionality (core method)
+- _real_extract(self, url):
+  - Extracts video_id from URL and downloads the page.
+  - Determines the video title using multiple fallbacks:
+    - ed_title meta
+    - data-favorite_title_eng/chi embedded in page
+    - <h1> tag
+    - OpenGraph title
+  - Extracts internal file_id and curr_url via regexes on the page.
+  - Constructs a POST payload with action='get_info', including curr_url and file_id, to the apps API endpoint at /media/play/handler.php.
+  - Sends the POST request with appropriate headers (including geo_verification_headers) and parses the JSON response.
+  - Error handling:
+    - If response indicates success/access is false, extracts access_err_msg.
+    - If error mentions country restriction, raises geo-restricted error for HK.
+    - Otherwise raises a generic ExtractorError with the message.
+  - Builds video formats:
+    - Iterates over the first playlist item: playlist0['sources'].
+    - For each source, builds an absolute file URL (urljoin with _APPS_BASE_URL).
+    - Infers width/height:
+      - height from result[ 'width' / 'height' ] or per-label mapping via _FORMAT_HEIGHTS[label].
+      - width calculated as w = h * width / height if both width and height exist.
+    - Creates format dicts with:
+      - format_id (label), ext (source type), url, width, height
+  - Sorts formats with _sort_formats.
+  - Builds subtitles:
+    - Reads tracks from playlist0['tracks'] (if present).
+    - For each track that is a dict and kind is 'captions' or 'subtitles':
+      - Builds track URL (absolute via urljoin).
+      - Language: maps track label via _CC_LANGS, defaulting to label if not found.
+      - Adds a subtitle entry with url (proto-relative) and ext 'srt'.
+  - Likes/emotions:
+    - Queries the emotion counter endpoint (https://emocounter.hkedcity.net/handler.php) with action=get_emotion and data identifiers (bucket_id 'etv' and identifier video_id).
+    - Parses like_count from the response path data.emotion_data[0].count if present.
+  - Assembles and returns the final info_dict:
+    - id: video_id
+    - title: determined title
+    - description: meta description from the page (nullable)
+    - upload_date: parsed from ed_date meta (day_first=False)
+    - duration: result['length'] as integer
+    - formats: list of constructed formats
+    - subtitles: subtitles mapping
+    - thumbnail: absolute URL from result['image']
+    - view_count: parsed view_count via parse_count
+    - like_count: parsed like_count (if available)
+
+Important implementation details
+- Robust title extraction: multiple strategies to determine a meaningful title from metadata, page content, or OG data.
+- API interaction:
+  - Uses apps base URL and a POST payload to retrieve streaming information (get_info) for the specific video.
+  - Merges geo-verification headers with content-type headers for the request.
+- Geo handling:
+  - If access is denied due to geo restrictions, raises a geo-restricted error with a helpful message and HK as the allowed country.
+- Formats handling:
+  - Uses internal width/height data and labeled format heights to compute video dimensions when possible.
+  - Builds per-format dictionaries including id, extension, URL, width, and height.
+- Subtitles:
+  - Supports multiple languages and uses a mapping to produce standardized language codes.
+  - Produces subtitle entries with proto-relative URLs and .srt extensions.
+- Engagement metrics:
+  - Fetches like_count from a separate emotion counter API and includes it in the final result.
+- Data safety:
+  - Uses utility helpers like _download_json, _download_webpage, _html_search_meta, _search_regex, _og_search_title, try_get to handle missing fields gracefully.
+  - Uses _proto_relative_url to ensure subtitles URLs are protocol-relative when appropriate.
+
+Return value
+- A dictionary conforming to YouTube-DL’s standard info_dict with id, title, description, upload_date, duration, formats, subtitles, thumbnail, view_count, and like_count.

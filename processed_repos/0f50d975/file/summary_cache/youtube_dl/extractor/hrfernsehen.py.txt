@@ -1,0 +1,59 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/hrfernsehen.py
+
+Purpose
+- Implement a YouTube-dl extractor for HR Fernsehen / Hessenschau video pages. It parses the page, extracts embedded loader data, builds video information including formats, subtitles, thumbnails, and timing metadata.
+
+Key class
+- HRFernsehenIE (inherits InfoExtractor)
+  - IE_NAME: 'hrfernsehen'
+  - _VALID_URL: Matches HR/Fernsehen or Hessenschau video pages with a 6-digit video id in the URL (video-<id>.html)
+  - _GEO_COUNTRIES: ['DE'] (geo-restricted to Germany)
+
+Main functionality
+- _real_extract(url):
+  - Extracts video_id via _match_id and downloads the page.
+  - Retrieves page metadata:
+    - title via og:title / twitter:title / name
+    - description via description meta
+  - Locates the embedded loader data in the page by searching for data-new-hr-mediaplayer-loader attribute, unescapes HTML, and parses it as JSON into loader_data.
+  - Constructs info dict:
+    - id, title, description
+    - formats by calling extract_formats(loader_data)
+    - timestamp by calling extract_airdate(loader_data)
+  - If loader_data contains a subtitle URL, adds subtitles with key 'de'.
+  - Collects thumbnails from loader_data.get("previewImageUrl", {}) values, deduplicates, and attaches as a list of {'url': ...} dictionaries if present.
+  - Returns the info dict.
+
+Key helper methods
+- extract_airdate(loader_data):
+  - Reads airdate from loader_data['mediaMetadata']['agf']['airdate'].
+  - Returns unified_timestamp(airdate) if present; otherwise None.
+
+- extract_formats(loader_data):
+  - Iterates over loader_data["videoResolutionLevels"].
+  - For each stream_obj, builds a format dict:
+    - format_id: "<verticalResolution>p" (e.g., "720p")
+    - height: verticalResolution
+    - url: stream_obj['url']
+  - Attempts to parse additional quality data from the URL using regex: r'([0-9]{3,4})x([0-9]{3,4})-([0-9]{2})p-([0-9]{3,4})kbit'
+    - If matched, fills:
+      - width, height (from groups 1 and 2)
+      - fps (group 3)
+      - tbr (group 4)
+  - Appends all formats, sorts them with _sort_formats.
+  - Returns the list of formats.
+
+Implementation details
+- The embedded loader data is obtained from the HTML attribute data-new-hr-mediaplayer-loader, then JSON-decoded.
+- Subtitles: if 'subtitle' key exists in loader_data, sets info["subtitles"] = {"de": [{"url": loader_data["subtitle"]}]}
+- Thumbnails: collects values from loader_data.get("previewImageUrl", {}) and deduplicates using a set before converting to a list of {'url': ...} dictionaries.
+- Does not rely on external request beyond the initial page download since formats come from the embedded loader data.
+
+Tests
+- _TESTS includes:
+  - A real example from hessenschau.de with a known video id, expected md5 for the video, and an info_dict containing id, ext, description, subtitles, timestamp, upload_date, thumbnail, and title.
+  - A second test with only_matching True for a hr-fernsehen URL (ensures URL pattern matches correctly even if not used for extraction in that test).
+
+Notes
+- The extractor focuses on German content and isgeo-restricted to DE.
+- It relies on the internal HR media loader structure: videoResolutionLevels for formats, mediaMetadata.agf.airdate for air date, and optional subtitle/previewImageUrl fields for accessibility data.

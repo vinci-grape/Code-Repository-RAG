@@ -1,0 +1,47 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/noovo.py
+
+What it does
+- NoovoIE is a YouTube-DL extractor for noovo.ca video pages that uses Brightcove as the underlying player.
+- It parses metadata from the Noovo page and then delegates actual video extraction to BrightcoveNewIE by returning a url_transparent entry pointing to the Brightcove player with the video ID.
+
+Main classes / functions
+- NoovoIE (InfoExtractor)
+  - _VALID_URL: URL pattern for Noovo video pages. Captures an id in the form slug/slug.
+  - BRIGHTCOVE_URL_TEMPLATE: Template URL used to construct the Brightcove player URL with videoId.
+  - _real_extract(url): Core extraction logic
+    - video_id = self._match_id(url): extracts the Noovo page’s id from the URL.
+    - webpage = self._download_webpage(url, video_id): fetches the HTML page.
+    - brightcove_id = self._search_regex(r'data-video-id=["\'](\d+)', webpage, 'brightcove id'): extracts the Brightcove video ID embedded in the page.
+    - data = self._parse_json(..., transform_source=js_to_json, fatal=False): parses JSON dataLayer entry embedded in the page, if present.
+    - title: prefer data['video']['nom'] (French title) else fallback to meta tag dcterms.Title.
+    - description: from meta tags dcterms.Description or description.
+    - series, season, episode and their numbers: extracted from the dataLayer if available (data['emission']...); with fallbacks to regex-based extraction from HTML when necessary.
+    - Returns a dict with:
+      - _type: 'url_transparent'
+      - ie_key: BrightcoveNewIE.ie_key()
+      - url: smuggle_url(self.BRIGHTCOVE_URL_TEMPLATE % brightcove_id, {'geo_countries': ['CA']}) to enforce Canada geo restriction
+      - id: brightcove_id
+      - title, description, series, season, season_number, episode, episode_number
+- Tests (_TESTS): Two test cases
+  - A clip: checks id, ext, title, description, timestamp, uploader_id, series.
+  - An episode: checks id, title, description, ext, timestamp, uploader_id, series, season_number, episode, episode_number.
+  Both use skip_download: True.
+
+Key implementation details
+- Data extraction sources:
+  - Brightcove video ID is read from the page attribute data-video-id.
+  - Additional metadata is read from a dataLayer push JSON object found via a regex and parsed with js_to_json to handle JavaScript-style JSON.
+  - Title uses video.nom from the dataLayer, with a fallback to the page meta tag.
+  - Description uses dcterms.Description or description meta tag.
+  - Series, season, and episode information are sourced from the dataLayer, with HTML fallbacks for series if needed.
+- Fallbacks and robustness:
+  - Uses try_get and int_or_none to safely access nested fields and convert numbers.
+  - If certain dataLayer fields are missing, falls back to HTML regex-based extraction.
+- Output strategy:
+  - Returns a url_transparent entry pointing to BrightcoveNewIE with the Brightcove video ID.
+  - Uses smuggle_url to attach geo_countries: ['CA'] to enforce Canadian geo restriction when loading the Brightcove player.
+  - Keeps the Noovo page’s metadata (title, description, series, season/episode) in the final info_dict for the user.
+- Encoding/compatibility:
+  - Uses compat_str for string handling and js_to_json for converting embedded JavaScript JSON to Python dict.
+
+In short, NoovoIE scrapes Noovo video pages to obtain a Brightcove video ID and rich metadata, then delegates playback to BrightcoveNewIE with a Canada-only geolocation constraint, while exposing title, description, series, season/episode details in the resulting info.

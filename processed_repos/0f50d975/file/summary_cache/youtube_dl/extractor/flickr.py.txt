@@ -1,0 +1,55 @@
+Summary of the Flickr extractor (youtube_dl/extractor/flickr.py)
+
+What it does
+- Extracts video information from Flickr photo pages that are videos.
+- Uses Flickr’s REST API to fetch photo info and streaming details, then builds a standard youtube-dl video dictionary (id, title, description, formats, uploader info, etc.).
+
+Key class and functions
+- FlickrIE(InfoExtractor): Main extractor class.
+  - _VALID_URL: Regex matching Flickr photo URLs that contain a numeric photo id.
+  - _TEST: Example test case with expected metadata (id, ext, title, description, etc.).
+  - _API_BASE_URL: Base URL for Flickr REST API calls.
+  - _LICENSES: Mapping of Flickr license codes to human-readable license strings.
+  - _call_api(self, method, video_id, api_key, note, secret=None):
+    - Builds a Flickr API request for method flickr.{method} with photo_id, api_key, format=json, nojsoncallback=1.
+    - Optionally includes a secret parameter (used for streaming info).
+    - Downloads JSON and raises ExtractorError if stat != 'ok'.
+    - Returns the parsed data.
+  - _real_extract(self, url):
+    - Extracts the Flickr photo id from the URL.
+    - Obtains an API key by querying a non-authenticated Hermes beacon URL and reading site_key.
+    - Retrieves photo info via photos.getInfo.
+    - If media is 'video':
+      - Retrieves stream information via video.getStreamInfo (needs the video secret).
+      - Builds a list of formats from streams['stream']:
+        - Each format has format_id (stream type), url, and a computed preference.
+        - Uses qualities(...) to rank/compare formats.
+      - Sorts formats with _sort_formats.
+      - Builds uploader information (uploader_id, uploader, uploader_url) from photo info owner data.
+      - Returns a dict with:
+        - id, title, description, formats
+        - timestamp (dateuploaded), duration (video duration)
+        - uploader_id, uploader, uploader_url
+        - comment_count, view_count
+        - tags, license (looked up via _LICENSES)
+    - If media is not 'video', raises ExtractorError('not a video', expected=True).
+
+Important implementation details
+- API key retrieval: The extractor fetches an API key from a Flickr beacon endpoint ( Hermes error beacon ) rather than requiring a traditional OAuth flow. It uses the site_key field from the response.
+- API interaction: All Flickr API calls are done via _call_api, which formats requests to Flickr’s REST API (method=flickr.{method}, photo_id, api_key, etc.) and handles JSON responses.
+- Video vs. other media: The extractor explicitly handles only video media; non-video items raise a not-a-video error.
+- Streams handling: Uses video.getStreamInfo to obtain available streams; each stream’s URL is taken from stream['_content'] and the stream type from stream['type'].
+- Formats ranking: Uses a predefined preference order:
+  ['288p', 'iphone_wifi', '100', '300', '700', '360p', 'appletv', '720p', '1080p', 'orig']
+  to assign a preference score for each format.
+- License handling: Flickr license IDs from video_info['license'] are mapped to human-readable license strings via the _LICENSES dict.
+- Uploader information: Builds uploader URL as https://www.flickr.com/photos/{path_alias or nsid}/ if available.
+- Returned metadata: Includes id, title, description, timestamp, duration, uploader info, counts (comments, views), tags, and license.
+
+Output
+- On success, returns a video info dictionary compatible with youtube-dl’s standard extractor output, including:
+  - id, title, description, formats, timestamp, duration, uploader_id, uploader, uploader_url, comment_count, view_count, tags, license, etc.
+
+Notes
+- The _TEST entry expects an mpg extension, which reflects Flickr’s stream-derived file type for the sample.
+- The code is designed specifically for Flickr video objects accessed through Flickr’s backend API, not for Flickr photos that are images.

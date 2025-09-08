@@ -1,0 +1,87 @@
+Below is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/toutv.py.
+
+High-level purpose
+- Implements a YouTube-DL extractor for Tou TV (Radio-Canada) videos by extending the RadioCanadaIE base extractor.
+- Retrieves video metadata from TouTV’s API, handles optional user login to access protected content, and constructs a standard YouTube-DL info dictionary including streaming formats via the parent logic.
+
+Key classes and constants
+- TouTvIE (class)
+  - Inherits from RadioCanadaIE, reusing common Radio-Canada extraction utilities.
+  - _NETRC_MACHINE = 'toutv' (credentials store name)
+  - IE_NAME = 'tou.tv'
+  - _VALID_URL = regex matching TouTV video pages and capturing an id/path segment
+  - _CLIENT_KEY: a client identifier used when calling TouTV Radio-Canada APIs
+
+-_TESTS
+- Provides sample URLs and expected extracted information to verify behavior, including:
+  - A typical episode page with expected id, title, description, and upload_date, and an instruction to skip download (m3u8).
+  - Two other URLs that should only be matched (only_matching).
+
+Key methods
+
+1) _real_initialize(self)
+- Optional login flow:
+  - Reads login credentials via self._get_login_info().
+  - If credentials are provided, performs a login request to:
+    https://services.radio-canada.ca/toutv/profiling/accounts/login
+  - Request payload includes:
+    - ClientId (self._CLIENT_KEY)
+    - ClientSecret (static UUID)
+    - Email, Password (from user)
+    - Scope
+  - Request headers include:
+    - Authorization: 'client-key ' + self._CLIENT_KEY
+    - Content-Type: application/json;charset=utf-8
+  - On success, stores the access token in self._access_token (from the response's access_token field).
+  - If a 401 error occurs, extracts the error message from the response and raises an ExtractorError with that message (friendly error for bad credentials).
+  - After login (whether or not login was attempted), fetches user claims via self._call_api('validation/v2/getClaims') and stores them in self._claims.
+- Overall, this enables access to protected content when valid credentials are provided.
+
+2) _real_extract(self, url)
+- Extracts the TouTV video id/path with self._match_id(url).
+- Retrieves metadata from:
+  https://services.radio-canada.ca/toutv/presentation/{path}
+  with query parameters:
+  - client_key: self._CLIENT_KEY
+  - device: 'web'
+  - version: 4
+- DRM handling:
+  - If metadata.get('IsDrm') is truthy, issues a warning that the video is probably DRM protected (noting a known nuance that IsDrm does not always imply DRM protection per a linked issue).
+- Core data extraction:
+  - video_id = metadata['IdMedia']
+  - details = metadata['Details']
+  - Builds a base info dict with fields:
+    - id: video_id
+    - title: details.get('OriginalTitle')
+    - description: details.get('Description')
+    - thumbnail: details.get('ImageUrl')
+    - duration: int_or_none(details.get('LengthInSeconds'))
+    - series: metadata.get('ProgramTitle')
+    - season_number: int_or_none(metadata.get('SeasonNumber'))
+    - season: metadata.get('SeasonTitle')
+    - episode_number: int_or_none(metadata.get('EpisodeNumber'))
+    - episode: metadata.get('EpisodeTitle')
+  - Merges this base dict with the result of:
+    self._extract_info(metadata.get('AppCode', 'toutv'), video_id)
+    (where _extract_info is provided by the parent class and returns additional information such as streaming formats/urls based on app code and video id)
+- Returns the merged dictionary as the final info dict for Youtube-DL.
+
+Important implementation details
+- The extractor relies on the RadioCanadaIE infrastructure for common helpers:
+  - _download_json for API calls
+  - _call_api for authenticated API access
+  - _extract_info for building streaming formats from AppCode and video id
+  - _parse_json, report_warning, int_or_none, and merge_dicts utilities
+- The login flow uses a hard-coded ClientSecret and a specific ClientId (CLIENT_KEY). If login succeeds, an access token is stored for subsequent authenticated requests.
+- The final metadata includes both high-level episode information (title, description, duration, series/season/episode) and streaming-related data derived from AppCode via _extract_info.
+- The code gracefully handles non-logged-in scenarios (no credentials) by skipping the login step and proceeding with public data retrieval.
+- The _VALID_URL indicates the extractor targets TouTV URLs like http(s)://ici.tou.tv/{path}, where path may include season/episode structure such as S2015E17.
+- The _TESTS include a 404/Not Found skip scenario for one URL and ensure only_matching is respected for non-video pages.
+
+In summary
+- This file implements a TouTV video extractor that:
+  - Optionally authenticates with user credentials to access protected content
+  - Fetches and parses detailed metadata from TouTV’s presentation API
+  - Warns on potentially DRM-protected content
+  - Builds a comprehensive info dict with basic metadata plus streaming information supplied by the parent class
+  - Uses a consistent client_key-based API flow and handles errors gracefully.

@@ -1,0 +1,20 @@
+Concise summary of the code in ./youtube-dl/test/test_netrc.py
+
+- Purpose: A unit test that ensures any extractor which supports login via credentials also declares a netrc machine identifier.
+
+- Key components:
+  - TestNetRc (subclass of unittest.TestCase)
+  - test_netrc_present: test method that iterates over all extractors provided by gen_extractors()
+  
+- Core logic:
+  - For each extractor (ie) returned by gen_extractors():
+    - If the extractor does not define a _login attribute, it is skipped.
+    - If _login is present, the test asserts that the extractor also defines a _NETRC_MACHINE attribute.
+    - If _NETRC_MACHINE is missing, the assertion fails with a message indicating the extractor’s IE_NAME.
+
+- Important implementation details:
+  - sys.path is adjusted to include the repository root so modules can be imported during tests.
+  - Uses Python 2/3 compatible unicode_literals future import.
+  - The test is executed via the standard unittest main entry point when run as a script.
+
+- Context: This is part of youtube-dl’s test suite to enforce that login-capable extractors provide a netrc machine configuration for credentials management.

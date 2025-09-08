@@ -1,0 +1,90 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/nextmedia.py
+
+Purpose
+- Provides YouTube-DL extractors for NextMedia family sites (Apple Daily HK/TW and NextTV), extracting video metadata and direct video URLs from news articles and video pages.
+
+Key classes
+- NextMediaIE
+  - Base extractor for NextMedia HK Apple Daily content.
+  - _VALID_URL: matches HK Apple Daily NextMedia articles: hk.apple.nextmedia.com/.../<date>/<id>.
+  - _URL_PATTERN: extracts a direct video URL embedded in the page as a JavaScript object: { url: '...' }.
+  - _real_extract: downloads the article page and delegates to _extract_from_nextmedia_page.
+  - _extract_from_nextmedia_page(news_id, url, page):
+    - Checks for a redirection set by a script: window.location.href = '...'. If found, returns a redirection to that URL.
+    - Otherwise, collects:
+      - title via _fetch_title (OG title by default)
+      - video URL via _URL_PATTERN
+      - thumbnail via _fetch_thumbnail (OG thumbnail)
+      - description via _fetch_description (OG description)
+      - timestamp via _fetch_timestamp (parses dateCreated in JSON if present)
+      - upload_date via _fetch_upload_date(url) if no timestamp
+    - Returns a dict with id, title, url, thumbnail, description, and either timestamp or upload_date (and possibly other fields).
+  - Helper fetchers:
+    - _fetch_title: uses OG title
+    - _fetch_thumbnail: uses OG thumbnail
+    - _fetch_timestamp: extracts "dateCreated" and parses ISO8601
+    - _fetch_upload_date: derives date from URL using _VALID_URL’s date group
+    - _fetch_description: uses OG description
+
+- NextMediaActionNewsIE
+  - Subclass of NextMediaIE for Apple Daily “Action News” videos.
+  - IE_DESC: 蘋果日報 - 動新聞
+  - _VALID_URL: matches hk.dv.nextmedia.com/actionnews/.../<date>/<id>/...
+  - _TESTS: includes sample Action News URLs and expected metadata
+  - _real_extract:
+    - Downloads the Action News page, finds the article URL via og:url, downloads the article page, then calls the common extractor (_extract_from_nextmedia_page) with that article page.
+  - Rationale: Action News pages point to a separate article page that contains the actual video/player; reuse the shared extraction logic.
+
+- AppleDailyIE
+  - Subclass of NextMediaIE for Taiwan Apple Daily.
+  - IE_DESC: 臺灣蘋果日報
+  - _VALID_URL: matches multiple Taiwan Apple Daily URL patterns (www/ent domain variants) with date and id captured.
+  - _TESTS: extensive set of examples (various article layouts, redirects, and a case with no thumbnail).
+  - _URL_PATTERN: same as NextMedia (extract embedded video URL from page)
+  - Overridden fetchers for site specifics:
+    - _fetch_title: tries an H1 with id="h1" first, falls back to meta description.
+    - _fetch_thumbnail: extracts image via setInitialImage('...'), not fatal if missing.
+    - _fetch_timestamp: returns None (Taiwan Apple Daily pages may not expose a clean dateCreated field)
+    - _fetch_description: uses meta description
+  - Inherits _real_extract and _extract_from_nextmedia_page from NextMediaIE; uses the overridden fetchers to adapt to the Apple Daily TW page structure.
+  - Note: some tests expect redirects to http://www.appledaily.com.tw/animation/ and a couple of matching/redirect cases are marked accordingly.
+
+- NextTVIE
+  - Separate extractor for NextTV site.
+  - IE_DESC: 壹電視
+  - _VALID_URL: matches nexttv.com.tw URLs that end with an article id.
+  - _TEST: includes a sample with id, title, thumbnail, timestamp, upload_date, and view_count.
+  - _real_extract:
+    - Extracts video_id from URL
+    - Downloads the page and pulls the title with a simple regex on an H1 tag
+    - Reads hidden form inputs via _hidden_inputs(page) to obtain:
+      - ntv-vod-src-detailview: direct video URL
+      - ntv-vod-img-src: thumbnail
+    - Reads date from an element with class "date" and builds a timestamp with unified_timestamp
+    - Reads view count from an element with class "click" and strips the "點閱：" prefix
+    - Returns a dict with id, title, url, thumbnail, timestamp, and view_count
+
+Implementation details and patterns
+- Redirection handling: NextMediaIE checks for a JavaScript-based redirection in the page (window.location.href = '...') and, if found, returns a URL result pointing to the redirected URL.
+- Video URL extraction: Many pages embed the actual video URL in a JavaScript object like { url: '...' }. The extractor uses _URL_PATTERN to capture this value.
+- Title/description/thumbnail: Uses a mix of Open Graph tags (_og_search_title, _og_search_description, _og_search_thumbnail) and site-specific fallbacks (_fetch_title for Apple Daily TW, HTML meta tags for description).
+- Timestamps and dates:
+  - HK NextMedia: dateCreated in page JSON parsed to a Unix timestamp; if unavailable, derives upload_date from the URL date segment.
+  - Taiwan Apple Daily: _fetch_timestamp returns None; upload_date is used if no timestamp.
+  - NextTV: uses page elements to extract a date string, then unified_timestamp with a +0800 offset.
+- Robustness/fallbacks:
+  - Thumbnail extraction in AppleDailyIE is non-fatal when missing (fatal=False) to allow extraction to continue even if the thumbnail is not present.
+  - Some tests expect warnings (e.g., missing video thumbnail) which are surfaced by the extractor when necessary.
+- Tests: Each extractor class includes _TESTS with representative URLs, expected metadata, and sometimes skip or redirect expectations to ensure correctness.
+
+Files and flow
+- All extractors live in the same module (NextMedia family) and share common infrastructure from InfoExtractor, including page downloading, regex helpers, and OG/meta extraction utilities.
+- The design emphasizes reuse: NextMediaIE provides common extraction logic, while AppleDailyIE and NextMediaActionNewsIE adapt that logic to specific site layouts; NextTVIE implements its own extraction path due to different HTML/metadata structure.
+
+In short
+- This file implements four extractors for NextMedia-origin content:
+  - NextMediaIE for HK Apple Daily pages
+  - NextMediaActionNewsIE for Action News videos (reuses NextMediaIE extraction on the article page)
+  - AppleDailyIE for Taiwan Apple Daily pages (with site-specific fetchers)
+  - NextTVIE for NextTV videos (standalone extraction using hidden inputs and page elements)
+- Key aspects include handling of in-page video URLs, redirections, OG metadata parsing, and date/timestamp extraction across the different site variants.

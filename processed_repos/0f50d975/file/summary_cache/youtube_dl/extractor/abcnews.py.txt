@@ -1,0 +1,53 @@
+Here's a concise, high-level summary of the code in youtube-dl/youtube_dl/extractor/abcnews.py:
+
+Main purpose
+- Provide two extractors for ABC News content:
+  - AbcNewsVideoIE: extracts individual ABC News video items (via AMP/AMP-HTML feed).
+  - AbcNewsIE: extracts ABC News story pages and builds a playlist of embedded/inlined videos, leveraging AbcNewsVideoIE for video entries.
+
+Key classes and their roles
+- AbcNewsVideoIE (inherits AMPIE)
+  - IE_NAME: 'abcnews:video'
+  - _VALID_URL: robust regex to match:
+    - abcnews.go.com/.../video/<display_id>-<id>
+    - abcnews.go.com/video/embed?id=<id> or itemfeed
+    - fivethirtyeight.abcnews.go.com/video/embed/<id>/
+  - _real_extract(url):
+    - Extracts display_id and id from the URL.
+    - Fetches video feed info via _extract_feed_info('http://abcnews.go.com/video/itemfeed?id=<video_id>').
+    - Returns the info dict augmented with id and display_id.
+  - Important behavior:
+    - Delegates to the AMP/AMP-EP feed logic via AMPIE for actual media formats (often mp4/m3u8).
+
+- AbcNewsIE (inherits InfoExtractor)
+  - IE_NAME: 'abcnews'
+  - _VALID_URL: matches ABC News story URLs of the form:
+    - https://abcnews.go.com/.../<display_id>/story?id=<id>
+  - _real_extract(url):
+    - Downloads the story page and extracts a JSON blob from window['__abcnews__'] containing the story data.
+    - story = first item of the everscroll array; article_contents = story['articleContents'] or {}.
+    - entries() generator:
+      - featured_video: if present, yields a URL-type entry pointing at the featured video feed:
+        - id, title, url (feed), thumbnail, description, timestamp, duration
+        - ie_key set to AbcNewsVideoIE.ie_key() so this entry will be processed by AbcNewsVideoIE
+      - inline videos/iframes:
+        - iframe: yield a simple URL result to the iframe source
+        - video: yield a URL-type entry with id, url 'http://abcnews.go.com/video/embed?id=<id>', thumbnail, description, duration, and ie_key for AbcNewsVideoIE
+    - Returns a playlist_result constructed from entries(), with story_id as the playlist id and article_contents['headline'] / ['subHead'] as title/description.
+  - Important behavior:
+    - Builds a composite playlist from a story page, including the featured video and any inline videos/iframes.
+    - Uses AbcNewsVideoIE for actual video items to fetch the detailed media info.
+
+Key implementation details
+- JSON parsing: The code reads a JSON blob embedded in the page via window['__abcnews__'] and navigates to story['everscroll'][0] to access content.
+- Safe access: Uses try_get to safely extract nested fields.
+- Date/time and duration: Uses parse_iso8601 and parse_duration to normalize timestamps and durations.
+- Video entry construction: For embedded/inline videos, the code creates entries with proper _type, id, URL, thumbnail, description, duration, and a specific ie_key to route to AbcNewsVideoIE when needed.
+- AMP integration: AbcNewsVideoIE extends AMPIE, indicating support for AMP-based video feeds and formats (common in ABC News video delivery).
+- Tests cover:
+  - A typical video feed extraction (including mp4 output and metadata like title, description, duration, timestamp, etc.).
+  - several only_matching cases to ensure correct URL pattern matching.
+
+In short
+- AbcNewsVideoIE handles individual video feeds from ABC News video pages using the itemfeed URL.
+- AbcNewsIE handles ABC News story pages, builds a playlist from the story content (featured video and inlines), and delegates actual video item extraction to AbcNewsVideoIE where appropriate.

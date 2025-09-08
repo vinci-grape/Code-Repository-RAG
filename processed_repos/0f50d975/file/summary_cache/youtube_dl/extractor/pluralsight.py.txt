@@ -1,0 +1,117 @@
+Summary of ./youtube-dl/youtube_dl/extractor/pluralsight.py
+
+Overview
+- This module implements Pluralsight extractors for youtube-dl: a per-clip extractor (PluralsightIE) and a course-wide playlist extractor (PluralsightCourseIE), both built on a shared base (PluralsightBaseIE).
+- It accesses Pluralsight data via GraphQL endpoints with a fallback to an older payload API. It supports login (to access certain clips) and subtitle extraction, including converting captions to SRT.
+
+Key components
+- PluralsightBaseIE
+  - Base class for Pluralsight extractors.
+  - API endpoints and GraphQL:
+    - _API_BASE: https://app.pluralsight.com
+    - _GRAPHQL_EP: https://app.pluralsight.com/player/api/graphql
+    - _GRAPHQL_HEADERS: JSON content type for GraphQL requests
+    - _GRAPHQL_COURSE_TMPL: GraphQL query template to bootstrap a course (course name, modules, clips, captions, etc.)
+  - _download_course(course_id, url, display_id)
+    - Tries RPC-based fetch via _download_course_rpc; if that fails (ExtractorError), falls back to an older API payload endpoint: /player/payload with courseId in POST data.
+  - _download_course_rpc(course_id, url, display_id)
+    - Sends GraphQL request to bootstrap the course.
+    - Extracts course data from response['data']['rpc']['bootstrapPlayer']['course'].
+    - If not found, raises ExtractorError with the error message from the GraphQL response.
+- PluralsightIE (single-clip extractor)
+  - IE_NAME: pluralsight
+  - _VALID_URL: matches pluralsight player URLs that point to a specific clip
+  - _LOGIN_URL: login page for authorizing access
+  - _NETRC_MACHINE: pluralsight (for credentials from .netrc)
+  - _GRAPHQL_VIEWCLIP_TMPL: GraphQL query to fetch clip URLs for a given clip/quality, including caption/cdn data
+  - _real_initialize()
+    - Calls _login() to perform user authentication if credentials are provided.
+  - _login()
+    - Reads credentials from _get_login_info().
+    - Loads login page, fills form with Username/Password, submits.
+    - Checks for login errors or block/agreement prompts; raises ExtractorError with helpful messages if login fails.
+  - _get_subtitles(author, clip_idx, clip_id, lang, name, duration, video_id)
+    - Tries to fetch captions JSON via:
+      - If clip_id available: /transcript/api/v1/caption/json/{clip_id}/{lang}
+      - Otherwise: POST to /player/retrieve-captions with author, clip, course, language, and clip name
+    - If captions are found, returns a dict with:
+      - lang: list of two items
+        - {'ext': 'json', 'data': json.dumps(captions)}
+        - {'ext': 'srt', 'data': self._convert_subtitles(duration, captions)}
+  - _convert_subtitles(duration, subs) (static)
+    - Converts caption data to SRT format.
+    - Reads timestamps from displayTimeOffset(DisplayTimeOffset) and text from Text/Text.
+    - Builds SRT blocks with proper timecodes using srt_subtitles_timecode.
+    - Returns concatenated SRT string.
+  - _real_extract(self, url)
+    - Parses query string to extract author, name, clip, course.
+    - Validates required fields; builds display_id as "name-clip".
+    - Loads course data via _download_course(course_name, url, display_id).
+    - Locates the clip in course modules by matching module name and clipIndex (or index/clipName fallbacks).
+    - Builds a title and clip_id from the selected clip.
+    - Quality/format handling:
+      - Defines QUALITIES: low/640x480, medium/848x640, high/1024x768, high-widescreen/1280x720
+      - QUALITIES_PREFERENCE order for mapping via qualities()
+      - ALLOWED_QUALITIES: (webm high), (mp4 low/medium/high)
+      - If widescreen supported by course, extend allowed qualities to include best_quality (high-widescreen) for relevant ext types
+      - If not requesting formats list (default), try to guess allowed qualities from requested format. If a specific ext/quality is requested, keep only that; otherwise choose defaults (webm unless free formats preferred, else mp4) with best_quality
+    - For each allowed (ext, qualities) and for each quality:
+      - Build clip_post with author, courseName, moduleName, etc., and mediaType/ext, quality string
+      - Try to fetch viewclip data via GraphQL (_GRAPHQL_EP) with GRAPHQL_VIEWCLIP_TMPL
+      - If GraphQL call fails, fall back to legacy endpoint: /video/clips/viewclip
+      - Sleep randomly 5-10 seconds before each request to reduce throttling risk
+      - If viewclip contains 'urls' (list), iterate URLs and build format entries:
+        - url, ext, format_id (including CDN if present), quality (mapped via quality_key), source_preference (rank)
+        - Append to formats
+    - After gathering formats, sort them via self._sort_formats(formats)
+    - duration: derived from clip['duration'] or clip['formattedDuration']
+    - subtitles: obtain via _get_subtitles(...)
+    - Return dict with id, title, duration, creator, formats, subtitles
+- PluralsightCourseIE (course playlist extractor)
+  - IE_NAME: pluralsight:course
+  - _VALID_URL matches course URLs
+  - _TESTS: includes a test for a free course (playlist of 31 clips) and a couple of matching URL tests
+  - _real_extract(self, url)
+    - Extracts course_id from URL
+    - Fetches course data via _download_course(course_id, url, course_id)
+    - title = course['title'], course_name = course['name'], course_data = course['modules'], description from course
+    - Builds a list of entries by iterating modules and clips:
+      - For each module, require author and module name
+      - For each clip, determine clip_index
+      - Build a transparent URL pointing to the clip player: /player?mode=live&course={course_name}&author={author}&name={module_name}&clip={clip_index}, and wrap it as a url_transparent entry
+      - Each entry uses:
+        - _type: 'url_transparent'
+        - url: constructed clip URL
+        - ie_key: PluralsightIE
+        - chapter, chapter_number, chapter_id for module metadata
+    - Return a playlist via self.playlist_result(entries, course_id, title, description)
+
+Important implementation details
+- GraphQL usage centralized:
+  - Bootstrap course data via _GRAPHQL_COURSE_TMPL to discover modules and clips.
+  - View clip data via _GRAPHQL_VIEWCLIP_TMPL to obtain available URLs per format/quality.
+- Fallback mechanism:
+  - If GraphQL RPC fails for a course, falls back to the older payload API: /player/payload
+  - For clip URL retrieval, falls back from GraphQL viewclip to legacy /video/clips/viewclip when needed.
+- Throttling protection:
+  - Introduces random sleeps (5–10 seconds) before each viewclip request to reduce throttling/ban risk.
+- Subtitles support:
+  - Tries clip-specific captions via /transcript/api/... if clipId is available.
+  - Falls back to a transcript endpoint that returns JSON, then converts to SRT with _convert_subtitles.
+  - Returns both JSON and SRT subtitle formats when captions exist.
+- Quality and formats:
+  - Supports multiple qualities with explicit mappings to resolutions.
+  - Considers widescreen support and dynamically extends available formats when supported by the course.
+  - Attempts to minimize requests by default (only best format) unless listformats is requested.
+  - Tracks per-format data including CDN, rank, and source preference.
+- Login handling:
+  - Optional login support via _login(); uses credentials from _get_login_info() (usually from netrc or user input).
+  - Robust error checks for login failures, blocks, and consent prompts.
+- Data extraction:
+  - When extracting a clip, it resolves the correct clip in the course by matching module/clip indices and IDs.
+  - Returns a structured dict with id, title, duration, creator, formats, and subtitles.
+- Playlists:
+  - Course extractor composes a playlist of all clips by creating transparent URLs that delegate to the single-clip extractor, enabling reuse of the clip logic and consistent metadata (chapters, numbers).
+
+In short
+- The file provides a robust Pluralsight integration for youtube-dl with two entry points: a per-clip extractor (PluralsightIE) that fetches and formats multiple video qualities, supports captions, and handles login; and a course extractor (PluralsightCourseIE) that enumerates modules and clips to produce a playlist of all clips, leveraging the per-clip extractor for individual items. It uses GraphQL endpoints primarily, includes a fallback path, implements throttling safeguards, and includes subtitle handling and quality-aware format selection.

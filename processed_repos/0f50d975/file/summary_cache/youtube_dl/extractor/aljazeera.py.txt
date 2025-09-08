@@ -1,0 +1,51 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/aljazeera.py
+
+- Purpose
+  - An InfoExtractor for Al Jazeera pages that redirects to Brightcove video players used by Al Jazeera, extracting video details and providing a BrightcoveNew URL for playback.
+
+- Key class
+  - AlJazeeraIE (inherits from InfoExtractor)
+
+- URL matching and types
+  - _VALID_URL regex captures two parts:
+    - type: program/episode, features, or videos (e.g., program/episode or features)
+    - id: the article/video slug
+  - For internal processing, the first part is normalized to post_type via:
+    - 'features' -> 'post'
+    - 'program'  -> 'episode'
+    - 'videos'   -> 'video'
+  - This is done by taking the first segment before the slash from the matched type and mapping accordingly.
+
+- Core functionality (_real_extract)
+  - Extractors the post_type and name from the URL using the _VALID_URL regex.
+  - Performs a GraphQL request to https://www.aljazeera.com/graphql with:
+    - operationName: SingleArticleQuery
+    - variables: JSON payload containing 'name' and 'postType'
+  - Request header includes 'wp-site': 'aje'
+  - Extracts video information from the response at data.article.video
+  - Retrieves video_id, accountId (default: '665003303001'), and playerId (default: 'BkeSH5BDb')
+  - Builds a Brightcove URL using BRIGHTCOVE_URL_TEMPLATE with account_id, player_id, and video_id
+  - Returns a URL result pointing to the BrightcoveNew extractor with the video_id
+
+- Brightcove integration
+  - Uses a Brightcove player URL template:
+    http://players.brightcove.net/{account_id}/{player_id}_default/index.html?videoId={video_id}
+  - The final extracted item is handled by the BrightcoveNew extractor
+
+- Tests (_TESTS)
+  - Test case for a program/episode URL expecting:
+    - id: 3792260579001
+    - ext: mp4
+    - title, description, uploader_id, timestamp, upload_date
+  - Declares 'add_ie': ['BrightcoveNew'] indicating the final extraction is delegated to BrightcoveNew
+  - Includes skip condition for Travis CI server
+  - Additional test entries use only_matching for other Al Jazeera pages to verify URL matching
+
+- Important implementation details
+  - Uses a GraphQL call to fetch the video data rather than parsing HTML.
+  - Provides sensible fallbacks for accountId and playerId if the GraphQL response omits them.
+  - The final media URL is handed off to BrightcoveNew, implying the actual video host is Brightcove.
+  - The code is designed to handle multiple Al Jazeera content types (features, program/episode, videos) through a unified GraphQL path.
+
+- Summary
+  - This extractor maps Al Jazeera URLs to a Brightcove video resource by querying a GraphQL API, then returns a BrightcoveNew URL for playback, with basic metadata derived from the GraphQL response.

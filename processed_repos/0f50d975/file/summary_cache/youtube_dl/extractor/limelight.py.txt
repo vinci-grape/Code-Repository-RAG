@@ -1,0 +1,102 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/limelight.py
+
+Purpose
+- Implement YouTube-DL extractors for Limelight-based players used by services like 3Play Media and Delve networks.
+- Support individual media items, channels, and channel lists by querying a Limelight PlaylistService backend and assembling playable formats and metadata.
+
+Key classes
+- LimelightBaseIE (InfoExtractor)
+  - Core utilities and shared logic for Limelight extractors.
+  - _PLAYLIST_SERVICE_URL: base URL for the PlaylistService API.
+  - _extract_urls(webpage, source_url): scans a page for Limelight references and builds initial URL results.
+    - Parses:
+      - JavaScript loads: LimelightPlayer.doLoad(Media|Channel|ChannelList) with a 32-char ID.
+      - Embedded object tags containing LimelightEmbeddedPlayerFlash and flashVars with MediaId/ChannelId/ChannelListId.
+      - LimelightPlayerUtil.embed calls with mediaId.
+    - Produces url_result entries like limelight:media:<id>, limelight:channel:<id>, limelight:channel_list:<id>.
+    - Uses smuggle_url to attach source_url for geo/cross-origin handling.
+  - _call_playlist_service(item_id, method, fatal=True, referer=None): fetches JSON from the PlaylistService.
+    - Optional Referer header.
+    - Handles 403 errors specially: if the JSON payload indicates contentAccessPermission, translates into geo-restriction errors or user-friendly messages.
+  - _extract(item_id, pc_method, mobile_method, referer=None): fetches both PC (playlist) and mobile playlists, returning (pc, mobile).
+  - _extract_info(pc, mobile, i, referer): builds a single video entry’s info from the PC/mobile data.
+    - Deduce video_id and title from either PC or mobile data.
+    - Build a list of formats from:
+      - PC item streams: skip missing URLs or DRM-protected items.
+        - If URL ext is f4m: use _extract_f4m_formats (HDS) with fatal=False.
+        - Otherwise, build a format dict with:
+          - url, abr (audio bitrate), fps, ext
+          - width/height/vbr if provided; otherwise vcodec='none'
+        - If an RTMP URL is detected, attempt to map to an HTTP URL via known CDN hosts and add a corresponding HTTP format if valid.
+        - Always add an RTMP format with url, play_path, app, ext='flv', format_id (e.g., 'rtmp' or 'rtmp-<bitrate>').
+      - Mobile item mobileUrls: handle m3u8, f4m, and direct URLs.
+        - m3u8: _extract_m3u8_formats (native, mp4, m3u8_native) with proper IDs.
+        - f4m: _extract_f4m_formats
+        - Others: add basic format with url, format_id, and ext.
+    - Sort formats (_sort_formats).
+    - Subtitles: if ClosedCaptions flag present, fetch details via getClosedCaptionsDetailsByMediaId and collect per-language VTT URLs.
+    - Metadata: id, title; description from either PC or mobile data; duration (ms to seconds); thumbnail; subtitles.
+  - Geo handling: _initialize_geo_bypass is used to allow limited geo-unblock if source_url carries geo data.
+
+- LimelightMediaIE (LimelightBaseIE)
+  - IE_NAME = 'limelight'
+  - _VALID_URL matches either:
+    - limelight:media:<id>
+    - typical HTTP URLs containing mediaId= in /media/ or a Delve loader SWF URL.
+  - _PLAYLIST_SERVICE_PATH = 'media'
+  - _real_extract(url):
+    - unsmuggle_url to recover source_url and id.
+    - Initialize geo bypass with any country restrictions carried in the smuggled data.
+    - Call _extract(video_id, 'getPlaylistByMediaId', 'getMobilePlaylistByMediaId', source_url).
+    - Return the result of _extract_info(pc, mobile, 0, source_url).
+
+- LimelightChannelIE (LimelightBaseIE)
+  - IE_NAME = 'limelight:channel'
+  - _VALID_URL matches limelight:channel:<id> or channelId in typical Limelight URLs.
+  - _PLAYLIST_SERVICE_PATH = 'channel'
+  - _real_extract(url):
+    - unsmuggle_url; extract channel_id and source_url.
+    - Call _extract(channel_id, 'getPlaylistByChannelId', 'getMobilePlaylistWithNItemsByChannelId?begin=0&count=-1', source_url).
+    - For each item in pc['playlistItems'], call _extract_info and collect results.
+    - Return playlist_result(entries, channel_id, pc.get('title'), mobile.get('description')).
+
+- LimelightChannelListIE (LimelightBaseIE)
+  - IE_NAME = 'limelight:channel_list'
+  - _VALID_URL matches limelight:channel_list:<id> or channelListId in typical Limelight URLs.
+  - _PLAYLIST_SERVICE_PATH = 'channel_list'
+  - _real_extract(url):
+    - channel_list_id = matched id.
+    - Get mobile channel list via getMobileChannelListById.
+    - Build entries as a list of LimelightChannel entries: limelight:channel:<id> for each channel in channelList.
+    - Return playlist_result(entries, channel_list_id, channel_list['title']).
+
+Important implementation details
+- URL discovery and linking:
+  - _extract_urls scans both JavaScript-based loads and traditional HTML object/flash embeddings to discover Limelight IDs.
+  - Uses smuggle_url/unsmuggle_url to preserve and retrieve the original source URL for geo checks.
+- PlaylistService integration:
+  - The base URL is http://production-ps.lvp.llnw.net/r/PlaylistService/<path>/<id>/<method>.
+  - _call_playlist_service handles JSON retrieval with error handling for access/geo issues (CountryDisabled triggers geo restrictions).
+- Formats handling:
+  - Supports multiple formats from PC (playlist) streams and mobile streams.
+  - Handles:
+    - Regular HTTP(S) video URLs
+    - RTMP URLs with host mapping to HTTP endpoints for some CDNs (delvenetworks.com and video.llnw.net) when possible.
+    - HDS (f4m) and HLS (m3u8) formats with appropriate extractors (_extract_f4m_formats, _extract_m3u8_formats).
+  - Deduplicates streams, skips DRM-protected URLs, and handles missing URLs gracefully.
+  - RTMP formatting includes format_id construction and cross-format compatibility with HTTP alternatives where available.
+- Subtitles:
+  - If ClosedCaptions are present, fetches details via the PlaylistService and collects WebVTT URLs per language.
+  - Builds a subtitles dict keyed by language codes.
+- Metadata extraction:
+  - Video title and description come from either PC (playlistItems) or mobile data.
+  - duration is converted from milliseconds to seconds.
+  - thumbnail URL is taken from mobile or PC metadata.
+- Geo-restriction handling:
+  - Geo bypass is initialized using source_url-provided geo data.
+  - If PlaylistService returns a 403 with CountryDisabled, a geo-restriction error is raised.
+- Tests and entry points:
+  - Tests cover sample media URLs, channel URLs, and a loader SWF URL that should match but not necessarily extract content.
+
+In short
+- This file provides a cohesive Limelight extractor with a shared base class that handles URL discovery, PlaylistService API calls, format extraction (including RTMP, HDS, HLS), subtitles, and metadata. It exposes three entry points for media, channel, and channel list, each backed by the same core logic but targeting different PlaylistService endpoints and data structures.

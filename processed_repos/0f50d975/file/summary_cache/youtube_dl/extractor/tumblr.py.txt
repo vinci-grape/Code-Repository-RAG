@@ -1,0 +1,72 @@
+Summary of ./youtube-dl/youtube_dl/extractor/tumblr.py
+
+Purpose
+- Implement a Tumblr video post extractor (TumblrIE) for youtube-dl.
+- Retrieve video metadata and available video formats from Tumblr video posts that embed video players via Tumblr’s iframe system.
+- Supports optional login to handle content restricted by Tumblr accounts and can delegate to other extractors for certain posts (via add_ie in tests).
+
+Main components
+- TumblrIE class (subclass of InfoExtractor)
+  - _VALID_URL: Regex for Tumblr blog video posts. Captures blog_name and post id.
+  - _NETRC_MACHINE and _LOGIN_URL: Configure netrc login machine and Tumblr login URL.
+  - _TESTS: Predefined test cases for various Tumblr posts, including cases that should be parsed by other extractors (Vidme, Vimeo, Vine, Instagram).
+
+Key methods and workflow
+- _real_initialize(self)
+  - Invokes self._login() to establish a session if credentials are provided.
+
+- _login(self)
+  - Fetches login credentials via self._get_login_info().
+  - If credentials exist, downloads the Tumblr login page, builds a form from hidden inputs, fills in user[email] and user[password], and submits it.
+  - If redirect after login contains '/dashboard', login succeeded.
+  - If not, tries to extract login errors from the response; raises ExtractorError on failure and otherwise warns that login probably failed.
+
+- _real_extract(self, url)
+  - Parses the URL with _VALID_URL to obtain video_id and blog.
+  - Reconstructs a canonical post URL: http://{blog}.tumblr.com/post/{video_id}/
+  - Downloads the post page and follows to get the final redirect URL.
+  - Safe mode handling: if Tumblr redirects to safe-mode, raise ExtractorError with guidance to disable safe mode.
+  - iframe_url extraction: looks for an iframe src pointing to a Tumblr video URL. If not found, falls back to the redirect URL using the Generic extractor.
+  - Downloads the iframe page.
+
+Video sources extraction
+- SD source: Looks for a <source> tag with a src attribute inside the iframe and adds the URL as an 'sd' format.
+- HD source: Tries to read a JSON-like data-crt-options attribute from the iframe (data-crt-options). If present, extracts duration and hdUrl; if hdUrl exists, adds it as an 'hd' format.
+- formats construction: Builds a list of format dictionaries with:
+  - url: video URL
+  - ext: 'mp4'
+  - format_id: a label ('sd', 'hd', etc.)
+  - height: parsed from the URL path if present (by matching /(\d{3,4})$)
+  - quality: index-based ranking (using enumerate over sources)
+- _sort_formats(formats): Sorts formats by quality/size rules for proper selection order.
+
+Metadata extraction
+- video_title: Extracted from the HTML <title> tag using a regex (captures before a trailing " | Tumblr" if present).
+- description: Retrieved via og:description from the page.
+- thumbnail: Retrieved via og:thumbnail from the page.
+- duration: Derived from the data-crt-options JSON (if present).
+- Other fields returned: id (video_id), title, description, thumbnail, duration, formats.
+
+Fallbacks and edge cases
+- If iframe URL cannot be found, returns the redirect URL as a Generic extractor result.
+- If safe-mode redirect detected, raises a user-visible ExtractorError with instructions to disable safe mode.
+- Handles missing data gracefully (e.g., optional duration or hdUrl).
+
+Implementation details of note
+- Regexes are narrowly targeted to Tumblr’s post/iframe structure:
+  - _VALID_URL enforces blog.tumblr.com/post/{id}
+  - iframe_url regex targets src attributes containing https://www.tumblr.com/video/...
+  - sd_url is parsed from a <source> tag inside the iframe
+  - data-crt-options is parsed as JSON to obtain duration and hdUrl
+  - Title extraction uses a regex on the page title element
+- Uses helper utilities:
+  - _hidden_inputs to collect hidden form fields for login
+  - urlencode_postdata to prepare login POST data
+  - _download_webpage_handle to capture final redirected URL (for safe-mode checks)
+  - _parse_json and int_or_none for robust type handling
+  - _og_search_description and _og_search_thumbnail for metadata
+- Multi-Extractor support in tests:
+  - Some Tumblr posts are known to embed content that should be handled by other extractors (Vidme, Vimeo, Vine, Instagram). The tests specify add_ie for these cases to ensure proper delegation.
+
+Overall
+- This extractor logs in if credentials are provided, fetches the Tumblr post, locates the embedded video iframe, and assembles available SD/HD video formats from the iframe data. It returns a structured info dictionary with id, title, description, thumbnail, duration, and a list of video formats. It handles safe-mode redirects, provides fallbacks, and includes comprehensive tests demonstrating typical Tumblr video post structures and cross-extractor delegation.

@@ -1,0 +1,41 @@
+Concise summary of ./youtube-dl/youtube_dl/postprocessor/common.py
+
+Purpose
+- Defines the base framework for post-processors used after a download finishes in youtube-dl.
+- Supports chaining multiple post-processors where each processor can transform the information and/or decide which files to delete.
+- Allows optional per-processor command-line configuration via downloader params.
+
+Key components
+
+1) PostProcessor class
+- Purpose: Base class for all post-processors. Instances can be linked to a downloader and participate in a chain of post-processing steps.
+- Main concepts:
+  - Chain execution: After a successful download, the downloader runs the chain of post-processors by calling run() on each processor in sequence. Each run can modify the information dictionary and return a list of files to delete. The chain stops if a processor returns None or the end is reached.
+  - Information parameter: run(information) expects a dictionary similar to those produced by InfoExtractors, with an extra filepath field pointing to the downloaded file.
+  - Return contract: By default, run() returns ([], information), meaning no files deleted and no changes to the information.
+  - Error handling: run() may raise PostProcessingError if post-processing fails.
+
+- Important methods and attributes:
+  - __init__(downloader=None): Stores a reference to the associated downloader.
+  - set_downloader(downloader): Sets the downloader for this post-processor.
+  - run(self, information): Default implementation as described above; intended to be overridden by subclasses.
+  - try_utime(path, atime, mtime, errnote='Cannot update utime of file'): Attempts to update the access/modified times of the given path. Uses encodeFilename(path) and os.utime. On failure, reports a warning via the downloader (self._downloader.report_warning).
+  - _configuration_args(self, default=[]): Retrieves per-post-processor CLI args from the downloader’s parameters using cli_configuration_args(self._downloader.params, 'postprocessor_args', default). This allows post-processors to receive extra configuration from the command line or config.
+
+- Internal mechanics:
+  - _downloader: Class-level attribute initialized to None, then set per-instance in __init__. Used for reporting warnings and accessing params.
+  - encodeFilename: Used to ensure the path is correctly encoded for the filesystem when updating times.
+  - cli_configuration_args and PostProcessingError: Imported from youtube-dl utilities to support configuration and error handling.
+
+2) AudioConversionError class
+- Defined as a specific exception type: class AudioConversionError(PostProcessingError): pass
+- Intended for post-processors that perform audio conversion, providing a more specific error category while still integrating with the general PostProcessingError exception hierarchy.
+
+Implementation details and notes
+- The file is designed as a common base for various post-processing tasks (conversion, tagging, metadata updates, file operations, etc.). It does not implement concrete post-processors itself.
+- It emphasizes the chaining mechanism, where each post-processor can modify the information dictionary and indicate which files to delete, with the ability to short-circuit the chain by returning None.
+- try_utime provides a utility to preserve or modify file timestamps after processing, with robust error reporting via the downloader rather than raising exceptions.
+- _configuration_args uses a mutable default argument (default=[]), which is a minor Python pitfall to be aware of.
+- The code relies on the utils module for standardized error handling and configuration loading.
+
+Overall, this file establishes the shared interface and utilities for post-processing steps in youtube-dl, enabling flexible chaining, configuration, and robust error handling, while deferring specific post-processing implementations to subclasses.

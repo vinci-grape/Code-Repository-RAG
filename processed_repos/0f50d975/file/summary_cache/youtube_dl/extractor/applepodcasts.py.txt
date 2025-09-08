@@ -1,0 +1,56 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/applepodcasts.py
+
+- Purpose
+  - Implement a YouTube-DL (yt-dlp compatible) extractor for Apple Podcasts episode pages. It returns a single episode info dictionary with id, title, url, description, timestamp, duration, series, thumbnail, and codec/format data.
+
+- Main class
+  - ApplePodcastsIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL: Matches Apple Podcasts episode URLs that contain a query parameter i=<digits> identifying the episode.
+  - Supports variations of the path (podcast/[…], etc.) to cover different Apple Podcasts page formats.
+
+- Tests
+  - _TESTS contains a primary test for an episode with id 1000482637777, expecting mp3 audio, and fields like title, description, upload_date, timestamp, duration, series, and thumbnail.
+  - Includes additional URL patterns with only_matching to ensure URL matching logic is robust.
+
+- Core extraction flow (_real_extract)
+  - Derives episode_id from the URL via _match_id and downloads the webpage.
+  - Data sources (two page formats) to support different Apple Podcasts page structures:
+    1) 2021-11+ AMP data:
+       - Looks for JSON blob under id "shoebox-media-api-cache-amp-podcasts".
+       - Extracts a nested structure, focusing on an entry where type == 'podcast-episodes' and id matches episode_id.
+       - Normalizes to amp_data['d'] and then selects the specific episode data.
+    2) Pre-2021-11 Ember data:
+       - If AMP data not found, uses "shoebox-ember-data-store" JSON.
+       - Tries to fetch episode data via ember_data[episode_id]['data'] or ember_data.
+  - Episode data extraction:
+    - episode = episode_data['attributes']
+    - description = episode.get('description') or {}
+  - Series name resolution:
+    - First, attempt to locate a related 'media/podcast' item in the included data (amp_data or ember_data['included']) and read its attributes['name'].
+    - If not found, fall back to the HTML element with class 'podcast-header__identity' and clean the text.
+  - Info dictionary construction:
+    - id: episode_id
+    - title: episode['name']
+    - url: clean_podcast_url(episode['assetUrl'])
+    - description: description.get('standard') or description.get('short')
+    - timestamp: parse_iso8601(episode.get('releaseDateTime'))
+    - duration: int_or_none(episode.get('durationInMilliseconds'), 1000)
+    - series: resolved series name
+    - thumbnail: self._og_search_thumbnail(webpage)
+  - Post-processing:
+    - _sort_formats(info) is called, then info is reduced to the first (and expected only) item.
+    - codecs are determined via parse_codecs(info.get('ext', 'mp3')) and merged into the info dict.
+  - Returns the final info dict containing all extracted fields plus codec information for proper format handling.
+
+- Important implementation details
+  - Robust handling of two data schemas (AMP-based and Ember-based) to support different Apple Podcasts page structures.
+  - Uses try_get to safely navigate potentially missing nested data.
+  - Uses next with a generator to locate the correct included entry for the series name.
+  - Fallback to HTML parsing for the series name if JSON data doesn’t contain it.
+  - Cleaned URL and description fields via helper utilities (clean_podcast_url, clean_html).
+  - Timestamp and duration conversions handled with parse_iso8601 and int_or_none (with 1000 as the multiplier for milliseconds).
+  - Codec/extension handling via parse_codecs to populate appropriate fields (e.g., ext, vcodec, acodec).
+
+Overall, this extractor fetches and reconciles Apple Podcasts episode data from either AMP or Ember data structures, derives metadata (including series name with a fallback to HTML), computes the correct audio URL, and returns a complete, codec-aware info dictionary suitable for download.

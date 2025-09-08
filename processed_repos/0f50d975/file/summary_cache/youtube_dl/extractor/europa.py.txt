@@ -1,0 +1,54 @@
+- Purpose: A YouTube-dl extractor for European Commission audiovisual content. It parses video (and audio) pages on ec.europa.eu, retrieves metadata from a playlist XML, and builds a list of downloadable formats with language information.
+
+- Key class:
+  - EuropaIE(InfoExtractor): Main extractor class handling the extraction logic.
+
+- URL matching:
+  - _VALID_URL matches URLs like:
+    http(s)://ec.europa.eu/avservices/video/player.cfm?...&ref=<ID>
+    and similar for audioDetails.cfm. The captured id is named 'id'.
+
+- Tests:
+  - _TESTS includes a real video URL with expected md5 and info_dict (id, ext mp4, title, description, thumbnail, upload_date, duration, view_count, and formats).
+  - Additional tests use only_matching for non-video URLs to ensure correct URL matching behavior.
+
+- Core extraction flow (_real_extract):
+  1. video_id = self._match_id(url)
+  2. Download playlist XML: playlist = self._download_xml('http://ec.europa.eu/avservices/video/player/playlist.cfm?ID=%s' % video_id, video_id)
+  3. Helper get_item(type_, preference):
+     - Collects language-to-label mappings from playlist at ./info/<type_>/item where each item has lg (language) and label.
+     - Returns the first matching label according to the provided language preference order.
+  4. Language preference:
+     - Parse sitelang from the URL query (default 'en').
+     - preferred_langs = orderedSet((sitelang, 'en', 'int'))
+     - title = get_item('title', preferred_langs) or video_id
+     - description = get_item('description', preferred_langs)
+  5. Metadata:
+     - thumbnail from ./info/thumburl
+     - upload_date from ./info/date (converted with unified_strdate)
+     - duration from ./info/duration (converted with parse_duration)
+     - view_count from ./info/views (converted with int_or_none)
+  6. Language handling for formats:
+     - language_preference = qualities(preferred_langs[::-1])
+     - For each file in ./files/file:
+       - video_url = ./url
+       - lang = ./lg
+       - format dict includes:
+         - 'url': video_url
+         - 'format_id': lang
+         - 'format_note': ./lglabel
+         - 'language_preference': language_preference(lang)
+  7. Sort formats: self._sort_formats(formats)
+  8. Return a dict with:
+     - 'id', 'title', 'description', 'thumbnail', 'upload_date',
+       'duration', 'view_count', 'formats'
+
+- Important implementation details:
+  - Uses XPath helpers (xpath_text) to extract text from XML safely.
+  - Uses unified_strdate to normalize dates (YYYYMMDD).
+  - Uses parse_duration to convert duration strings to seconds.
+  - Uses int_or_none to safely parse views count.
+  - Language handling prioritizes the site language from the URL, then English ('en'), then an 'int' fallback; formats include a language_preference score to aid proper sorting.
+  - The _TESTS include a scenario with multiple languages and a separate test ensuring non-video URLs still match the extractor pattern.
+
+- Summary: EuropaIE fetches a playlist XML for the given video/ref ID, resolves multilingual metadata with a priority rule, assembles a list of available file formats with language metadata, and returns a standard info dictionary suitable for YouTube-dl, including title, description, thumbnail, upload date, duration, view count, and sorted formats.

@@ -1,0 +1,35 @@
+concise summary
+
+- Purpose: A youtube-dl extractor for CMT (cmt.com) video pages. It parses CMT video/show/episode pages and rewrites them to the corresponding MTVN embed URL for downloading.
+
+- Class and inheritance:
+  - Class: CMTIE
+  - Inherits: MTVIE (uses MTV-related parsing/helpers)
+
+- Key attributes:
+  - IE_NAME = 'cmt.com'
+  - _VALID_URL: Regular expression matching CMT URLs for videos, shows, full/episodes, and video-clips. Captures the internal id as group 'id'.
+
+- Tests:
+  - _TESTS includes several sample URLs with expected MD5s and info_dict data (id, ext, title, description, and optional timestamp/upload_date). Some entries are marked to skip if the video is not available. Also includes a few “only_matching” cases to ensure URL recognition without full extraction.
+
+- Core functionality:
+  - _extract_mgid(self, webpage):
+    - Tries to extract the mgid (Media GUID) from the page using the pattern:
+      MTVN.VIDEO.contentUri = '...mgid...'
+    - Uses _search_regex to capture the mgid (group 'mgid').
+    - If not found, falls back to _extract_triforce_mgid(webpage) (a helper likely provided by the parent class to extract mgid via another site-specific mechanism).
+    - Returns the mgid or None.
+
+  - _real_extract(self, url):
+    - Extracts video_id via self._match_id(url).
+    - Downloads the webpage: self._download_webpage(url, video_id).
+    - Obtains mgid by calling _extract_mgid(webpage).
+    - Returns a result pointing to the MTVN embed URL: http://media.mtvnservices.com/embed/{mgid}
+
+- Important implementation details:
+  - The extractor does not directly download the video file; instead, it derives an MTVN embed URL using the mgid and delegates downstream handling to fetch the embedded content.
+  - The mgid extraction has a primary method (contentUri in MTVN.VIDEO) and a fallback (triforce mgid) to maximize reliability across page variants.
+  - The _VALID_URL and tests indicate support for multiple CMT page types, but actual video retrieval ultimately routes through the MTVN embed service.
+
+In short: CMTIE extracts a Media GUID from CMT pages and rewrites the URL to MTVN’s embed endpoint for that mgid, leveraging MTVIE helpers and fallback mgid extraction when needed.

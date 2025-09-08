@@ -1,0 +1,81 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/amp.py
+
+Purpose
+- Implements an extractor for Akamai Adaptive Media Player (AMP) feeds. It parses AMP feed JSON, extracts metadata, thumbnails, subtitles, and available media formats (including HDS and HLS) for a video.
+
+Main class
+- AMPIE(InfoExtractor): The extractor class that handles AMP feeds.
+
+Core functionality (via _extract_feed_info)
+- Downloading feed
+  - Uses _download_json(url, None, 'Downloading Akamai AMP feed', 'Unable to download Akamai AMP feed') to fetch the AMP feed JSON.
+  - Retrieves item from feed['channel']['item']. If missing, raises ExtractorError with the feed's error message.
+
+- Video identity and structure
+  - video_id is item['guid'].
+  - Provides a helper function get_media_node(name, default=None) to fetch media-related data by checking:
+    - media-group[name], or item[name], with fallbacks to media-name variants ('media-<name>') and default when not found.
+  - This helper enables robust access across varying AMP feed structures.
+
+- Thumbnails
+  - Fetches media thumbnail via get_media_node('thumbnail').
+  - Handles both single dict and list of dicts.
+  - For each thumbnail, reads attributes from '@attributes', extracts 'url', 'width', 'height'.
+  - Converts thumbnail URLs to absolute using _proto_relative_url(thumbnail_url, 'http:').
+  - Collects a list of thumbnail dicts: {'url', 'width', 'height'}.
+
+- Subtitles
+  - Fetches subtitles via get_media_node('subTitle').
+  - Handles single dict or list of dicts.
+  - For each subtitle, reads '@attributes', obtains 'href' (URL), 'lang' (default 'en'), and 'type' to determine extension with mimetype2ext or fall back to determine_ext(subtitle_href).
+  - Groups subtitles by language: subtitles[lang] = [{ 'url': href, 'ext': ext }, ...].
+
+- Formats
+  - Fetches media content via get_media_node('content'), ensures it is a list.
+  - For each media entry:
+    - Reads attributes via '@attributes' and extracts 'url' as media_url.
+    - Skips if no media_url.
+    - Determines extension ext from mimetype2ext(media.get('type')) or determine_ext(media_url).
+    - Special handling for common AMP container formats:
+      - If ext == 'f4m': uses _extract_f4m_formats on media_url with '?hdcore=3.4.0&plugin=aasp-3.4.0.132.124', video_id, f4m_id='hds', fatal=False.
+      - If ext == 'm3u8': uses _extract_m3u8_formats on media_url, video_id, 'mp4', m3u8_id='hls', fatal=False.
+    - Otherwise, appends a direct format with:
+      - 'format_id': from media_data['media-category']['@attributes']['label'] if available
+      - 'url': media_url
+      - 'tbr': int_or_none(media.get('bitrate'))
+      - 'filesize': int_or_none(media.get('fileSize'))
+      - 'ext': ext
+  - After accumulating formats, sorts them via self._sort_formats(formats).
+
+- Metadata extraction
+  - timestamp: tries unified_timestamp(item.get('pubDate'), ' ') first (handles spaces in date string), fallback to parse_iso8601(item.get('dc-date')).
+  - duration: int_or_none(media_content[0].get('@attributes', {}).get('duration')) (uses first content entry’s duration attribute).
+  - title: get_media_node('title')
+  - description: get_media_node('description')
+  - thumbnails: collected thumbnails list
+  - subtitles: collected subtitles dict
+  - formats: collected formats list
+
+Return value
+- A dict containing:
+  - 'id': video_id
+  - 'title': title
+  - 'description': description
+  - 'thumbnails': list of thumbnail dicts
+  - 'timestamp': timestamp (epoch or None)
+  - 'duration': duration in seconds (or None)
+  - 'subtitles': dict of subtitles per language
+  - 'formats': list of available formats (including f4m/hds, m3u8/hls, and direct formats)
+
+Key implementation details
+- Robust feed parsing with get_media_node to accommodate variations in AMP feed structures (channel/item vs. media-group and different naming).
+- Proper handling of single-item vs. list properties for thumbnails and subtitles.
+- URL handling: ensures URLs are absolute when needed using _proto_relative_url.
+- Multiple format support:
+  - HDS (f4m) via _extract_f4m_formats with a specific hdcore/plugin query.
+  - HLS (m3u8) via _extract_m3u8_formats.
+  - Direct formats with metadata such as bitrate and filesize.
+- Timestamp parsing strategy prioritizes pubDate with spaces, with a fallback to ISO8601 parsing for dc-date.
+- Error handling for missing feed data: raises an ExtractorError with the feed-provided error message when the channel item is absent.
+
+Overall, this extractor focuses on translating Akamai AMP feed data into a structured video entry with metadata, thumbnails, subtitles, and a comprehensive set of media formats suitable for playback.

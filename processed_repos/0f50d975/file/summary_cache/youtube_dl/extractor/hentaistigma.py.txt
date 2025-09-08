@@ -1,0 +1,42 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/hentaistigma.py
+
+Purpose:
+- Provides a youtube-dl extractor (HentaiStigmaIE) to download videos from hentai.animestigma.com.
+
+Main components:
+- Class HentaiStigmaIE(InfoExtractor)
+  - _VALID_URL: Regex matching video URLs on hentai.animestigma.com. Captures the video id from the path.
+  - _TEST: Sample test data including a URL, expected md5 for the video, and an info_dict with id, ext (mp4), title, and age_limit (18).
+  - _real_extract(self, url): Core extraction logic to obtain direct video URL and metadata.
+
+Extraction flow:
+- video_id = self._match_id(url)
+  - Derives the internal id from the URL using the _VALID_URL pattern.
+- webpage = self._download_webpage(url, video_id)
+  - Downloads the HTML of the initial page.
+- title = self._html_search_regex(r'<h2[^>]+class="posttitle"[^>]*><a[^>]*>([^<]+)</a>', webpage, 'title')
+  - Parses the page to extract the video title from an h2 element with class "posttitle" containing a link.
+- wrap_url = self._html_search_regex(r'<iframe[^>]+src="([^"]+mp4)"', webpage, 'wrapper url')
+  - Finds an iframe on the page whose src attribute contains "mp4" (wrapper page URL that hosts the actual video).
+- wrap_webpage = self._download_webpage(wrap_url, video_id)
+  - Downloads the content of the wrapper page loaded in the iframe.
+- video_url = self._html_search_regex(r'file\s*:\s*"([^"]+)"', wrap_webpage, 'video url')
+  - Extracts the direct video URL from the wrapper page, looking for a JavaScript-like pattern file: "URL".
+- Returned metadata:
+  - id: video_id
+  - url: video_url (direct video URL, typically mp4)
+  - title: extracted title
+  - age_limit: 18
+
+Implementation details:
+- Uses standard InfoExtractor helpers:
+  - _match_id for ID extraction
+  - _download_webpage to fetch pages
+  - _html_search_regex to pull data via regex
+- Assumes a two-step structure: a main page with an iframe that loads a wrapper page, which contains a JS-style file field with the actual video URL.
+- Ext is inferred from the direct video URL (test data expects mp4).
+- Age restriction is explicitly set to 18, matching the content domain.
+
+Notes on robustness:
+- Relies on specific HTML structure (posttitle heading) and patterns (iframe src containing mp4, and a file: "URL" string). If the site changes its HTML/JS layout, extraction can fail.
+- The approach is straightforward but potentially brittle due to dependence on regex parsing of HTML/JS content.

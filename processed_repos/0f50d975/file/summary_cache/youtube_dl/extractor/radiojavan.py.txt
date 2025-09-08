@@ -1,0 +1,62 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/radiojavan.py
+
+Purpose
+- Implement an InfoExtractor (RadioJavanIE) for extracting video information from radiojavan.com video pages.
+
+Key components
+- Class RadioJavanIE(InfoExtractor)
+  - _VALID_URL: RegEx pattern identifying RadioJavan video URLs: http(s)://(www.)?radiojavan.com/videos/video/{id}
+  - _TEST: Sample test data including URL, expected MP4 extension, title, thumbnail, upload date, and counts.
+
+Main workflow (_real_extract)
+1) Identify video_id
+   - Extracts the id portion from the URL using self._match_id(url).
+
+2) Retrieve video host
+   - Performs a POST request to https://www.radiojavan.com/videos/video_host with form data {'id': video_id} using self._download_json.
+   - Includes headers: Content-Type: application/x-www-form-urlencoded and Referer set to the original URL.
+   - Response expected to provide a 'host' value. If missing, defaults to 'https://host1.rjmusicmedia.com'.
+
+3) Download page HTML
+   - Fetches the full HTML of the video page via self._download_webpage(url, video_id).
+
+4) Parse available video formats
+   - Scans the webpage for JavaScript variable declarations of the form RJ.video<format_id> = '<url>'.
+     - Regex used: RJ\.video(?P<format_id>\d+[pPkK])\s*=\s*(["\'])(?P<url>(?:(?!\2).)+)\2
+     - Extracted format_id examples: 720p, 1080P, etc.
+   - For each match:
+     - Resolves the actual video URL by urljoin(download_host, video_path).
+     - Converts format_id into a standard format via parse_resolution(format_id).
+     - Updates the format dict with 'url' and 'format_id'.
+   - Collects all formats and sorts them with self._sort_formats(formats).
+
+5) Metadata extraction
+   - Title: self._og_search_title(webpage) using OpenGraph meta tags.
+   - Thumbnail: self._og_search_thumbnail(webpage) using OpenGraph meta tag.
+   - Upload date: Extracted via regex on the page:
+     - Regex: class="date_added">Date added: ([^<]+)<
+     - Converted to standardized date with unified_strdate; non-fatal if missing.
+   - View/like/dislike counts: Extracted via regexes and converted to integers with str_to_int; all are non-fatal if missing.
+     - View count: class="views">Plays: ([\d,]+)
+     - Like count: class="rating">([\d,]+) likes
+     - Dislike count: class="rating">([\d,]+) dislikes
+
+6) Return
+   - Constructs and returns a dictionary with:
+     - id: video_id
+     - title: title
+     - thumbnail: thumbnail
+     - upload_date: upload_date
+     - view_count: view_count
+     - like_count: like_count
+     - dislike_count: dislike_count
+     - formats: list of parsed formats
+
+Implementation details and nuances
+- Uses a two-step approach: first obtain a host for video segments, then parse segments from the page.
+- The host retrieval uses a POST request with application/x-www-form-urlencoded data and Referer header for compatibility with the remote endpoint.
+- Video formats are embedded in the page as JavaScript variables (RJ.video...); parsing relies on a robust regex that captures both the format id and the URL literal (handling either single or double quotes).
+- The code gracefully handles missing metadata (upload date and counts) by using fatal=False in searches.
+- Default host fallback ensures the extractor can still build full URLs if the host value is not present in the JSON response.
+
+Overall, this extractor fetches a host for video segments, parses available video formats from the page’s JavaScript, and gathers metadata (title, thumbnail, upload date, and counts) to output a structured video info dictionary compatible with youtube-dl’s downstream processing.

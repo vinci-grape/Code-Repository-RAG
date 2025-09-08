@@ -1,0 +1,29 @@
+concisely summarize the code:
+
+- Purpose
+  - A YouTube-dl extractor for 3sat (Dreisat), leveraging the existing ZDF extractor logic.
+
+- Class and inheritance
+  - Defines DreiSatIE, which inherits from ZDFIE (the ZDF family extractor).
+  - No new extraction logic is added; it relies on ZDFIE’s implementation to parse 3sat pages.
+
+- Key constants
+  - IE_NAME = '3sat'
+  - _VALID_URL = a regex that matches 3sat URLs and captures an id component before the .html extension:
+    - Matches URLs like http(s)://www.3sat.de/.../some-slug-<id>.html
+    - Uses a named capture group 'id' for the internal video/media identifier.
+
+- Tests (_TESTS)
+  - Several tests demonstrate expected behavior:
+    - A typical 3sat media page returning mp4 with id, title, description (md5-checked), duration, timestamp, and upload_date.
+    - A 3sat page where download is skipped (skip_download: True) but metadata is still parsed.
+    - Example pages that should only be matched (only_matching: True) to ensure URL recognition without full extraction.
+  - Test data includes md5 checks for certain fields (description, etc.) and expected metadata like duration, timestamps, and IDs.
+
+- Implementation details
+  - Since no methods are overridden, the extraction process uses ZDFIE’s logic to fetch and parse metadata and media URLs from 3sat pages.
+  - The 3sat-specific part is mainly URL recognition and reusing ZDF family parsing, reflecting 3sat’s alignment with ZDF/Dokumentation content.
+
+- File context
+  - Located at ./youtube-dl/youtube_dl/extractor/dreisat.py
+  - Simple wrapper to enable 3sat content to be handled by the existing ZDF extraction pipeline.

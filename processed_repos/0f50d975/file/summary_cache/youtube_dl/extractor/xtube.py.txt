@@ -1,0 +1,85 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/xtube.py
+
+Overview
+- This module implements two extractors for the XTube site:
+  - XTubeIE: extracts individual video information and available formats.
+  - XTubeUserIE: extracts a user’s video playlist by crawling through their profile pages.
+
+Key classes
+- XTubeIE (InfoExtractor)
+  - URL matching: _VALID_URL handles both an old xtube: scheme and standard xtube video pages. Captures id and an optional display_id.
+  - _real_extract(url):
+    - Determines display_id; maps video_id to the correct page URL depending on the ID format:
+      - If video_id is all digits and shorter than 11, use a “video-watch/-%s” URL.
+      - Otherwise use “watch.php?v=%s”.
+    - Downloads the video page with cookies age_verified=1 and cookiesAccepted=1.
+    - Extracts metadata from a JavaScript config blob:
+      - Finds playerConf config object, converts it from JS to JSON, and digs into mainRoll to obtain:
+        - title, poster (thumbnail), duration, sources, mediaDefinition.
+      - If sources is not a dict and mediaDefinition is not present, attempts to extract sources as a JSON-like object from a JavaScript snippet.
+    - Formats extraction:
+      - If sources is a dict: each key (format_id) and value (format_url) becomes a format with url, format_id, and height derived from the numeric format_id when possible.
+      - If mediaDefinition is a list: each item can specify videoUrl and format:
+        - If format == 'hls', uses _extract_m3u8_formats to fetch multiple HLS variants (entry_protocol 'm3u8_native').
+        - If format == 'mp4', uses its 'quality' as height and stores the URL with a composed format_id (e.g., "mp4-720").
+      - Deduplicates and sorts formats with _remove_duplicate_formats and _sort_formats.
+    - Fallbacks and metadata extraction:
+      - Title: from config if present; otherwise via HTML regex or generic title extraction.
+      - Description: from Open Graph, Twitter meta, or page content.
+      - Uploader: parsed from contentOwnerId input or a nickname span if present.
+      - Duration: uses parsed duration from config or falls back to parsing “Runtime” in the page.
+      - View count and comment count: extracted via several regex patterns and converted to int when present.
+      - age_limit: hardcoded to 18.
+      - thumbnail, id, display_id: collected as part of the final info dict.
+    - Returns a dict with:
+      - id, display_id, title, description, thumbnail, uploader, duration, view_count, comment_count, age_limit, formats.
+  - Robust handling for old/new URL schemas, FLV videos, and potential duplicate formats in the source data.
+
+- XTubeUserIE (InfoExtractor)
+  - IE_DESC: “XTube user profile”
+  - _VALID_URL matches user profile URLs under /profile/ with an id that ends in -digits.
+  - _real_extract(url):
+    - Extracts user_id from URL.
+    - Iterates over profile pages starting from 1:
+      - Builds a sanitized Request to:
+        - URL: http://www.xtube.com/profile/<user_id>/videos/<page>
+        - Headers: Cookie popunder=4, X-Requested-With=XMLHttpRequest, Referer set to the profile URL
+      - Downloads a JSON page via _download_json.
+      - Reads page['html'] to find video IDs via regex data-plid="VIDEO_ID".
+      - Each video ID is added as a URL result pointing to xtube:<video_id> using XTubeIE.ie_key().
+      - Stops when there is no pageCount or when the last page is reached.
+    - Returns a playlist_result consisting of the collected video entries and sets age_limit = 18.
+    - Ensures deduplication via an orderedSet when collecting IDs.
+
+Key implementation details
+- Helper utilities used:
+  - int_or_none, str_to_int, parse_duration to normalize numeric values.
+  - js_to_json to convert embedded JS objects to JSON-compatible data.
+  - url_or_none and sanitized_Request to safely build requests.
+  - orderedSet to avoid duplicate video IDs.
+- Config parsing:
+  - The code looks for a JavaScript object assigned to playerConf and then digs into mainRoll for metadata.
+  - Uses a tolerant approach with fatal=False on several searches to avoid hard failures if some fields are missing.
+- Formats handling:
+  - Supports two main sources of format data:
+    - A dictionary of direct video URLs (format_id -> URL) with height inferred from format_id.
+    - A mediaDefinition list where each item can be hls (M3U8) or mp4 with explicit quality (height).
+  - HLS formats are extracted with _extract_m3u8_formats and support for native HLS is enabled.
+  - Deduplication and sorting ensure unique formats are presented in a stable order.
+- Metadata extraction fallbacks:
+  - Title and description have multiple fallback strategies (config values, HTML tags, Open Graph, Twitter meta).
+  - Uploader extraction uses multiple patterns to account for site variations.
+  - View and comment counts are guarded with fatal=False to avoid breaking on missing data.
+- Edge-cases:
+  - Handles old and new URL schemas for videos.
+  - Avoids duplicating formats when the same URL appears multiple times in the sources/definitions.
+
+What this enables
+- Extraction of individual XTube videos with associated metadata and multiple playable formats (including HLS variants).
+- Extraction of a user’s video list as a playlist with proper video entries, leveraging the XTubeIE extractor for each video.
+- Compatibility with a variety of XTube page structures and robust handling of missing fields via sensible fallbacks.
+
+Main functions / methods
+- XTubeIE._real_extract(url): core logic for extracting a single video’s metadata and available formats.
+- XTubeUserIE._real_extract(url): core logic for enumerating a user’s videos and producing a playlist of video entries.
+- Throughout, helpers from the youtube-dl framework are used for page downloads, JSON parsing, format extraction, and metadata retrieval.

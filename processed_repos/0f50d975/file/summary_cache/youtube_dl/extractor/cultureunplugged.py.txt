@@ -1,0 +1,46 @@
+- Purpose: A YouTube-DL extractor for Culture Unplugged video pages. It fetches video metadata and streaming URL from cultureunplugged.com.
+
+- Class and inheritance:
+  - CultureUnpluggedIE(InfoExtractor)
+
+- URL matching:
+  - _VALID_URL matches both with and without a display title segment:
+    - Pattern: http(s)://(www.)cultureunplugged.com/documentary/watch-online/play/<id>[/<display_id>]
+  - Extracts video_id from the URL and uses display_id if present; otherwise falls back to video_id.
+
+- Tests:
+  - _TESTS includes a real example with:
+    - MD5 for the MP4, expected fields (id, display_id, ext, title, description, thumbnail, creator, duration, view_count)
+  - A second test checking URL matching behavior when display_id is absent (only_matching)
+
+- Main workflow in _real_extract:
+  1. Parse URL to obtain video_id and display_id.
+  2. Issue a HEAD request to setClientTimezone.php with a timeOffset parameter to obtain a PHPSESSID cookie needed for subsequent JSON retrieval:
+     - URL: http://www.cultureunplugged.com/setClientTimezone.php?timeOffset=%d
+     - timeOffset is calculated as the negative of (time.timezone / 3600)
+     - Uses HEADRequest and _request_webpage for this step.
+  3. Download JSON data with movie metadata:
+     - URL: http://www.cultureunplugged.com/movie-data/cu-<video_id>.json
+     - Uses _download_json.
+  4. Extract fields from the JSON:
+     - video_url = movie_data['url']
+     - title = movie_data['title']
+     - description = movie_data.get('synopsis')
+     - creator = movie_data.get('producer')
+     - duration = int_or_none(movie_data.get('duration'))
+     - view_count = int_or_none(movie_data.get('views'))
+  5. Build thumbnails list from available thumbnail URLs:
+     - Looks for 'small_thumb' and 'large_thumb' in the JSON
+     - Creates entries with {'url': ..., 'id': size, 'preference': enumeration_index}
+     - Order is small first (preference 0), then large (preference 1) if present
+  6. Return the standard info dictionary:
+     - id, display_id, url, title, description, creator, duration, view_count, thumbnails
+     - The extractor relies on the video URL extension (mp4 in the test) to set ext.
+
+- Important details:
+  - The initial HEAD request is required to obtain a session cookie for the subsequent JSON fetch to work correctly.
+  - Robust integer parsing via int_or_none for duration and view_count.
+  - Thumbnails are optional and built only from available thumb fields.
+  - The code uses plain HTTP URLs (not HTTPS) for both the timezone ping and JSON data retrieval.
+
+Overall, this extractor handles Culture Unplugged documentary pages by resolving the metadata JSON after establishing a necessary session, then assembling a complete info_dict suitable for YouTube-DL.

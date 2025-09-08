@@ -1,0 +1,49 @@
+- Purpose
+  - Centralizes and re-exports all postprocessor classes used by youtube-dl.
+  - Provides a small dynamic factory (get_postprocessor) to obtain a postprocessor class by a simple key name.
+
+- Key components
+  - Imports
+    - EmbedThumbnailPP from .embedthumbnail
+    - A suite of FFmpeg-related postprocessors from .ffmpeg:
+      - FFmpegPostProcessor
+      - FFmpegEmbedSubtitlePP
+      - FFmpegExtractAudioPP
+      - FFmpegFixupStretchedPP
+      - FFmpegFixupM3u8PP
+      - FFmpegFixupM4aPP
+      - FFmpegMergerPP
+      - FFmpegMetadataPP
+      - FFmpegVideoConvertorPP
+      - FFmpegSubtitlesConvertorPP
+    - XAttrMetadataPP from .xattrpp
+    - ExecAfterDownloadPP from .execafterdownload
+    - MetadataFromTitlePP from .metadatafromtitle
+  - get_postprocessor(key)
+    - Returns the class object named <key>PP from the module’s globals.
+    - Example: get_postprocessor('EmbedThumbnail') -> EmbedThumbnailPP; get_postprocessor('FFmpegExtractAudio') -> FFmpegExtractAudioPP.
+    - This enables dynamic lookup/instantiation of postprocessors by a short key.
+  - __all__
+    - Explicit public API listing for wildcard imports:
+      - EmbedThumbnailPP
+      - ExecAfterDownloadPP
+      - FFmpegEmbedSubtitlePP
+      - FFmpegExtractAudioPP
+      - FFmpegFixupM3u8PP
+      - FFmpegFixupM4aPP
+      - FFmpegFixupStretchedPP
+      - FFmpegMergerPP
+      - FFmpegMetadataPP
+      - FFmpegPostProcessor
+      - FFmpegSubtitlesConvertorPP
+      - FFmpegVideoConvertorPP
+      - MetadataFromTitlePP
+      - XAttrMetadataPP
+
+- Implementation details
+  - Uses explicit relative imports for clean modular structure.
+  - __future__ import unicode_literals for Python 2/3 compatibility.
+  - The dynamic lookup relies on the naming convention that each postprocessor class is named <Key>PP, ensuring consistent exports and lookup.
+
+- Overall behavior
+  - This module acts as a registry and convenient access point for all postprocessors, enabling both direct imports (via the listed names) and dynamic retrieval (via get_postprocessor).

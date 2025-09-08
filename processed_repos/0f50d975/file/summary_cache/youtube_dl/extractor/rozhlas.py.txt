@@ -1,0 +1,44 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/rozhlas.py
+
+- Purpose
+  - Implement a YouTube-DL extractor (RozhlasIE) for audio pages on rozhlas.cz ( Czech Radio ).
+
+- Key class
+  - RozhlasIE(InfoExtractor): Subclass that defines how to parse Rozhlas audio pages.
+
+- URL pattern
+  - _VALID_URL = r'https?://(?:www\.)?prehravac\.rozhlas\.cz/audio/(?P<id>[0-9]+)'
+  - Matches pages like http://prehravac.rozhlas.cz/audio/3421320
+
+- Tests
+  - _TESTS includes:
+    - A typical page URL with expected md5, id, ext mp3, title, and description.
+    - An embed URL http://prehravac.rozhlas.cz/audio/3421320/embed with only_matching: True (ensures the embed URL does not get treated as a match for this extractor).
+
+- Main extraction flow (_real_extract)
+  - Extracts audio_id from the URL using _match_id.
+  - Downloads the page content from http://prehravac.rozhlas.cz/audio/{audio_id}.
+  - Title extraction:
+    - Primary: tries to parse a specific HTML structure to grab the title with a regex targeting:
+      <h3>...</h3> followed by a paragraph and a div with id="player-track".
+    - Fallback: uses the page OpenGraph title via _og_search_title and strips a leading "Radio Wave - " prefix with remove_start.
+  - Description extraction:
+    - Uses a regex to capture a URL found inside a paragraph with a title attribute, within a div with id="player-track".
+    - Marked fatal=False to avoid failing if not present; stores the captured URL as description.
+  - Duration extraction:
+    - Looks for data-duration="digits" in the page and converts it to an int via int_or_none.
+  - Resource URL:
+    - Constructs the MP3 URL as http://media.rozhlas.cz/_audio/{audio_id}.mp3
+  - Return payload:
+    - id: audio_id
+    - url: MP3 URL
+    - title: extracted title
+    - description: extracted description (or None)
+    - duration: duration in seconds (or None)
+    - vcodec: 'none' (no video)
+
+- Important implementation details
+  - Uses utilities: int_or_none, remove_start.
+  - Uses multiple extraction strategies to robustly obtain title (primary HTML parse with a fallback to OpenGraph title).
+  - The final media URL is a simple MP3 endpoint separate from the page content.
+  - Provides a minimal, yet comprehensive metadata set: id, title, description, duration, and direct MP3 URL.

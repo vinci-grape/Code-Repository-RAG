@@ -1,0 +1,42 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/ynet.py
+
+- Purpose
+  - Implement a YouTube-dl extractor (YnetIE) for video pages on ynet.co.il (HOT section), extracting video formats and metadata.
+
+- Key class
+  - YnetIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL regex targets ynet.co.il pages like http(s)://...ynet.co.il/.../0,7340,L-xxxxxx...,00.html
+  - The captured id corresponds to the video id (e.g., L-11659-99244), used as the item id.
+
+- Tests
+  - _TESTS contains two examples:
+    - Verifies id, extension (flv), title (Hebrew), and a thumbnail URL pattern.
+    - Ensures proper extraction for different video IDs.
+
+- Core extraction flow (_real_extract)
+  - Extract video_id from URL using _match_id.
+  - Download the page HTML with _download_webpage.
+  - Obtain the Open Graph video URL via _og_search_video_url(webpage), then URL-unquote it with compat_urllib_parse_unquote_plus.
+  - Parse a JSON config from the content: config = json.loads(self._search_regex(r'config=({.+?})$', content, 'video config')).
+    - This config is expected to include a clip.url field that points to an F4M manifest.
+  - Retrieve f4m_url = config['clip']['url'].
+  - Get a title from the Open Graph data via _og_search_title(webpage).
+  - Clean the title if it matches the pattern ynet - HOT -- "title" (handles both single and double quotes) to remove the prefix.
+  - Extract formats from the F4M manifest using _extract_f4m_formats(f4m_url, video_id).
+  - Sort the formats with _sort_formats(formats).
+  - Return a dict with:
+    - id: video_id
+    - title: (cleaned) title
+    - formats: list of available video formats
+    - thumbnail: value from _og_search_thumbnail(webpage)
+
+- Important implementation details
+  - The extractor relies on an OpenGraph video URL embedded in the page to fetch a JSON config containing the F4M manifest URL.
+  - The F4M manifest is parsed into formats; the code expects an "clip.url" entry in the JSON config.
+  - Title cleaning accounts for common page titles like "ynet - HOT -- 'Video Title'".
+  - Thumbnail is sourced from OpenGraph meta tags.
+  - Uses standard InfoExtractor helpers: _download_webpage, _og_search_video_url, _search_regex, _og_search_title, _extract_f4m_formats, _sort_formats, _og_search_thumbnail.
+
+Overall, the extractor fetches the page, derives the F4M manifest URL from a JSON config found in the page’s encoded content, parses available formats, cleans up the title, and returns the video metadata including id, title, formats, and thumbnail.

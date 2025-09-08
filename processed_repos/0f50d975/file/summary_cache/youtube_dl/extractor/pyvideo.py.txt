@@ -1,0 +1,73 @@
+Summary:
+
+This file defines a youtube-dl extractor for pyvideo.org, allowing retrieval of a video or a playlist of videos from a pyvideo category page.
+
+Main components:
+
+- Class: PyvideoIE(InfoExtractor)
+  - _VALID_URL: Matches URLs like https://pyvideo.org/<category>/<id> where category is any non-slash segment and id is the video identifier.
+  - _TESTS: Includes two tests:
+    - A category/model URL that yields a playlist with 2 entries (playlist_count: 2).
+    - A URL that resolves to a single video with MD5, extension m4v, and a title derived from the data file.
+
+- _real_extract(self, url):
+  - Parses category and video_id from the URL using the _VALID_URL regex.
+  - Attempts to fetch a JSON data file from GitHub:
+    https://raw.githubusercontent.com/pyvideo/data/master/{category}/videos/{video_id}.json
+    with fatal=False, so it’s optional.
+  - If the JSON data exists:
+    - Iterates data['videos']:
+      - video_url = video.get('url')
+      - If video.get('type') == 'youtube':
+        - Adds a YouTube entry via self.url_result(video_url, 'Youtube').
+      - Else:
+        - Adds a direct video entry with:
+          - id: data.get('id') or video_id (cast to string via compat_str)
+          - url: video_url
+          - title: data['title']
+          - description: data.get('description') or data.get('summary')
+          - thumbnail: data.get('thumbnail_url')
+          - duration: int_or_none(data.get('duration'))
+  - If the JSON data does not exist (fallback):
+    - Downloads the HTML page.
+    - title = OG title from the page.
+    - Extracts a block of “Media URL” entries: using regex r'(?s)Media URL:(.+?)</li>'.
+    - Within that block, finds all <a href="URL">...</a> anchors and extracts URLs.
+    - For each media_url:
+      - If it matches a YouTube watch URL (https://www.youtube.com/watch?v=...), add a YouTube entry.
+      - Else, add a direct video entry with:
+        - id: video_id
+        - url: media_url
+        - title: title
+  - Returns a playlist result containing all entries via self.playlist_result(entries, video_id).
+
+Key implementation details:
+
+- Data source and fallback:
+  - Primary data source is a JSON file stored on GitHub per category and video_id. If present, it provides a uniform set of video entries (some may be YouTube).
+  - If the JSON is unavailable, the extractor falls back to parsing the actual HTML page to collect Media URLs and construct entries.
+
+- YouTube integration:
+  - If an entry is of type 'youtube' in the JSON, or if a Media URL is a YouTube link found in the HTML, the code uses self.url_result(url, 'Youtube') to delegate to the Youtube extractor.
+
+- Entry construction:
+  - For non-YouTube JSON entries:
+    - id is taken from data['id'] if available; otherwise video_id.
+    - title is data['title'].
+    - description is data.get('description') or data.get('summary').
+    - thumbnail is data.get('thumbnail_url').
+    - duration is parsed with int_or_none(data.get('duration')).
+  - For HTML fallback entries:
+    - title is taken from OG metadata.
+    - Each non-YouTube media URL yields an entry with id=video_id, url=media_url, title=title.
+
+- Utilities used:
+  - compat_str to normalize IDs to strings.
+  - int_or_none to safely parse duration.
+  - _download_json with fatal=False to attempt optional dataset fetch.
+  - _download_webpage, _og_search_title, _search_regex for HTML fallback.
+  - playlist_result to return a playlist; video_id serves as the playlist ID.
+
+Overall functionality:
+
+- The extractor supports both a structured JSON dataset (preferred) and a robust HTML fallback to obtain video URLs for pyvideo.org category pages, handling YouTube vs. other video formats, and returning a cohesive playlist of entries.

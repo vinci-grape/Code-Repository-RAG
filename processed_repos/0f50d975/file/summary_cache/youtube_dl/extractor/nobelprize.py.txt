@@ -1,0 +1,46 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/nobelprize.py
+
+- Purpose
+  - Implement an extractor for Nobel Prize media pages served by the Nobel Prize mediaplayer. It discovers video formats from the embedded media configuration and returns a standard info dictionary (id, title, description, duration, and formats).
+
+- Key class
+  - NobelPrizeIE (subclass of InfoExtractor)
+
+- URL matching
+  - _VALID_URL matches URLs like http(s)://www.nobelprize.org/mediaplayer... with a numeric id parameter id=<digits>.
+  - _TEST provides a sample URL and expected metadata for unit testing.
+
+- Core extraction flow (_real_extract)
+  - Extracts video_id from the URL using _match_id.
+  - Downloads the page HTML via _download_webpage.
+  - Locates a JavaScript config object in the page using the regex (?s)var\s*config\s*=\s*({.+?}); and converts it to proper JSON with js_to_json.
+  - Accesses media = config['media'] and reads the title from media['title'].
+  - Iterates over media.get('source', []) to build video formats:
+    - Each source must have a 'src'. If missing, skip.
+    - Determines the extension:
+      - ext = mimetype2ext(source.get('type')) or determine_ext(source_src)
+    - If ext is 'm3u8':
+      - Extracts HLS formats with _extract_m3u8_formats(source_src, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+    - If ext is 'f4m':
+      - Extracts HDS formats with _extract_f4m_formats(update_url_query(source_src, {'hdcore': '3.7.0'}), video_id, f4m_id='hds', fatal=False)
+    - Otherwise, adds a simple format with {'url': source_src}.
+  - Sorts all discovered formats using _sort_formats.
+  - Returns the standard info dict:
+    - id: video_id
+    - title: media['title']
+    - description: extracted from the HTML attribute itemprop="description" using get_element_by_attribute
+    - duration: int_or_none(media.get('duration'))
+    - formats: the built formats list
+
+- Important implementation details
+  - Uses a specific page-internal JSON config embedded in the page (var config = {...}); relies on regex + js_to_json to parse.
+  - Handles multiple video sources, including HLS (m3u8) and HDS (f4m) formats, as well as direct URLs.
+  - For HDS sources, appends hdcore=3.7.0 to the URL via update_url_query.
+  - Uses get_element_by_attribute to fetch the description from the page’s HTML rather than from the JSON config.
+  - The _TEST demonstrates expected metadata including an mp4 extension and an md5 for the description/sample (md5: ...).
+
+- What it does not do
+  - It does not support non-medithas sources outside the provided media['source'] array.
+  - It relies on the page structure (config var) being present; if the Nobel site changes its embedding, extraction could fail.
+
+Overall, NobelPrizeIE cleanly extracts video metadata and multiple streaming formats from Nobel Prize mediaplayer pages, normalizes them into YouTube-DL’s standard info dictionary, and handles common adaptive formats (HLS/HDS) as well as direct video URLs.

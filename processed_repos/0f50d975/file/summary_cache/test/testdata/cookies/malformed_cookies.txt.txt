@@ -1,0 +1,38 @@
+Summary:
+
+- Type: Data/test fixture file (not executable code) used by youtube-dl’s test suite.
+- Purpose: Provide input for testing a Netscape-style HTTP cookie file parser, specifically to exercise handling of malformed cookie entries.
+- Location: ./youtube-dl/test/testdata/cookies/malformed_cookies.txt
+
+Key contents and what they represent:
+
+- Header lines:
+  - "# Netscape HTTP Cookie File"
+  - "# http://curl.haxx.se/rfc/cookie_spec.html"
+  - "# This is a generated file!  Do not edit."
+  These indicate the Netscape cookie file format and that the file is a generated test artifact.
+
+- Two intentionally malformed cookie entries (to test parser robustness):
+  1) Malformed due to invalid number of fields:
+     - Line: www.foobar.foobar\tFALSE\t/\tFALSE\t0\tCOOKIE
+     - Interpretation: This line has only 6 fields (domain, flag, path, secure, expiration, name) and is missing the 7th field (value). The comment explicitly notes “invalid number of fields - 6 instead of 7.”
+  2) Malformed due to invalid expiration value:
+     - Line: www.foobar.foobar\tFALSE\t/\tFALSE\t1.7976931348623157e+308\tCOOKIE\tVALUE
+     - Interpretation: This line has 7 fields (domain, flag, path, secure, expiration, name, value) but the expiration value is an unrealistically large number (near the IEEE 754 double max). The comment notes “invalid expires at.”
+
+Implementation details:
+
+- Field format follows the Netscape cookie file convention: fields are tab-separated in the order:
+  domain, flag, path, secure, expiration, name, value
+- Comment lines starting with # are ignored by parsers.
+- The first malformed line omits the value, testing whether the parser correctly rejects lines with too few fields.
+- The second malformed line includes a value but uses an expiration timestamp that is not a valid Unix epoch timestamp, testing whether the parser rejects or handles invalid date values gracefully.
+
+Overall purpose:
+
+- Serve as a robust test dataset to verify that cookie parsing code in youtube-dl can:
+  - Detect and ignore (or error on) lines with an incorrect field count.
+  - Detect and handle (reject or sanitize) cookies with invalid expiration values.
+  - Ignore comment lines and continue parsing valid entries (if any exist in the real dataset).
+
+There are no functions or classes in this file; it is purely a fixture for tests.

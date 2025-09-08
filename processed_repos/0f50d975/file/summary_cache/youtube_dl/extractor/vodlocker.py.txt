@@ -1,0 +1,41 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/vodlocker.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Vodlocker video URLs. It handles both direct Vodlocker pages and embedded pages, and resolves the final video URL (formats) along with metadata like title and thumbnail.
+
+- Key class
+  - VodlockerIE(InfoExtractor)
+    - _VALID_URL: Regex matching Vodlocker URLs from vodlocker.com or vodlocker.city, with optional embed- prefix before the id. Captures the video id.
+    - _TESTS: Contains a test case for a sample Vodlocker URL, expecting mp4 format with a specific title and a thumbnail URL pattern, plus an md5 for the downloaded file.
+
+- Main functionality (_real_extract)
+  - Extracts video_id from the URL and downloads the page.
+  - Detects missing/deleted videos by searching for several error messages in the page; raises ExtractorError with expected=True if found.
+  - Collects hidden form fields from the page via self._hidden_inputs(webpage). If fields['op'] == 'download1', it simulates submitting the form:
+    - Sleeps 3 seconds to avoid anti-bot detection.
+    - Posts the form data (urlencode_postdata(fields)) to the same URL using a sanitized Request, with Content-type set to application/x-www-form-urlencoded.
+    - Re-downloads the resulting page after the POST.
+  - Defines and uses a helper function extract_file_url(html, default=NO_DEFAULT) to extract a direct video file URL using a regex that looks for file: "<http...>" in the page.
+  - Attempts to obtain the video URL (video_url) from the main page. If not found, it:
+    - Looks for an iframe embed URL on the page (embed URL pointing to vodlocker.com/embed-...).
+    - Downloads the embed page and tries to extract the file URL from there.
+    - Uses the embed page as the thumbnail source when it has to fetch from the embed page.
+  - If a direct video URL is still not found after the above, the embed path is used; otherwise, the main page is used for thumbnail.
+  - Extracts metadata:
+    - title: from an element with id="file_title" pattern on the main page.
+    - thumbnail: from image: "<URL>" pattern on the page considered (embed page if used, else main page). Fatal=False to allow absence.
+  - Formats: constructs a single format entry with format_id 'sd' and the resolved video_url.
+  - Returns a dict with:
+    - id: video_id
+    - title: extracted title
+    - thumbnail: extracted thumbnail URL (if found)
+    - formats: list containing the single SD format
+
+- Important implementation details
+  - Robust handling of Vodlocker’s download flow: if the initial page requires a POST (op=download1), the code emulates that flow with a 3-second delay before posting and then parses the resulting page for the actual video URL.
+  - Fallback mechanism: if the video URL isn’t present on the main page, it falls back to parsing an embedded page (iframe) and extracting the file URL from there.
+  - Error handling for missing/deleted files via explicit text checks on the page.
+  - Uses YouTube-DL utility functions: _download_webpage, _hidden_inputs, _search_regex, sanitized_Request, urlencode_postdata, and ExtractorError.
+  - Returns a minimal formats list with a single format (sd), implying Vodlocker’s content is typically a single video URL without multiple qualities in this extractor.
+
+Overall, VodlockerIE implements the standard pattern used by many YouTube-DL extractors for sites with a simple direct video URL or an intermediate embed page, including basic anti-bot handling for form submissions and careful extraction of title and thumbnail metadata.

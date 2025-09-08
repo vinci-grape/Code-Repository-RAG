@@ -1,0 +1,36 @@
+- Purpose: TVNoeIE is a video extractor for the Czech site tvnoe.cz. It parses a video page, navigates to an embedded iframe, extracts JWPlayer data from that iframe, converts it from JavaScript to JSON, and builds a standardized video info dictionary. It also augments the data with metadata (title, description, series) found on the original page.
+
+- Key class:
+  - TVNoeIE(InfoExtractor)
+    - _VALID_URL: Matches URLs like http(s)://www.tvnoe.cz/video/<id> where <id> is a numeric video identifier.
+    - _TEST: Provides a sample URL, expected MD5, and an info_dict with id, ext (mp4), series, title, and description for testing.
+
+- Main workflow in _real_extract(self, url):
+  1. Extract video_id from URL using _match_id.
+  2. Download the main video page (webpage).
+  3. Locate the embedded iframe URL via a regex that finds <iframe ... src="...">.
+  4. Download the content of the iframe page (ifs_page).
+  5. Find JWPlayer data on the iframe page with _find_jwplayer_data, applying js_to_json to transform the JS data into JSON.
+  6. Parse the JWPlayer data with _parse_jwplayer_data to obtain an initial info_dict. Use require_title=False and base_url=iframe_url to aid relative resource resolution.
+  7. Augment info_dict with:
+     - id: the numeric video_id
+     - title: text extracted from the main page element with class 'field-name-field-podnazev'
+     - description: text extracted from the main page element with class 'field-name-body'
+     - series: text extracted from the main page element with class 'title'
+     All extractions use clean_html to strip HTML.
+  8. Return the final info_dict.
+
+- Important implementation details:
+  - Helper utilities used:
+    - _download_webpage: to fetch pages.
+    - _search_regex: to extract the iframe URL from the main page.
+    - _find_jwplayer_data: to locate JWPlayer config on the iframe page.
+    - _parse_jwplayer_data: to convert JWPlayer data into a standard info_dict.
+    - clean_html: to clean HTML fragments.
+    - get_element_by_class: to extract text from elements by CSS-like class names on the main page.
+    - js_to_json: transformer to convert JavaScript object data to JSON for parsing.
+  - The JWPlayer data extraction uses transform_source=js_to_json to properly convert JS objects to JSON before parsing.
+  - The base_url parameter in _parse_jwplayer_data is set to the iframe URL to help resolve relative media URLs.
+  - The code assumes the iframe with the video player is present in the page; if not found, the extraction would fail at the iframe URL step.
+
+- Result: A complete video info dictionary containing JWPlayer-derived data plus a normalized set of metadata (id, title, description, series) suitable for use by youtube-dl.

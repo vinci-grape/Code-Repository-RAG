@@ -1,0 +1,70 @@
+Summary of canalplus.py (CanalplusIE)
+
+Purpose
+- Implement a content extractor for Canal Plus sites mycanal.fr and piwiplus.fr in youtube-dl.
+- Retrieve video metadata and available formats from Canal Plus, returning a standard info dict.
+
+Key components
+- Class: CanalplusIE(InfoExtractor)
+  - IE_DESC: 'mycanal.fr and piwiplus.fr'
+  - _VALID_URL: Regex to match URLs from mycanal.fr and piwiplus.fr, capturing site, display_id, and video id.
+  - _SITE_ID_MAP: Maps site names to internal IDs used by Canal Plus API (mycanal -> 'cplus', piwiplus -> 'teletoon').
+  - _VIDEO_INFO_TEMPLATE: API endpoint template to fetch related/linked videos JSON.
+  - _GEO_COUNTRIES: ['FR'] indicating only FR geo is allowed for direct mp4 URLs (commented geolocation check present).
+  - _TESTS: Two tests demonstrating typical usage and a geo-restricted case.
+
+Main functionality (_real_extract)
+- Parse URL:
+  - Extracts site, display_id, and video_id using _VALID_URL.
+  - Converts site to internal site_id via _SITE_ID_MAP.
+- Fetch video JSON:
+  - Builds info_url using _VIDEO_INFO_TEMPLATE with (site_id, video_id).
+  - Downloads JSON via _download_json(info_url, video_id, 'Downloading video JSON').
+  - If the response is a list, selects the element with matching ID.
+  - Extracts media = video_data['MEDIA'] and infos = video_data['INFOS'].
+- Build format list:
+  - Uses preferences = qualities(['MOBILE', 'BAS_DEBIT', 'HAUT_DEBIT', 'HD']).
+  - Iterates media['VIDEOS'] items:
+    - If URL is empty, skip.
+    - If format_id is 'HLS', uses _extract_m3u8_formats with m3u8_native, m3u8_id=format_id, fatal=False.
+    - If format_id is 'HDS', uses _extract_f4m_formats with '?hdcore=2.11.3', f4m_id=format_id, fatal=False.
+    - Otherwise (direct URLs), appends a secret parameter to the URL:
+      - url: format_url + '?secret=pqzerjlsmdkjfoiuerhsdlfknaes'
+      - format_id: format_id
+      - 'preference': preference(format_id)
+  - Calls self._sort_formats(formats) to sort by preference/quality.
+- Thumbnails:
+  - Builds a list from media.get('images', {}) where each entry is {'id': image_id, 'url': image_url}.
+- Title and description:
+  - titrage = infos['TITRAGE']
+  - title: '{} - {}'.format(titrage['TITRE'], titrage['SOUS_TITRE'])
+  - upload_date: unified_strdate(infos.get('PUBLICATION', {}).get('DATE'))
+  - description: infos.get('DESCRIPTION')
+- Additional metadata:
+  - duration: int_or_none(infos.get('DURATION'))
+  - view_count: int_or_none(infos.get('NB_VUES'))
+  - like_count: int_or_none(infos.get('NB_LIKES'))
+  - comment_count: int_or_none(infos.get('NB_COMMENTS'))
+- Return info dictionary:
+  - id: video_id
+  - display_id: display_id
+  - title, upload_date, thumbnails, description, duration, view_count, like_count, comment_count
+  - formats: built formats list
+
+Notable implementation details
+- Handling of video data:
+  - The API may return a list; code selects the entry with matching ID when needed.
+- Formats:
+  - Supports HLS and HDS through dedicated extractors.
+  - Direct formats are exposed with a fixed secret parameter (as observed in the code comment about a canalPlayer.js secret).
+- Geo/limits:
+  - _GEO_COUNTRIES restricts to FR; a commented-out georestriction check is present (not active).
+- Metadata:
+  - Title is composed from TITRE and SOUS_TITRE.
+  - Upload date uses unified_strdate for consistent date formatting.
+  - Thumbnails come from media['images'] if provided.
+- Tests:
+  - First test covers a standard accessible video (MP4).
+  - Second test demonstrates a geo-restricted scenario with an expected HTTP 403 warning.
+
+In short, CanalplusIE fetches a related video JSON, extracts media formats (HLS/HDS or direct) with a secret parameter for direct URLs, compiles metadata and thumbnails, and returns a complete info dictionary suitable for youtube-dl.

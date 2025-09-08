@@ -1,0 +1,72 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/gedidigital.py
+
+What it does
+- Implements a YouTube-DL extractor for Gedì Digital video pages from the Gelocal network (various Repubblica-group sites on gelocal.it video domains).
+- Extracts video metadata and a list of available video formats by parsing embedded JavaScript parameters on the page.
+
+Key class
+- GediDigitalIE(InfoExtractor)
+  - _VALID_URL: Regular expression that matches the Gedì Digital/Gelocal video URLs across multiple subdomains (e.g., repubblica, Lastampa, IlSecoloXIX, etc.) and captures the numeric video id from the path.
+  - _TESTS: Test cases including:
+    - A real page on video.lastampa.it with expected id, title, description, thumbnail, duration, and mp4 format.
+    - Multiple other URLs with only_matching: True to ensure URL patterns are recognized by the extractor.
+
+Main extraction flow (_real_extract)
+- video_id = self._match_id(url): extracts the numeric video id using the _VALID_URL capture group.
+- webpage = self._download_webpage(url, video_id): downloads the page HTML.
+- title = self._html_search_meta(['twitter:title', 'og:title'], webpage, fatal=True): retrieves the title from meta tags.
+- player_data = re.findall(...): parses embedded JavaScript calls of the form:
+  PlayerFactory.setParam('format'|'param', 'name', 'value');
+  This returns tuples (type, name, value) for later processing.
+
+Format extraction logic
+- formats = [] initially; duration and thumb are None.
+- Iterate over each (type, name, value) in player_data:
+  - If type == 'format':
+    - Skip known non-useful formats: video-hds-vod-ec, video-hls-vod-ec, video-viralize, video-youtube-pfp.
+    - If name ends with '-vod-ak': use Akamai formats via self._extract_akamai_formats(value, video_id, {'http': 'media.gedidigital.it'}).
+    - Else:
+      - ext = determine_ext(value): infer file extension from URL.
+      - If ext == 'm3u8':
+        - Use self._extract_m3u8_formats(value, video_id, 'mp4', 'm3u8_native', m3u8_id=name, fatal=False) and continue.
+      - Else:
+        - f = {'format_id': name, 'url': value}
+        - If ext == 'mp3':
+          - abr = int_or_none(self._search_regex(r'-mp3-audio-(\d+)', value, 'abr', default=None))
+          - Set abr, tbr to abr and vcodec to 'none' (audio-only).
+        - Else (video):
+          - If name matches ^video-rrtv-(\d+)(?:-(\d+))?$:
+            - Set height to the first capture group; vbr to the second capture group (if present).
+          - If vbr not set, try to derive it from the URL: extract -video-rrtv-(\d+) from value as abr (vbr).
+        - Append f to formats.
+  - If type == 'param':
+    - If name in ['image_full', 'image']: thumb = value.
+    - If name == 'videoDuration': duration = int_or_none(value).
+
+Post-processing
+- self._sort_formats(formats): sorts the collected formats by quality/bitrate.
+- Return a dict with:
+  - 'id': video_id
+  - 'title': title
+  - 'description': pulled from twitter:description, og:description, or description meta tag
+  - 'thumbnail': the explicit thumb if found, otherwise a fallback via self._og_search_thumbnail(webpage)
+  - 'formats': the assembled list of format dictionaries
+  - 'duration': duration (if found)
+
+Important implementation details
+- Extraction relies on parsing inline JavaScript calls to PlayerFactory.setParam, rather than parsing a JSON object or dedicated API.
+- Supports multiple format sources:
+  - Akamai formats via _extract_akamai_formats for -vod-ak variants.
+  - HLS (m3u8) formats via _extract_m3u8_formats.
+  - Direct video URLs with various naming schemes, inferred extensions, and potential bitrate hints.
+  - MP3 audio formats with explicit bitrate extraction from the URL and audio-only mode (vcodec='none').
+- Special handling for rrtv formats to set height and vbr when available, with fallback to URL-based bitrate hints.
+- Graceful handling of missing numeric values via int_or_none.
+- Thumbnail handling via explicit image fields or og thumbnail.
+
+Return value structure
+- Standard InfoExtractor result containing:
+  - id, title, description, thumbnail, formats, duration
+
+In short
+The extractor targets Gedì Digital video pages, reads the embedded parameters that define each available format, handles multiple format types (Akamai, HLS, MP3, direct video formats), derives metadata (title, description, duration, thumbnail), and returns a structured video info dictionary suitable for download by youtube-dl.

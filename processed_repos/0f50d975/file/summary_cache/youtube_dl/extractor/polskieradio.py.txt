@@ -1,0 +1,66 @@
+Summary of ./youtube-dl/youtube_dl/extractor/polskieradio.py
+
+What it does
+- Provides two extractors for Polskie Radio (polskieradio.pl):
+  - PolskieRadioIE: extracts audio/video items from article pages.
+  - PolskieRadioCategoryIE: extracts a playlist of articles from category/listing pages and delegates article parsing to PolskieRadioIE.
+
+Key classes and main methods
+- PolskieRadioIE (InfoExtractor)
+  - _VALID_URL: matches article URLs of the form /Artykul/{id}.
+  - _real_extract(url):
+    - Downloads the article page.
+    - Locates the main article content block using a regex on a div with class "this-article".
+    - Extracts a timestamp from a span with id="datetime2" (optional) and converts it to epoch using unified_timestamp.
+    - Gets the OpenGraph thumbnail.
+    - Scans the content for data-media attributes containing JSON-like data. For each media:
+      - Parses the JSON with _parse_json.
+      - Requires media['file'] and media['desc'].
+      - Builds a media URL with _proto_relative_url(media['file'], 'http:').
+      - Deduplicates using a set to avoid repeated entries.
+      - Creates a playlist entry with:
+        - id: media['id']
+        - url: constructed media URL
+        - title: media['desc'] (URL-unquoted)
+        - duration: media['length'] (int if present)
+        - vcodec: 'none' if media['provider'] == 'audio', else None
+        - timestamp: extracted timestamp
+        - thumbnail: page's og thumbnail
+    - Extracts overall title and description from OpenGraph meta tags.
+    - Returns a playlist result with all media entries, using the article id as playlist_id and including title/description.
+  - Utilities used: _download_webpage, _search_regex, _html_search_regex, _og_search_title/description/thumbnail, _proto_relative_url, _parse_json, strip_or_none, int_or_none, unified_timestamp.
+
+- PolskieRadioCategoryIE (InfoExtractor)
+  - _VALID_URL: matches category/list URLs like /<n>/<id> (with possible extra path components).
+  - _TESTS: several category URLs with expected min playlist counts.
+  - suitable(cls, url):
+    - Returns False if PolskieRadioIE is suitable for the URL; otherwise uses superclass logic.
+    - This ensures article pages are handled by PolskieRadioIE and category pages by PolskieRadioCategoryIE.
+  - _real_extract(url):
+    - Downloads the category page.
+    - Extracts a playlist title from the page title tag (regex pattern) if present.
+    - Returns the playlist result of _entries(url, webpage, category_id).
+  - _entries(url, page, category_id):
+    - Iterates through articles on the listing page to find links to individual articles.
+    - For each article link found, yields a result that delegates to PolskieRadioIE.ie_key() with the article URL and its title as the entry title.
+    - Handles pagination by detecting a next page link (class="next") and downloading the next page iteratively until there is no next page.
+  - Utilities used: extract_attributes, compat_urlparse.urljoin, _download_webpage, _og helpers not directly used here, regex parsing, and self.url_result with PolskieRadioIE.ie_key().
+
+Important implementation details
+- Data extraction strategy:
+  - Article pages: content is extracted from a specific div segment, then media items are gathered from data-media attributes containing JSON-like data. This is robust against page layout changes as long as the data-media attributes remain.
+  - Media entries are de-duplicated by URL to avoid duplicates when the same media is referenced multiple times.
+  - Media item fields mapped to YouTube-DL expected keys: id, url, title, duration, vcodec, timestamp, thumbnail.
+- Timestamp handling:
+  - The code attempts to parse a human-readable timestamp from a specific span and converts it to a UNIX timestamp if present.
+- OpenGraph metadata:
+  - Article title and description are pulled from OpenGraph metadata for consistency with social previews.
+- Video vs audio:
+  - vcodec is set to 'none' for audio-only media (provider == 'audio') to indicate no video track; for other providers, vcodec is left as None (letting the extractor decide).
+- URL handling:
+  - Uses _proto_relative_url to ensure that file URLs are properly formed with a base scheme.
+  - urljoin is used to resolve relative links when following category/article links.
+- Testing:
+  - _TESTS include realistic examples with expected playlist structures (titles, ids, durations, timestamps, and a thumbnail pattern) to validate both article extraction and category listing behavior.
+
+Overall, the file implements a two-tier extraction system for Polskie Radio: article pages yield media playlists derived from embedded data-media attributes, while category pages enumerate articles and feed them into the article extractor to build comprehensive playlists.

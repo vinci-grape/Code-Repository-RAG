@@ -1,0 +1,86 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/globo.py
+
+What this file does
+- Provides two extractors for Globo media sites:
+  - GloboIE: extracts inline Globo (globo.com) videos that are served via Globo’s video API (globovideos) and protected by a custom security/hash scheme.
+  - GloboArticleIE: extracts video IDs embedded in Globo article pages and delegates to GloboIE for actual video extraction.
+
+Key classes
+- GloboIE (InfoExtractor)
+  - URL pattern: _VALID_URL matches either globo: style or Globo video URLs with an ID (7+ digits) in paths like v/… or /videos/.
+  - _real_initialize:
+    - Attempts to log in to Globo using credentials from _get_login_info() by POSTing to https://login.globo.com/api/authentication.
+    - If a glbId is returned, sets a GLBID cookie for .globo.com.
+    - Handles 401 errors gracefully by surfacing user messages as ExtractorError with expected=True.
+  - _real_extract(self, url):
+    - Extracts video_id via _match_id.
+    - Fetches playlist data from http://api.globovideos.com/videos/{video_id}/playlist and uses the first video entry.
+    - DRM check: if video['encrypted'] is True, raise ExtractorError("This video is DRM protected.", expected=True).
+    - Collects:
+      - title
+      - duration
+      - uploader and uploader_id from video fields
+      - formats and subtitles from video['resources']
+    - Resource handling loop:
+      - Ignore invalid/unsupported resources (missing URL, or media without id, or non-subtitle/media types).
+      - Subtitles: accumulate per language (default 'por') with resource URL.
+      - For media resources:
+        - Obtain a security hash via GET to http://security.video.globo.com/videos/{video_id}/hash with query: player=desktop, version=5.19.1, resource_id.
+        - If no hash, check for message in response and raise as appropriate; otherwise skip.
+        - Build a signed URL from the security hash:
+          - Derives time, MD5 parts and a hash_prefix depending on the hash_code (first 2 chars of the hash).
+          - Handles at least two schemes based on hash_code sets: {'04','14'} or {'02','12','03','13'}.
+          - Computes padded_sign_time = (received_time + 86400) with a random padding string; computes an MD5-based signed value and base64-encodes a signed hash.
+          - signed_url = resource_url with parameters h=(signed_hash), k (html5 or A), a (F if subscriber_only else A), u (user or empty).
+        - Format selection:
+          - If resource_id ends with m3u8 or resource_url ends with .m3u8: use _extract_m3u8_formats with entry_protocol='m3u8_native', m3u8_id='hls', fatal=False.
+          - If ends with mpd or .mpd: use _extract_mpd_formats with mpd_id='dash', fatal=False.
+          - If ends with manifest or ends with /manifest: use _extract_ism_formats with ism_id='mss', fatal=False.
+          - Else: treat as a direct HTTP URL with a format_id and optional height if provided.
+    - After collecting formats, sort them (_sort_formats).
+    - Derive duration (milliseconds to seconds with 1000 divisor), uploader, and uploader_id from video data.
+    - Return a standard info dict:
+      - id, title, duration, uploader, uploader_id, formats, subtitles
+- GloboArticleIE (InfoExtractor)
+  - _VALID_URL matches Globo article pages (globo.com) and captures an id from the path.
+  - _VIDEOID_REGEXES: several patterns to locate video IDs embedded in HTML (data-video-id, data-player-videosids, etc.).
+  - _TESTS: tests for article extraction, some with playlist_count expectations, and some with only_matching.
+  - suitable(cls, url):
+    - Returns False if GloboIE would match; otherwise uses the base suitable check. This ensures article pages are handled only if not a direct Globo video URL.
+  - _real_extract(self, url):
+    - display_id from _match_id; download the page.
+    - Extract video_ids by applying all regexes in _VIDEOID_REGEXES to the page content (accumulate unique IDs via orderedSet).
+    - Create entries linking to separate GloboIE video URLs: entries = [ self.url_result('globo:%s' % video_id, GloboIE.ie_key()) for video_id in orderedSet(video_ids) ].
+    - Extract title from OpenGraph if available and description meta tag.
+    - Return a playlist result with:
+      - entries, display_id, title, description
+
+Important implementation details
+- DRM handling:
+  - GloboIE explicitly checks video.get('encrypted') and raises an expected error if DRM is present.
+- Security hash/signing mechanism:
+  - Requires contacting security.video.globo.com to obtain a per-resource hash.
+  - Uses an algorithm that selects a hash_code pattern, extracts time and MD5 components, builds a padded timestamp, and computes a signed MD5 which is base64-url-safe.
+  - The signed URL includes:
+    - h (signed hash),
+    - k (html5 or A depending on subscriber_only),
+    - a (A or F),
+    - u (user from security response or empty).
+- Format extraction:
+  - Supports HLS (m3u8), DASH (mpd), and ISM formats via dedicated _extract_*_formats helpers.
+  - Falls back to a direct signed HTTP URL if none of the special formats apply.
+  - Subtitles supported per language (defaulting to Portuguese 'por').
+- Login integration:
+  - Optional: if login info is provided, a GLBID cookie is obtained and stored for subsequent requests.
+  - 401 error handling surfaces user-friendly messages when login fails.
+- GloboArticleIE integration:
+  - Acts as a fallback/alternative path to capture video IDs embedded in Globo article pages and routes them to GloboIE for actual extraction.
+  - Ensures article pages without direct Globo video URLs still yield playable entries when possible.
+- Robustness:
+  - Handles missing security hash messages gracefully.
+  - Skips resources that cannot be processed due to missing data rather than failing entirely.
+
+Main outputs
+- GloboIE returns a dict with:
+  - id, title, duration, uploader, uploader_id, formats (list of dicts with URLs and format details), subtitles (per language)
+- GloboArticleIE returns a playlist with entries pointing to GloboIE video IDs and metadata (title/description) derived from the article page.

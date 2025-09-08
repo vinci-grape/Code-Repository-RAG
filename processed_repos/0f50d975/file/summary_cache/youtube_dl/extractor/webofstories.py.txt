@@ -1,0 +1,75 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/webofstories.py
+
+Goal
+- Provide YouTube-DL extractors for the Web of Stories site, handling both individual videos and the “play all” playlist feature.
+
+Main components
+1) WebOfStoriesIE (individual video extractor)
+- URL pattern
+  - _VALID_URL: https?://(?:www\.)?webofstories\.com/play/(?:[^/]+/)?(?P<id>[0-9]+)
+  - Video id captured as the numeric part after /play/.
+- Constants used
+  - _VIDEO_DOMAIN: http://eu-mobile.webofstories.com/
+  - _GREAT_LIFE_STREAMER: rtmp://eu-cdn1.webofstories.com/cfx/st/
+  - _USER_STREAMER: rtmp://eu-users.webofstories.com/cfx/st/
+- Data extraction flow
+  - Download the video page.
+  - Title: try og:title; if missing or malformed, fall back to an HTML pattern.
+  - Description: from meta description.
+  - Thumbnail: from og:image.
+  - Extract embed parameters from JavaScript: looks for $("#embedCode").html(getEmbedCode(...)) and splits the resulting comma-separated string into 10 fields. Strips whitespace and quotes.
+  - Unpack embed fields into:
+    _, speaker_id, story_id, story_duration, speaker_type, great_life, _thumbnail, _has_subtitles, story_filename, _story_order
+  - Interpret:
+    - is_great_life_series = great_life == 'true'
+    - duration = int_or_none(story_duration)
+  - URL construction (based on whether it’s a Great Life series):
+    - If is_great_life_series:
+      - mp4_url = {VIDEO_DOMAIN}lives/{speaker_id}/{story_filename}.mp4
+      - streamer = _GREAT_LIFE_STREAMER
+      - play_path = stories/{speaker_id}/{story_filename}
+      - rtmp_ext = 'flv'
+    - Else (regular story):
+      - mp4_url = {VIDEO_DOMAIN}{ms_prefix}{speaker_id}/{story_filename}.mp4
+        - ms_prefix is 'mini_sites/' when speaker_type.lower() == 'ms', else ''
+      - streamer = _USER_STREAMER
+      - play_path = mp4:{ms_prefix}{speaker_id}/{story_filename}
+      - rtmp_ext = 'mp4'
+  - Formats created (two formats):
+    - mp4_sd: url = mp4_url
+    - rtmp_sd: url = streamer, ext = rtmp_ext, play_path = play_path, page_url = original URL
+  - Sort formats with self._sort_formats(formats)
+- Return value
+  - dict with keys: id (story_id), title, formats, thumbnail, description, duration
+
+2) WebOfStoriesPlaylistIE (playlist extractor)
+- URL pattern
+  - _VALID_URL: https?://(?:www\.)?webofstories\.com/playAll/(?P<id>[^/]+)
+- Example/test
+  - _TEST with id 'donald.knuth' and title derived; expects at least 97 videos in playlist.
+- Data extraction flow
+  - Download the playlist page.
+  - Build entries by extracting all video ids found with regex: \bid=["\']td_(\d+)
+    - For each video_id, create a URL result pointing to WebOfStoriesIE:
+      http://www.webofstories.com/play/{video_id}
+    - Use orderedSet to preserve order and deduplicate.
+  - Determine playlist title:
+    - Try to build from speaker info in page:
+      - title = contents of <div id="speakerName"><span>...</span></div>
+      - If title present, try to append a field extracted from <span id="primaryField">...</span> as "(field)"
+    - If still no title, fall back to page title format:
+      Play all stories - <something> - Web of Stories
+  - Return playlist_result(entries, playlist_id, title)
+
+Key implementation details
+- Title handling is robust against malformed og:title by falling back to a direct HTML search.
+- Embed parameters are parsed from a JavaScript embed helper: getEmbedCode(...) results, then split into 10 fields that drive video URL construction.
+- Dual-format output per video: a direct MP4 URL (mp4 format) and an RTMP video stream (rtmp format) with appropriate play_path, ext, and potential ms prefixes for mini-sites.
+- Great Life series vs regular stories have distinct URL schemas and RTMP endpoints.
+- Playlist extraction leverages orderedSet to maintain order and avoid duplicates, creating one WebOfStoriesIE entry per video.
+- Tests included for individual videos and playlist to cover typical pages, thumbnail/description extraction, duration, and handling of missing videos.
+
+In short
+- This file implements two extractors:
+  - WebOfStoriesIE for individual videos, building two formats (mp4 and rtmp) from embedded JS-provided metadata, with special handling for “Great Life” series and mini-sites.
+  - WebOfStoriesPlaylistIE for /playAll pages, aggregating all video IDs on the page into a WebOfStoriesIE playlist, with title derivation from page content or fallback.

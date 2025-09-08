@@ -1,0 +1,64 @@
+Here is a concise yet comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/aparat.py:
+
+- Purpose
+  - Implement an extractor for Aparat video pages for youtube-dl (AparatIE).
+
+- Main class
+  - AparatIE(InfoExtractor): extends the base InfoExtractor with Aparat-specific logic.
+
+- URL matching
+  - _VALID_URL: regular expression targeting Aparat video pages in two formats:
+    - http(s)://www.aparat.com/v/{id}
+    - http(s)://www.aparat.com/video/video/embed/videohash/{id}
+  - Video id captured as group "id".
+
+- Tests
+  - _TESTS: two test cases.
+    - Test 1: Validates extraction of id, title, description (via md5), duration, timestamp/upload_date, view_count, and extension mp4 for a sample video.
+    - Test 2: A second URL with only_matching set to True to verify URL pattern matching.
+
+- Core extraction flow (_real_extract)
+  - video_id = self._match_id(url): extract the id from the URL.
+  - Retrieve webpage with self._download_webpage(url, video_id, fatal=False). If unavailable, fall back to an embed URL constructed as:
+    http://www.aparat.com/video/video/embed/vt/frame/showvideo/yes/videohash/{video_id}
+  - options = self._parse_json(self._search_regex(r'options\s*=\s*({.+?})\s*;', webpage, 'options'), video_id)
+    - Extracts a JSON object named options from the page, which contains metadata and format sources.
+
+- Formats extraction
+  - Initialize formats = [].
+  - Iterate over sources in options.get('multiSRC') (or empty if missing):
+    - Ensure item is a dict; get file_url from item['src'] via url_or_none.
+    - If item_type == 'application/vnd.apple.mpegurl':
+      - Use hls extraction: self._extract_m3u8_formats(file_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False)
+    - Else (progressive HTTP formats):
+      - ext = mimetype2ext(item.get('type'))
+      - label = item.get('label')
+      - Append a format dict:
+        - 'url': file_url
+        - 'ext': ext
+        - 'format_id': 'http-%s' % (label or ext)
+        - 'height': int_or_none(self._search_regex(r'(\d+)[pP]', label or '', 'height', default=None))
+  - Sort formats with self._sort_formats(formats, field_preference=('height', 'width', 'tbr', 'format_id')) to prefer higher quality.
+
+- Metadata extraction
+  - info = self._search_json_ld(webpage, video_id, default={}) to pull JSON-LD metadata if present.
+  - If info lacks a title, attempt to populate:
+    - title from element with id 'videoTitle' on the page, or
+    - fall back to common meta tags via self._html_search_meta(['og:title', 'twitter:title', 'DC.Title', 'title'], webpage, fatal=True)
+
+- Final result construction
+  - Return merge_dicts(info, {
+      'id': video_id,
+      'thumbnail': url_or_none(options.get('poster')),
+      'duration': int_or_none(options.get('duration')),
+      'formats': formats,
+    })
+
+- Key implementation details
+  - Graceful handling when the primary page is unavailable; falls back to a separate embed URL to obtain metadata.
+  - Supports both HLS (m3u8) and progressive HTTP formats, parsing format details from the options.multiSRC structure.
+  - Uses multiple helpers (get_element_by_id, int_or_none, merge_dicts, mimetype2ext, url_or_none) to robustly parse and assemble info.
+  - Metadata is sourced from JSON-LD when available, with sensible fallbacks for title discovery.
+
+- Overall functionality
+  - The extractor collects video metadata and a list of available video formats (including HLS and progressive HTTP), builds a consistent info dictionary, and returns it in the standard youtube-dl format.

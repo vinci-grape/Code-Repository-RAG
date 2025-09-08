@@ -1,0 +1,118 @@
+Concise overview of the code in ./youtube-dl/youtube_dl/extractor/twitch.py
+
+What this file provides
+- A set of extractors (IEs) for Twitch content integrated into youtube-dl/yt-dlp.
+- Handles VODs, live streams, clips, collections, and channel video listings via Twitch GraphQL API and the Usher HLS endpoints.
+- Supports login flow (including 2FA) to access authenticated endpoints and playback tokens.
+- Builds standard youtube-dl info dictionaries (with id, title, description, duration, timestamp, uploader, thumbnails, formats, is_live, etc.) and playlist results where appropriate.
+
+Core design and helpers
+- Base class: TwitchBaseIE (inherits from InfoExtractor)
+  - URL base and API endpoints:
+    - _VALID_URL_BASE, _API_BASE, _USHER_BASE, login URLs, and a fixed client_id used by Twitch.
+  - GraphQL support:
+    - _OPERATION_HASHES: mapping of operationName to persisted query SHA256 hashes (used for persisted queries).
+    - _download_base_gql: sends GraphQL requests to https://gql.twitch.tv/gql with proper headers (Client-ID and optional OAuth token from cookies).
+    - _download_gql: wraps _download_base_gql and attaches extensions with persistedQuery sha256Hash for each operation.
+    - _download_access_token: fetches playback tokens (VideoPlaybackAccessToken, StreamPlaybackAccessToken, etc.) via GraphQL.
+  - Authentication:
+    - _real_initialize() triggers _login().
+    - _login(): fetches credentials via _get_login_info(); performs browser-like login flow by parsing the login page, submitting forms, and handling redirects. Supports two-factor authentication by fetching a token via _get_tfa_info if needed.
+  - Helpers:
+    - _prefer_source(formats): marks a Source-format as highest quality (best) and sorts formats.
+    - _download_gql and token methods centralize GraphQL calls and token handling.
+    - _make_video_result(node): helper to convert a channel video node into a standard url_transparent entry pointing to a Twitch video URL; used by other IEs to build playlists.
+
+Key IEs (classes) and their roles
+
+- TwitchVodIE (Video on Demand)
+  - IE_NAME: twitch:vod
+  - _VALID_URL matches traditional Twitch VOD URLs and player URLs containing a video id.
+  - _download_info(item_id): fetches video metadata via VideoMetadata GraphQL query and returns a rich info dict via _extract_info_gql.
+  - _extract_info and _extract_info_gql: convert API responses into standard info dicts (id, title, description, duration, thumbnails, uploader, timestamp, view_count, is_live, etc.). Supports both legacy (HTTP-based) and GraphQL-based payloads.
+  - _real_extract(url):
+    - Extracts vod_id from URL, fetches metadata and access token (VideoPlaybackAccessToken).
+    - Builds HLS formats from Usher URL: https://usher.ttvnw.net/vod/{vod_id}.m3u8 with params including nauth, nauthsig, and other playback options.
+    - Applies _prefer_source to pick the best source if available.
+    - Adds start_time if ?t=... is present in the URL.
+    - If timestamp exists, adds rechat subtitles URL using Twitch API (comments) with client_id.
+  - Important: uses Usher-based HLS delivery with a token pair for access.
+
+- TwitchCollectionIE
+  - IE_NAME: twitch:collections
+  - _VALID_URL for Twitch collections pages.
+  - _OPERATION_NAME = 'CollectionSideBar'
+  - _real_extract(url):
+    - Fetches a collection via GraphQL (CollectionSideBar) and iterates edges to construct video entries using _make_video_result.
+    - Returns a playlist_result with collection id and title.
+  - Purpose: expose a collection as a playlist of included videos.
+
+- TwitchVideosIE (Channel Videos Listing)
+  - Base: TwitchPlaylistBaseIE (handles paginated GraphQL listing)
+  - _VALID_URL: twitch.tv/{channel}/videos or profile
+  - Data model:
+    - Uses a GraphQL query (FilterableVideoTower_Videos) to list videos.
+    - Supports channel, broadcast type (archives, highlights, uploads, past_premieres, all), and sort (time, views).
+    - _make_variables and _extract_entry route entries into a uniform video result using _make_video_result.
+  - _real_extract(url):
+    - Parses channel name, filter, and sort from URL query.
+    - Builds a playlist_result with entries produced by _entries(channel_name, broadcast.type, sort) and a playlist title like "channel - Label sorted by Date/Popular".
+  - Supports multiple playlist views (All Videos, Past Broadcasts, Highlights, etc.) and yields a unified playlist for each.
+
+- TwitchVideosClipsIE (Clips of a Channel)
+  - _VALID_URL: clips for a channel (clips or videos with filter=clips)
+  - Uses GraphQL operation 'ClipsCards__User' to fetch clips
+  - Clip entry format is a url_transparent pointing to an actual clip URL (via TwitchClipsIE)
+  - _RANGE mapping for 7d, 24h, 30d, all time
+  - _extract_entry builds a standard clip dict with id, url, title, thumbnail, duration, timestamp, view_count, language
+  - _real_extract(url) yields a playlist of clips for a channel and range.
+
+- TwitchVideosCollectionsIE (Channel Collections)
+  - _VALID_URL: channel collections listing
+  - Uses GraphQL operation 'ChannelCollectionsContent'
+  - Entry type is a collection; _extract_entry builds a url_transparent to TwitchCollectionIE
+  - _real_extract(url) returns a playlist of channel collections
+
+- TwitchStreamIE (Live Stream)
+  - IE_NAME: twitch:stream
+  - _VALID_URL matches Twitch channels and player-based channel URLs
+  - suitable(): prevents clash with other IEs (Vod, Clips, Videos, etc.) by deferring to those when applicable; otherwise uses default suitability
+  - _real_extract(url):
+    - Fetches multiple GraphQL queries: StreamMetadata, ComscoreStreamingQuery, VideoPreviewOverlay for channel
+    - If channel/user or stream missing, raises ExtractorError (offline or non-existent).
+    - Fetches StreamPlayback token; builds HLS formats using the channel HLS endpoint: https://usher.ttvnw.net/api/channel/hls/{channel}.m3u8 with authentication params (sig/token) and other options.
+    - Applies _prefer_source to formats.
+    - Extracts metadata (title, description, uploader, thumbnail, timestamp, view_count) and live status (is_live) from GraphQL payloads.
+    - Returns a full info dict with id, display_id, title, description, thumbnail, uploader, timestamps, and formats.
+
+- TwitchClipsIE (Clip pages)
+  - IE_NAME: twitch:clips
+  - _VALID_URL matches multiple Twitch clip URL formats (clips.twitch.tv/embed, twitch.tv/<user>/clip/<slug>, etc.)
+  - _real_extract(url):
+    - Obtains video_id/clip slug from URL.
+    - Fetches clip access token via VideoAccessToken_Clip GraphQL operation.
+    - Builds access_query with sig and token, then fetches clip data via a GraphQL query to retrieve broadcaster, creation time, duration, thumbnails, title, viewCount, videoQualities (stream qualities).
+    - Builds a list of formats from videoQualities, each with URL augmented by access_query; assigns format_id, height, and fps based on quality data.
+    - Sorts formats, builds thumbnails of multiple sizes (tiny, small, medium) with inferred width/height from URL if possible.
+    - Returns a dict with id, title, formats, duration, views, timestamp, thumbnails, and uploader/creator data.
+
+Additional implementation notes
+- URL matching and URL construction:
+  - The code handles various Twitch URL forms: www/go/m/twitch.tv, player.twitch.tv, clips.twitch.tv, go.twitch.tv, m.twitch.tv, and channel/video URL variations.
+- Token and authentication:
+  - Access tokens for VODs/streams/clips are obtained via GraphQL (VideoPlaybackAccessToken, StreamPlaybackAccessToken, VideoAccessToken_Clip) and passed to Usher or HLS endpoints to fetch playable formats.
+  - For authenticated endpoints, _login() stores cookies and token in HTTP headers for subsequent requests.
+- GraphQL usage:
+  - Uses persisted queries with _OPERATION_HASHES and _download_gql to send operationName + variables payloads.
+  - The code defines multiple specialized operator blocks (operationName) across VODs, streams, clips, collections, and videos.
+- Usher-based streaming:
+  - Formats for VODs and streams are resolved using Usher endpoints (usher.ttvnw.net), with appropriate query parameters to enable source, audio, spectre, etc.
+- Error handling:
+  - Raises ExtractorError for missing videos, offline streams, or non-existent items; uses expected=True to indicate recoverable/common user-visible errors.
+- Data shaping:
+  - Provides consistent info dict fields across IEs: id, title, description, duration, timestamp, uploader/uploader_id, view_count, is_live, thumbnails, formats, and for URLs used in playlists, uses url_transparent with embedded IEs (e.g., TwitchVodIE, TwitchCollectionIE, TwitchClipsIE).
+
+In short
+- The module aggregates multiple Twitch content types (VODs, streams, clips, collections, channel video lists) into youtube-dl/yt-dlp extractors.
+- It communicates with Twitch via GraphQL (including persisted queries) and Usher HLS endpoints, handles authentication, and standardizes data into youtube-dl's info dictionaries and playlist structures.
+- It includes robust login flow, token handling, and careful mapping from Twitch data structures to the extractor’s canonical output.

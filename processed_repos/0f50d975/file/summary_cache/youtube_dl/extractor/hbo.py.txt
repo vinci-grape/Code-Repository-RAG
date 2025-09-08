@@ -1,0 +1,56 @@
+Here's a concise, function-focused summary of the code in youtube-dl/youtube_dl/extractor/hbo.py:
+
+- Purpose
+  - Implement an HBO video extractor to fetch video metadata and formats from HBO pages and their embedded XML state.
+
+- Key classes
+  - HBOBaseIE (subclass of InfoExtractor)
+    - Core logic for parsing an HBO video’s XML data and building a comprehensive list of formats, thumbnails, and subtitles.
+    - Provides a reusable _extract_info(url, display_id) method used by the concrete extractor.
+  - HBOIE (subclass of HBOBaseIE)
+    - Specific extractor with the proper IE_NAME, _VALID_URL, and a test case.
+    - _real_extract(url) obtains the internal location URL from the HBO page’s data-state JSON, then delegates to _extract_info.
+
+- Core functionality (main methods)
+  - _extract_info(self, url, display_id)
+    - Downloads the HBO XML data for the given video location.
+    - Retrieves video_id, title, and series; builds a display title as “Series - Title” when series exists.
+    - Iterates over video sources under the XML’s videos/sources:
+      - If source.tag == 'size':
+        - Reads path and width; uses _FORMATS_INFO to determine height and standard width/height.
+        - Builds a format dict with url, format_id, width, height.
+        - Detects RTMP paths via regex; if matched, enriches the format with RTMP fields (play_path, app, ext='flv') and updates format_id to an RTMP style.
+      - Else (other tags):
+        - Reads video_url from source.text. If empty, skip.
+        - Special handling per tag:
+          - tarball: use m3u8 formats from base_index_w8.m3u8 via _extract_m3u8_formats.
+          - hls: use m3u8 formats from base_index.m3u8 via _extract_m3u8_formats, and for any formats with vcodec 'none' and no tbr, attempt to infer tbr from the URL (e.g., “-1234k-” pattern) and set tbr accordingly.
+          - dash: use MPD formats via _extract_mpd_formats from manifest.mpd.
+          - other tags: treat as direct HTTP format with format_id derived from the tag (e.g., http-<tag>), and include width/height if available from _FORMATS_INFO.
+    - Sorts the collected formats with _sort_formats(formats).
+    - Thumbnails:
+      - If titleCardSizes exists, iterates sizes to build a list of thumbnail dicts with id (width), url, and width.
+    - Subtitles:
+      - If captionUrl exists, creates an English subtitle track with ext 'ttml'.
+    - Returns a dict with: id, title, duration (parsed from duration/tv14), series, episode, formats, thumbnails, subtitles.
+
+  - _real_extract(self, url) (HBOIE)
+    - Determines display_id from the URL.
+    - Downloads the HBO page HTML and extracts a locationUrl from a JSON blob found in data-state attribute.
+    - Calls _extract_info(urljoin(url, location_path), display_id) to fetch and parse the actual video data.
+
+- Important implementation details
+  - XML parsing leverages helper functions: xpath_text, xpath_element, int_or_none.
+  - A predefined _FORMATS_INFO mapping (width/height) guides format construction for several size codes (e.g., 'pro7', '1920', 'pro5', 'highwifi', etc.).
+  - RTMP support is included: when a path matches an RTMP pattern, additional fields are added (play_path, app, ext='flv') and format_id is converted to an RTMP style.
+  - HLS/DASH support:
+    - HLS: handles tarball and normal HLS variants, uses m3u8 formats extraction, and attempts to infer bitrates (tbr) when not explicitly provided.
+    - DASH: uses MPD extraction for MPD manifests.
+  - Thumbnails are sourced from titleCardSizes, with width used as an id when available.
+  - Subtitles are optional and only for captionUrl, provided as TTML (en).
+  - The code is designed to be robust against missing fields (fatal flags on essential XML fields) while still attempting to build as many formats as possible.
+
+- Test case
+  - HBOIE._TEST demonstrates extraction of a sample HBO video, expecting an mp4, with id '22113301' and title 'Game of Thrones - Trailer', plus a known warning about an unknown MIME type in a DASH manifest.
+
+In short, this file provides a thorough HBO video extractor that builds a complete set of video formats (RTMP, HTTP, HLS, DASH), thumbnails, and subtitles from HBO’s internal XML state, with careful handling of different source types and robust URL resolution.

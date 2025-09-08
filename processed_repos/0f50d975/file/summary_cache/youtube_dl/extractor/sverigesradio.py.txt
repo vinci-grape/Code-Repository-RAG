@@ -1,0 +1,82 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/sverigesradio.py
+
+Purpose
+- Implements YouTube-DL extractors for Sveriges Radio content.
+- Supports two page types:
+  - Publications (articles/gruppsidor)
+  - Episodes
+- Retrieves audio metadata and formats via Sveriges Radio AJAX endpoints and exposes them in YouTube-DL’s standard format structure.
+
+Key classes
+- SverigesRadioBaseIE (InfoExtractor)
+  - Base class containing the common extraction logic for Sveriges Radio.
+  - Constants:
+    - _BASE_URL: https://sverigesradio.se/sida/playerajax/
+    - _QUALITIES: ['low', 'medium', 'high'] – ordered qualities to try when fetching URLs.
+    - _EXT_TO_CODEC_MAP: {'mp3': 'mp3', 'm4a': 'aac'} – maps file extensions to codecs.
+    - _CODING_FORMAT_TO_ABR_MAP: {5:128, 11:192, 12:32, 13:96} – fallback bitrate mapping by codingFormat value.
+  - _real_extract(self, url)
+    - Extracts the audio_id from the URL using _match_id.
+    - Builds a query with id and type (self._AUDIO_TYPE, defined in subclasses).
+    - Fetches audiometadata JSON from _BASE_URL + 'audiometadata', using the audio_id and query.
+    - Extracts title from item['subtitle'].
+    - Prepares to collect multiple formats by setting query['format'] = 'iis'.
+    - Iterates over _QUALITIES:
+      - Sets query['quality'] = quality.
+      - Fetches audio URL JSON from _BASE_URL + 'getaudiourl' with the current query (fatal=False to continue if missing).
+      - Skips if no audioUrl or if it’s a duplicate.
+      - Determines extension (ext) from the URL via determine_ext(audio_url).
+      - Reads codingFormat from the JSON and derives abr:
+        - Tries to extract a bitrate from the URL via regex _a(\d+)\.m4a.
+        - If not found, uses _CODING_FORMAT_TO_ABR_MAP[codingFormat] as fallback.
+      - Builds a format dict:
+        - 'abr': computed bitrate
+        - 'acodec': based on ext via _EXT_TO_CODEC_MAP
+        - 'ext': file extension (e.g., mp3, m4a)
+        - 'format_id': str_or_none(coding_format)
+        - 'vcodec': 'none' (audio-only)
+        - 'url': audio_url
+      - Appends format to formats list.
+    - After gathering all formats, sorts them with _sort_formats(formats).
+    - Returns a dict with:
+      - 'id': audio_id
+      - 'title': title
+      - 'formats': formats
+      - 'series': item.get('title')
+      - 'duration': int_or_none(item.get('duration'))
+      - 'thumbnail': item.get('displayimageurl')
+      - 'description': item.get('description')
+
+- SverigesRadioPublicationIE (SverigesRadioBaseIE)
+  - IE_NAME: 'sverigesradio:publication'
+  - _VALID_URL: matches publication pages (artikel or gruppsida) with query parameter containing artikel id.
+  - _AUDIO_TYPE = 'publication'
+  - _TESTS: validates extraction from a publication URL, checking id, ext, duration, series, title, description, and thumbnail.
+    - First test includes a real example with md5 checksums for description and thumbnail, and duration.
+    - Second test is a non-extractive match assertion (only_matching).
+
+- SverigesRadioEpisodeIE (SverigesRadioBaseIE)
+  - IE_NAME: 'sverigesradio:episode'
+  - _VALID_URL: matches episode pages (avsnitt) by numeric id.
+  - _TEST: validates extraction from an episode URL (id, ext, duration, series, title, description, thumbnail).
+  - _AUDIO_TYPE = 'episode'
+
+Implementation details and behavior
+- Queries and endpoints:
+  - audiometadata: returns metadata for the audio item; used to populate id, title, duration, series, and description.
+  - getaudiourl: returns actual audio URLs for a given quality; supports multiple qualities (low/medium/high) and formats (iis).
+- Quality handling:
+  - For each quality, the extractor fetches a candidate audio URL and adds it as a separate format if unique.
+  - Formats are audio-only (vcodec 'none') with appropriate 'ext' and 'acodec' derived from the URL extension.
+  - Bitrate (abr) is determined either from the URL pattern _a<bitrate>.m4a or from a codingFormat value mapped via _CODING_FORMAT_TO_ABR_MAP.
+- Ext and codec mapping:
+  - determine_ext(audio_url) determines the extension (e.g., mp3, m4a).
+  - _EXT_TO_CODEC_MAP maps 'mp3' to 'mp3' and 'm4a' to 'aac'.
+- Robustness:
+  - Uses fatal=False when requesting getaudiourl to allow continuing if a particular quality is unavailable.
+  - Deduplicates URLs to avoid duplicate formats.
+- Data exposure:
+  - Exposes standard fields: id, title, formats, duration, series, thumbnail, description.
+  - In publication pages, series is taken from item['title']; in episodes, series is similarly derived from metadata.
+
+In short, this file provides a shared extraction mechanism for Sveriges Radio audio items and two concrete extractors for publications and episodes, using Sveriges Radio’s AJAX endpoints to assemble and expose multiple quality audio formats in YouTube-DL’s expected schema.

@@ -1,0 +1,38 @@
+Concise summary of update-sites.py
+
+- Purpose
+  - Generate or refresh an HTML page (supportedsites.html) listing all YouTube-DL extractors (sites supported by youtube-dl).
+  - Reads a template file (supportedsites.html.in), fills in a list of sites, and writes the output HTML.
+
+- Main workflow
+  - Adjusts Python path to ensure youtube_dl can be imported from the repository layout.
+  - Loads the template from supportedsites.html.in.
+  - Iterates over all extractors returned by youtube_dl.list_extractors(age_limit=None).
+  - For each extractor (ie):
+    - Starts an HTML line with the extractor name in bold: <b>IE_NAME</b>.
+    - Reads IE_DESC if present:
+      - If IE_DESC is False, skips this extractor.
+      - If IE_DESC is not None, appends ': IE_DESC' to the line.
+    - Appends " (Currently broken)" if ie.working() returns False.
+    - Wraps the line in <li>...</li> and collects all items.
+  - Indents the list items with tabs and joins them into the template, replacing the placeholder '@SITES@'.
+  - Writes the resulting HTML to supportedsites.html.
+
+- Key functions/components
+  - main(): Orchestrates the whole process (read template, build HTML list, replace placeholder, write output).
+  - list_extractors(age_limit=None): Obtains supported extractors (sites) from youtube-dl.
+  - IE_NAME, IE_DESC attributes: Used to build display text for each site.
+  - ie.working(): Determines if a site is currently functional; affects labeling with "(Currently broken)".
+  - textwrap.indent: Indents the generated list items for formatting in the template.
+  - read_file/write_file: Utility I/O helpers from devscripts.utils to read the template and write the output file.
+  - supportedsites.html.in: Template that contains a placeholder @SITES@ for injection.
+
+- Important implementation details
+  - If an extractor’s IE_DESC is False, the site is skipped entirely.
+  - If IE_DESC is None, no description is added; otherwise a colon and the description are appended.
+  - The output marks non-working extractors with "(Currently broken)".
+  - Uses a simple string replacement for the placeholder '@SITES@' in the template.
+  - Output is written to supportedsites.html in the working directory (likely the gh-pages site directory).
+
+- Usage context
+  - Intended for maintaining the GitHub Pages site for youtube-dl, generating an up-to-date list of supported sites with status and descriptions.

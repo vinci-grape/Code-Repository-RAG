@@ -1,0 +1,57 @@
+concisely summarizes the code:
+
+- Purpose
+  - Implement a YouTube-DL extractor for HearThisAt (HearThisAtIE) to fetch track metadata and available download formats from a track page on hearthis.at.
+
+- Class and URL pattern
+  - HeartThisAtIE(InfoExtractor)
+  - _VALID_URL: matches URLs like https://hearthis.at/<artist>/<title>/
+  - _PLAYLIST_URL: endpoint https://hearthis.at/playlist.php used to retrieve track details via POST
+
+- Core workflow (_real_extract)
+  1. Validate URL and build display_id as "artist - title" using regex groups from the URL.
+  2. Download the track page HTML.
+  3. Extract track_id from the page with intTrackId regex.
+  4. Post to the playlist endpoint with payload tracks[]=<track_id> to fetch track details (JSON). Use the first result as the track.
+  5. Build the full title as "artist - title" from the track data.
+  6. Optional metadata:
+     - categories: if track['category'] exists, wrap in a list.
+     - description: from og:description on the page.
+     - thumbnail: from og:image on the page.
+     - view_count, like_count, comment_count: parsed from page via a meta span pattern (plays_count, likes_count, comment_count) using a helper str_to_int.
+     - duration: from data-length attribute (if present).
+     - timestamp: from a span with class "calctime" and data-time attribute (if present).
+  7. Formats gathering:
+     - mp3 format: locate a data-mp3 attribute within an anchor with class "player-link". If found, add a format with:
+       - format_id: 'mp3', vcodec: 'none', acodec: 'mp3', url: mp3_url
+     - download format (optional): locate a download href via an anchor with class containing "download_fct". If found:
+       - Resolve full URL, issue a HEAD request to detect the file extension.
+       - If the extension is in KNOWN_EXTENSIONS, add a format:
+         - format_id: 'download', vcodec: 'none', ext: detected_ext, url: download_url, preference: 2
+     - Sort the formats (self._sort_formats).
+  8. Return a dict with:
+     - id: track_id
+     - display_id, title
+     - formats
+     - thumbnail, description
+     - duration, timestamp
+     - view_count, comment_count, like_count
+     - categories (or None)
+
+- Key implementation details
+  - Uses a two-step data fetch: first the track page to get context, then a POST to playlist.php with tracks[] to obtain structured track data (JSON array).
+  - Builds display title from both artist and track data.
+  - Robust metadata extraction with optional fields (fatal=False where appropriate) to tolerate missing data.
+  - Attempts to identify a downloadable file by exploring:
+    - An mp3 direct URL via data-mp3 attribute.
+    - A separate download link, validating the extension via HEAD request against KNOWN_EXTENSIONS.
+  - Ensures format sorting and returns a standard info dictionary compatible with youtube-dl’s expectations.
+  - Includes _TESTS with two scenarios: a WAV track and a downloadable MP3 track, including expected IDs, titles, and metadata fields.
+
+- Dependencies and helpers used
+  - Inherits from InfoExtractor
+  - Uses _download_webpage, _download_json, _request_webpage, _og_search_description, _og_search_thumbnail
+  - Uses _search_regex, str_to_int, urlencode_postdata, sanitized_Request, HEADRequest, compat_urlparse
+  - Uses urlhandle_detect_ext and KNOWN_EXTENSIONS for extension detection
+
+Overall, the extractor fetches a HearThisAt track page, retrieves detailed track data via a POST to playlist.php, extracts metadata and available formats (mp3 and optional direct download with extension detection), and returns a structured info dictionary suitable for downloading with youtube-dl.

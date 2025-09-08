@@ -1,0 +1,81 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/izlesene.py
+
+Purpose
+- Implement an InfoExtractor for the Izlesene video site. It parses Izlesene video pages, extracts metadata and direct video formats, and returns a structured dictionary compatible with youtube-dl.
+
+Key class
+- IzleseneIE(InfoExtractor): Main extractor class.
+
+URL matching
+- _VALID_URL: Regex matching Izlesene video pages and embedplayer pages, capturing the numeric video id as id.
+
+Tests
+- _TESTS: Contains two example URLs with expected metadata:
+  - id, ext (mp4), title, description hash, thumbnail URL pattern, uploader_id, timestamp, upload_date, duration, age_limit, etc.
+  - Provides md5 checksums for downloaded content as in real runs.
+
+Core extraction logic (_real_extract)
+1. id extraction
+   - video_id = self._match_id(url)
+
+2. page retrieval
+   - webpage = self._download_webpage('http://www.izlesene.com/video/%s' % video_id, video_id)
+
+3. video data extraction
+   - video = self._parse_json(self._search_regex(r'videoObj\s*=\s*({.+?})\s*;\s*\n', webpage, 'streams'), video_id)
+   - Title selection: video.get('videoTitle') or self._og_search_title(webpage)
+
+4. formats gathering
+   - Iterate video['media']['level'] to collect streams:
+     - source_url = stream.get('source')
+     - Skip if not a string or missing
+     - ext = determine_ext(url, 'mp4')  (default ext is mp4)
+     - quality = stream.get('value'); height = int_or_none(quality)
+     - format_id = '%sp' % quality if quality else 'sd'
+     - Add format dict:
+       - 'format_id': format_id
+       - 'url': compat_urllib_parse_unquote(source_url)
+       - 'ext': ext
+       - 'height': height
+   - self._sort_formats(formats)
+
+5. metadata extraction
+   - description: self._og_search_description(webpage, default=None)
+   - thumbnail: video.get('posterURL') or self._proto_relative_url(self._og_search_thumbnail(webpage), scheme='http:')
+   - uploader: self._html_search_regex(r"adduserUsername\s*=\s*'([^']+)';", webpage, 'uploader', fatal=False)
+   - timestamp: parse_iso8601(self._html_search_meta('uploadDate', webpage, 'upload date'))
+   - duration: float_or_none(video.get('duration') or self._html_search_regex(r'videoduration["\']?\s*=\s*(["\'])(?P<value>(?:(?!\1).)+)\1', webpage, 'duration', fatal=False, group='value'), scale=1000)
+     - Notes: duration may be provided directly or embedded in a JS variable; scale=1000 converts from ms to seconds if needed.
+   - view_count: int_or_none(get_element_by_id('videoViewCount', webpage))
+   - comment_count: self._html_search_regex(r'comment_count\s*=\s*\'([^\']+)\';', webpage, 'comment_count', fatal=False)
+
+6. additional attributes
+   - age_limit: self._family_friendly_search(webpage)
+
+7. return value
+   - A dict with:
+     - 'id': video_id
+     - 'title': title
+     - 'description': description
+     - 'thumbnail': thumbnail
+     - 'uploader_id': uploader
+     - 'timestamp': timestamp
+     - 'duration': duration
+     - 'view_count': view_count
+     - 'comment_count': comment_count
+     - 'age_limit': age_limit
+     - 'formats': formats
+
+Implementation details and helpers used
+- Uses Youtube-dl utility helpers:
+  - _download_webpage, _parse_json, _search_regex, _og_search_title, _og_search_description, _og_search_thumbnail, _proto_relative_url, _html_search_regex, _html_search_meta, _family_friendly_search, _html_search_meta
+  - determine_ext to infer media extension (default 'mp4')
+  - int_or_none, float_or_none, parse_iso8601, str_to_int
+  - compat utilities for string handling and URL unquoting
+- Data extraction is resilient to missing fields (fatal=False where appropriate) and handles both absolute and protocol-relative URLs for thumbnails.
+- The code assumes streams are provided in video['media']['level'] with a 'source' URL and a numeric 'value' for quality (e.g., height in px).
+- It prioritizes OpenGraph metadata as fallbacks for title/description/thumbnail.
+- It converts duration to seconds if provided in milliseconds via the scale parameter.
+
+Overall
+- The extractor fetches the Izlesene video page, parses an embedded videoObj JSON, builds a list of direct video formats, and collects metadata (title, description, thumbnail, uploader, timestamps, counts, age suitability). It then returns a comprehensive dict suitable for youtube-dl to present and download the video.

@@ -1,0 +1,117 @@
+Here is a concise but comprehensive summary of the AfreecaTV extractor code (youtube-dl/youtube_dl/extractor/afreecatv.py):
+
+What it is
+- A YouTube-DL information extractor (InfoExtractor) for AfreecaTV content (afreecatv.com, vod.afreecatv.com, etc.).
+- Supports both live-style pages and VOD/station pages, including multi-part videos and adult-content gating.
+
+Main class and key components
+- AfreecaTVIE extends InfoExtractor.
+- Core metadata:
+  - IE_NAME = 'afreecatv'
+  - IE_DESC = 'afreecatv.com'
+  - _VALID_URL: complex regex to match AfreecaTV live pages, BBS pages, and VOD player pages, capturing a video id.
+  - _NETRC_MACHINE = 'afreecatv' (for stored credentials)
+- _TESTS: multiple examples covering different URL forms and expected results (single video, multi-video, adult content gating, non-standard keys, and non-downloadable cases).
+
+Static helper
+- parse_video_key(key): parses a key of the form YYYYMMDD_<something>_<part> and returns a dict with:
+  - upload_date (YYYYMMDD)
+  - part (int)
+
+Login flow
+- _real_initialize calls _login to ensure credentials are ready before extraction.
+- _login:
+  - Reads credentials via _get_login_info() (username/password).
+  - If no credentials, skip login.
+  - Posts to https://login.afreecatv.com/app/LoginAction.php with a form-encoded payload.
+  - Interprets response via a RESULT code into a friendly message using the _ERRORS mapping.
+  - Raises ExtractorError with a user-friendly message if login fails.
+
+Main extraction logic
+- _real_extract(url):
+  - Extracts video_id from URL with _match_id.
+  - Downloads the page and checks for a deletion notice; raises an expected error if deleted.
+  - Extracts station_id (nStationNo), bbs_id (nBbsNo), and initial video_id (nTitleNo) from the page.
+  - Prepares to fetch video metadata via an API:
+    - Calls http://afbbs.afreecatv.com:8080/api/video/get_video_info.php with query params:
+      - nTitleNo, nStationNo, nBbsNo
+      - Optionally partialView=SKIP_ADULT (to bypass adult restrictions)
+  - Handles adult-content gating with a two-pass approach:
+    - First pass without partialView; if flag is PARTIAL_ADULT, warn and retry with partialView SKIP_ADULT.
+    - If flag is ADULT or other error flag, raise a descriptive ExtractorError.
+    - If SUCCEED, continue; if both attempts fail, raise "Unable to download video info".
+  - video_xml is parsed to locate the final video element:
+    - video_element = last <video> element under <track>.
+    - video_url = text content of that element (may be empty for multi-file case).
+    - title, uploader, uploader_id, duration, thumbnail are extracted from corresponding fields under <track>.
+  - Builds a common_entry with uploader, uploader_id, and thumbnail.
+
+Single-part videos
+- If video_url is present:
+  - If video URL ends with .m3u8 (HLS): formats = _extract_m3u8_formats(video_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls')
+  - Else: assume RTMP/FLV:
+    - video_url is split by 'mp4:' into app and playpath.
+    - info includes:
+      - 'url': app
+      - 'ext': 'flv'
+      - 'play_path': 'mp4:' + playpath
+      - 'rtmp_live': True (ensures RTMP download continues)
+  - Builds info dict with:
+    - id, title, duration, uploader, uploader_id, thumbnail
+    - formats (if m3u8) or RTMP/FLV fields
+  - Returns this info dict.
+
+Multi-part videos (file elements)
+- If video_url is not present, the code handles multi-file (parted) videos:
+  - Iterates over all <file> elements under the <video> track.
+  - For each file:
+    - file_url from file’s text content; skip if missing.
+    - key attribute may contain upload date; upload_date extracted with regex r'^(\d{8})_'.
+    - duration from file's duration attribute (if present).
+    - format_id = key if present, else a constructed id video_id_partnum.
+    - If the file URL is .m3u8: formats = _extract_m3u8_formats(...) with a note indicating part info.
+    - Else: formats = [{'url': file_url, 'format_id': 'http'}].
+    - Sort formats with _sort_formats(formats).
+    - Build file_info with:
+      - id (format_id)
+      - title (title for single-file, or title + " (part N)" for multiple parts)
+      - upload_date, duration
+      - uploader, uploader_id, thumbnail (from common_entry)
+      - formats
+  - Accumulate entries and return a multi-video entry:
+    - {'_type': 'multi_video', 'entries': [file_info1, file_info2, ...]}
+  - This path enables exporting a playlist-like result for videos with multiple parts.
+
+Single video metadata (after successful XML parsing)
+- If video_url exists and is not a multi-file scenario, build info:
+  - id, title, uploader, uploader_id, duration, thumbnail
+  - formats as above (m3u8 or RTMP/FLV as applicable)
+- Return the info dictionary.
+
+Implementation details and utilities used
+- Uses:
+  - xpath_text, compat_xpath for XML parsing
+  - _download_webpage, _download_xml, _download_json for HTTP requests
+  - _search_regex for extracting values from HTML/XML
+  - int_or_none, url_or_none, determine_ext, urlencode_postdata for data handling
+  - _extract_m3u8_formats to parse HLS streams
+  - _sort_formats to ensure proper format ordering
+- Error handling:
+  - Video deletion raises an expected ExtractorError
+  - Adult content gating handled via two-pass check with informative warnings
+  - Login failures raise ExtractorError with a descriptive message
+  - Other API failures raise ExtractorError with the provider name and server-provided error
+
+How it fits together
+- The extractor first ensures login (if credentials are provided).
+- It then fetches a video metadata XML from AfreecaTV’s API, handling adult-content gating gracefully.
+- It parses the metadata to determine a direct video URL or a set of files (parts).
+- It builds either a single video info dict or a multi_video entry containing per-part entries, each with appropriate metadata and available formats (either HLS or direct/RTMP).
+- The code is robust to variations: non-standard key formats, multi-part videos, and adult-content gating.
+
+Overall, this extractor provides:
+- Comprehensive handling for AfreecaTV VODs and some live-related pages
+- Support for both HLS (m3u8) and non-HLS formats
+- Multi-part video support with per-part metadata
+- Adult-content gating with a safe two-step retrieval
+- Credential-based access when necessary via a login flow

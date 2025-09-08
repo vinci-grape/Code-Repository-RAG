@@ -1,0 +1,51 @@
+Concise summary of ./youtube-dl/devscripts/make_supportedsites.py
+
+What it does:
+- Generates a Markdown file listing all supported sites (extractors) from youtube-dl.
+- Produces a bullet list with each site name in bold, an optional description, and a tag if the site’s extractor is currently broken.
+- Writes the resulting Markdown to a user-specified output file.
+
+Main flow and key pieces:
+- Command-line interface:
+  - Uses optparse to require a single positional argument OUTFILE.md.
+  - Validates that exactly one argument (the output file) is provided.
+- Import setup:
+  - Adjusts sys.path by inserting the repository root (grandparent of this script) so youtube_dl and a local utils module can be imported.
+  - Imports youtube_dl and a write_file utility (from utils).
+- gen_ies_md(ies) generator:
+  - Iterates over a list of extractor classes (ies).
+  - For each extractor (ie):
+    - Start with a markdown bold site name: **IE_NAME**.
+    - If IE_DESC is False, skip the extractor (do not include it).
+    - If IE_DESC is not None, append a description: ": IE_DESC".
+    - If the extractor is not working (ie.working() returns False), append " (Currently broken)".
+    - Yields the final markdown line for that extractor.
+- Collecting extractors:
+  - Obtains extractors via youtube_dl.gen_extractors().
+  - Sorts them by IE_NAME (case-insensitive).
+- Output construction:
+  - Builds a markdown document starting with "# Supported sites\n".
+  - Appends each generated line as a bullet: " - " + md + "\n".
+  - Writes the final string to the specified outfile using write_file(outfile, out).
+- Execution:
+  - Entrypoint guarded by if __name__ == '__main__': main()
+
+Important implementation details:
+- Extraction metadata:
+  - IE_NAME: used for display name (bold in Markdown).
+  - IE_DESC: optional description; True/False handling:
+    - False: skip the extractor entirely.
+    - None: no description added.
+    - Any other value: appended as the description.
+- Status indicator:
+  - If an extractor is not working (working() returns False), the line includes " (Currently broken)".
+- Ordering:
+  - Extractors are sorted alphabetically by IE_NAME (case-insensitive) to produce a stable list.
+- Dependencies:
+  - Relies on youtube_dl.gen_extractors() API and each extractor exposing IE_NAME, optional IE_DESC, and a working() method.
+  - Uses a write_file helper to write the Markdown to disk.
+
+Output:
+- A Markdown file with a heading "# Supported sites" and a bullet list of sites in the form:
+  - **SiteName**: Description (Currently broken)
+  - Entries with IE_DESC set to False are omitted.

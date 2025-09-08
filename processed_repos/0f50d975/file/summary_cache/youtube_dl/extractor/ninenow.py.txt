@@ -1,0 +1,54 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/ninenow.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for 9now (9now.com.au) videos. It handles clips and episodes by parsing embedded page data and delegates to Brightcove for actual streaming.
+
+- Main class
+  - NineNowIE(InfoExtractor)
+    - IE_NAME: '9now.com.au'
+    - _VALID_URL: matches 9now URLs with two path segments before the video slug; captures id
+    - _GEO_COUNTRIES: ['AU'] to restrict geo-region
+    - _BRIGHTCOVE_URL_TEMPLATE: Brightcove player URL with videoId parameter
+
+- Tests (_TESTS)
+  - Test for a clip (includes expected md5, id, title, description, uploader_id, upload_date, timestamp) with Australia-only skip
+  - Test for an episode (only_matching)
+  - Test for a DRM-protected video (only_matching)
+
+- Core workflow (_real_extract)
+  1) Determine display_id from URL and download the page
+  2) Extract page data from window.__data using a regex; parse as JSON
+     - If initial extraction fails, try an alternate JSON.parse-wrapped format
+  3) Locate video data for either 'episode' or 'clip':
+     - Look up currentKey under the kind (episode/clip)
+     - Look up the corresponding cache under kind and extract common_data
+     - Build common_data from currentKey or the first cache entry for the kind
+     - If neither is found for both kinds, raise ExtractorError("Unable to find video data")
+  4) Get video_data = common_data['video']
+     - If DRM is present (video_data['drm']): raise ExtractorError('This video is DRM protected.', expected=True)
+  5) Determine Brightcove video identity:
+     - brightcove_id = video_data.get('brightcoveId') or 'ref:' + video_data['referenceId']
+     - video_id = compat_str(video_data.get('id') or brightcove_id)
+  6) Metadata
+     - title = common_data['name']
+     - description = common_data.get('description')
+     - duration = float_or_none(video_data.get('duration'), 1000)  # convert ms to seconds
+     - thumbnails: build a list from common_data['image']['sizes']; each item has:
+       - id (thumbnail_id)
+       - url (thumbnail_url)
+       - width (int from thumbnail_id[1:], using int_or_none)
+  7) Return a url_transparent result that points to Brightcove:
+     - url: Brightcove URL constructed with BRIGHTCOVE_URL_TEMPLATE using brightcove_id
+     - geo restriction attached via smuggle_url with {'geo_countries': self._GEO_COUNTRIES}
+     - id, title, description, duration, thumbnails
+     - ie_key: 'BrightcoveNew' to delegate to Brightcove extractor
+
+- Important implementation details
+  - Data source: video data is embedded in the page as window.__data; the code robustly handles two formats: the initial JSON object or a JSON.parse-wrapped string inside the page.
+  - Video data resolution: it searches both 'episode' and 'clip' kinds and uses the available cache to derive common_data.
+  - DRM handling: explicitly detects DRM-protected content and raises an ExtractorError with expected=True to indicate restriction.
+  - Brightcove integration: the actual media is hosted on Brightcove; the extractor builds a URL to Brightcove and returns an indication (ie_key='BrightcoveNew') so the standard Brightcove extractor handles the rest.
+  - Geo restriction: 9now content in AU is enforced by attaching geo_countries to the Brightcove URL via smuggle_url.
+  - Thumbnails: builds a list of thumbnails from common_data.image.sizes, inferring width from the thumbnail key (thumbnail_id[1:]) with int_or_none.
+
+In short, NineNowIE extracts page-embedded video data to identify a Brightcove video, applies AU geo constraints, handles DRM by erroring, and returns a metadata-rich url_transparent entry that delegates to Brightcove for playback.

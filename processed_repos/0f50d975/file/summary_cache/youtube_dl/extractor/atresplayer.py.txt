@@ -1,0 +1,56 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/atresplayer.py
+
+- Purpose
+  - Implement an InfoExtractor for Atresplayer (atresplayer.com) to fetch episode metadata and video formats via the Atresplayer API, with optional user login support.
+
+- Key class
+  - AtresPlayerIE(InfoExtractor)
+    - _VALID_URL: Regex matching Atresplayer episode URLs and capturing display_id and a 24-hex-character video id.
+    - _NETRC_MACHINE: 'atresplayer' (for credentials lookup).
+    - _API_BASE: Base API URL ('https://api.atresplayer.com/').
+    - _TESTS: Several test cases verifying extraction, including a login-required skip case and sample URLs.
+    - _real_initialize: Triggers login flow by calling _login() before extraction.
+    - _handle_error(e, code): Common error handling for HTTP errors:
+      - If HTTP 4xx/3xx with API error JSON indicating 'required_registered' => raise login_required.
+      - Otherwise raise ExtractorError with API-provided error_description.
+    - _login(): Performs user login if credentials are provided.
+      - Retrieves credentials via _get_login_info().
+      - Requests login page from API_BASE + 'login'.
+      - Posts username/password to account.atresmedia.com API login endpoint.
+      - Expects a response containing 'targetUrl'; follows it to complete login.
+      - Handles 400 errors via _handle_error (to raise appropriate login errors).
+      - If no credentials are provided, the function returns without error (login is optional).
+    - _real_extract(url): Core extraction logic.
+      - Parse display_id and video_id from the URL using _VALID_URL.
+      - Fetch episode metadata from API_BASE + 'client/v1/player/episode/{video_id}'.
+      - If a 403/authorization error occurs, handle via _handle_error.
+      - Title is episode['titulo'].
+      - Build video formats from episode['sources']:
+        - If type is 'application/vnd.apple.mpegurl' (HLS), use _extract_m3u8_formats with m3u8_native, and alias as hls.
+        - If type is 'application/dash+xml' (DASH), use _extract_mpd_formats.
+        - Both format extractions use fatal=False to allow partial success.
+      - _sort_formats(formats).
+      - Compute meta fields: channel, season, episode_number by preferring heartbeat or omniture data.
+      - Return a dict with:
+        - display_id, id, title, description, thumbnail, duration (int_or_none), formats
+        - channel, season, episode_number (from meta)
+    - Important behavior:
+      - If login is not configured, extraction proceeds without authenticated access (some videos may require login; in tests this leads to a skip message).
+      - Video formats may include HLS and DASH streams; both are supported via standard YouTube-DL format extractors.
+      - Duration uses int_or_none to safely convert to integer if present.
+
+- Main functionality flow
+  - On initialization, attempt login (optional).
+  - When extracting, query the Atresplayer API for the episode by video_id.
+  - Build a list of available video formats from HLS/DASH sources.
+  - Gather metadata (title, description, thumbnail, duration) and optional channel/season/episode_number.
+  - Return a structured info dictionary suitable for download by youtube-dl.
+
+- Implementation details worth noting
+  - Error handling is designed to interpret API error responses and convert them into user-friendly messages or login prompts.
+  - Login flow uses a two-step process: obtain a target URL from the login API and then follow it to finalize authentication.
+  - Credentials are read via _get_login_info and are optional; this aligns with test cases that skip extraction when not provided.
+  - Formats extraction uses native m3u8 and mpd parsers with fatal=False to avoid failing extraction when some sources are unavailable.
+  - The code parses display_id and id from the URL to preserve the user-friendly URL portion while keeping the internal id separate for API calls.
+
+Overall, this extractor fetches episode data from Atresplayer’s API, supports authenticated access when credentials are provided, parses multiple video formats (HLS/DASH), and returns a comprehensive metadata dictionary for downstream processing.

@@ -1,0 +1,48 @@
+Concise yet comprehensive summary of the code in youtube-dl/youtube_dl/extractor/yesjapan.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for YesJapan video pages, extracting basic video metadata and a direct video URL for download.
+
+- Key class
+  - YesJapanIE(InfoExtractor): Subclass of youtube_dl's InfoExtractor.
+
+- URL matching
+  - _VALID_URL: Regex matching URLs like
+    http(s)://www.yesjapan.com/video/{slug}_{id}.html
+    - Captures slug and id; id is alphanumeric and used as the video id.
+
+- Test data
+  - _TEST: Sample URL with expected md5, and info_dict containing:
+    - id, title, description, ext (mp4), timestamp, upload_date, thumbnail
+  - Useful for automated testing within youtube-dl.
+
+- Core extraction (_real_extract)
+  - Extracts video_id via self._match_id(url) from the regex group.
+  - Downloads the webpage: self._download_webpage(url, video_id).
+  - Metadata extraction using Open Graph helpers:
+    - title = self._og_search_title(webpage)
+    - video_url = self._og_search_video_url(webpage)
+    - description = self._og_search_description(webpage)
+    - thumbnail = self._og_search_thumbnail(webpage)
+  - Upload timestamp extraction:
+    - Looks for an element with class="pm-submit-data" using get_element_by_attribute.
+    - If found, extracts datetime attribute via regex r'datetime="([^"]+)"'.
+    - Converts to a timestamp using parse_iso8601. If not found, timestamp remains None.
+  - Resolve final video URL (to obtain proper extension if redirects occur):
+    - Creates a HEAD request (HEADRequest(video_url)).
+    - Performs a non-fatal request to resolve redirects: self._request_webpage(..., fatal=False).
+    - If a response is obtained, uses req.geturl() as the final video_url.
+  - Formats information:
+    - formats = [{'format_id': 'sd', 'url': video_url}]
+    - This implies a single format entry labeled 'sd' (standard definition).
+  - Return dictionary with:
+    - id, title, formats, description, timestamp, thumbnail
+
+- Important implementation details
+  - Uses Open Graph tags to extract most metadata robustly.
+  - Timestamp extraction is optional (fatal=False path); if missing, timestamp stays None.
+  - Redirect resolution is non-fatal; if final URL cannot be resolved, the original video_url is used.
+  - The extractor provides only one format (sd) based on the final or initial video URL; it does not parse multiple quality variants.
+  - The returned info_dict aligns with youtube-dl conventions: id, title, formats, description, timestamp, thumbnail (no duration or uploader fields).
+
+Overall, YesJapanIE fetches page metadata via Open Graph, optionally reads an upload datetime from a specific page element, resolves any redirects to get a stable video URL, and returns a minimal but usable video entry with a single SD format.

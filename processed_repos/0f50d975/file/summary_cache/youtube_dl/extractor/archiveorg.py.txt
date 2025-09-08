@@ -1,0 +1,46 @@
+- Purpose: ArchiveOrgIE extracts video/audio information from archive.org pages that match either details or embed URLs. It supports both jwplayer-based playlists and HTML5 media fallbacks, and enriches basic media entries with metadata from archive.org.
+
+Key components:
+- Class ArchiveOrgIE(InfoExtractor)
+  - IE_NAME: "archive.org"
+  - IE_DESC: "archive.org videos"
+  - _VALID_URL: matches http(s)://archive.org/details/<id> or http(s)://archive.org/embed/<id>
+  - _TESTS: includes two real test URLs with expected info dicts (ids, titles, descriptions, timestamps, etc.) and two embedding URLs as matching tests.
+
+Main functionality (_real_extract):
+1. Determine video_id from URL: video_id = self._match_id(url).
+2. Download embed page HTML for the ID: webpage = self._download_webpage('http://archive.org/embed/' + video_id, video_id).
+3. Try to locate a playlist:
+   - Look for an HTML element with class "js-play8-playlist" and extract its value attribute to get the playlist string.
+   - If not found, fall back to an old jwplayer playlist by matching a Play('...', [ ... ]) pattern and extract the JSON array.
+   - Parse the playlist JSON with _parse_json(..., fatal=False). If found, feed it into _parse_jwplayer_data to generate the initial info dict.
+4. If no jwplayer playlist is found, fall back to HTML5 media:
+   - Use _parse_html5_media_entries(url, webpage, video_id)[0] to obtain the initial info dict.
+   - Explicitly set info['id'] = video_id.
+5. Metadata enrichment:
+   - Define helper get_optional(metadata, field) to safely fetch the first item from metadata fields (metadata is expected to be a dict of lists).
+   - Download metadata JSON from http://archive.org/details/<video_id> with output=json. Use the 'metadata' key from the response.
+   - Update info with:
+     - title: get_optional(metadata, 'title') or existing info['title']
+     - description: clean_html(get_optional(metadata, 'description'))
+   - If info['_type'] != 'playlist', also set:
+     - creator: get_optional(metadata, 'creator')
+     - release_date: unified_strdate(get_optional(metadata, 'date'))
+     - uploader: get_optional(metadata, 'publisher') or creator
+     - timestamp: unified_timestamp(get_optional(metadata, 'publicdate'))
+     - language: get_optional(metadata, 'language')
+6. Return the final info dict.
+
+Key implementation details:
+- Robust playlist handling: supports both modern jwplayer-based playlists and older HTML5 fallback mechanisms.
+- Parsing utilities:
+  - extract_attributes to parse HTML attributes for the playlist source.
+  - _parse_json with fatal handling for safe JSON parsing.
+  - _parse_jwplayer_data to convert jwplayer playlist data into a usable info dict.
+  - _parse_html5_media_entries to extract entries when only HTML5 media is available.
+  - clean_html to sanitize description text.
+  - unified_strdate and unified_timestamp to normalize date/time fields.
+- Metadata enrichment uses a separate API endpoint (details/<id>?output=json) and safely merges title/description and other fields into the final result.
+- Type handling: if the media is a playlist, some fields like creator/date/uploader/timestamp may be omitted (controlled by the _type check).
+
+Overall, ArchiveOrgIE is designed to extract and unify video/audio information from archive.org by first detecting the available media source (jwplayer playlist or HTML5), then enriching the extracted data with metadata from archive.org.

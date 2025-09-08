@@ -1,0 +1,74 @@
+Here is a concise but comprehensive summary of the file youtube-dl/youtube_dl/extractor/discoverygo.py.
+
+Main purpose
+- Implement extractors for Discovery GO sites (DiscoveryGO family) to fetch either a single video or a show/season playlist, producing standard YouTube-DL video/playlist results with formats, metadata, and subtitles.
+
+Key classes
+- DiscoveryGoBaseIE (InfoExtractor)
+  - Central logic shared by both single video and playlist extractors.
+  - _VALID_URL_TEMPLATE: matches Discovery GO domains (discovery, investigationdiscovery, discoverylife, animalplanet, ahctv, destinationamerica, sciencechannel, tlc, velocitychannel)go.com/<path>/... and captures an id.
+  - _extract_video_info(video, stream, display_id):
+    - Extracts video metadata (title, description, duration, series, season/episode, tags, age_limit).
+    - Builds a list of formats from stream data:
+      - Handles two stream kinds: '' (default) and 'hds'.
+      - '' uses HLS via _extract_m3u8_formats (mp4, entry protocol m3u8_native, m3u8_id 'hls').
+      - 'hds' uses _extract_f4m_formats.
+      - Sorts formats after collection.
+    - Handles missing/unauthorized streams with informative errors:
+      - If stream is missing and video.authenticated is True, raises an ExtractorError suggesting cookies.
+      - Otherwise raises a generic "Unable to find stream" error.
+    - Subtitles:
+      - If stream contains captions (list), collects subtitle entries from fileUrl with language (default 'en').
+      - Determines extension via determine_ext, mapping 'xml' to 'ttml' for files with XML extension.
+    - Returns a dictionary with id, display_id, title, description, duration, series, season_number, episode_number, tags, age_limit, formats, subtitles.
+
+- DiscoveryGoIE (DiscoveryGoBaseIE)
+  - _VALID_URL: uses the base template with a non-empty path segment pattern, targeting individual video pages.
+  - _GEO_COUNTRIES: ['US'] (geolocation restriction).
+  - _TEST: example video page with expected metadata (id, ext, title, description, duration, series, season, episode, age_limit).
+  - _real_extract(url):
+    - Extracts display_id from URL.
+    - Downloads the page and finds the video container div via a regex for class="video-player-container".
+    - Extracts JSON data from data-video or data-json attribute, parsing it into a video object.
+    - Retrieves stream from video['stream'] and delegates to _extract_video_info(video, stream, display_id).
+
+- DiscoveryGoPlaylistIE (DiscoveryGoBaseIE)
+  - _VALID_URL: uses the base template with an empty path, targeting a show/playlist page (e.g., /bering-sea-gold/).
+  - _TEST: example playlist with id 'bering-sea-gold', title, description, and minimum playlist item count.
+  - suitable(cls, url): returns False if DiscoveryGoIE is suitable for the URL (so a single video won’t be treated as a playlist); otherwise uses the parent suitability check.
+  - _real_extract(url):
+    - Extracts display_id from URL.
+    - Downloads the page and scans for data-json blocks containing JSON data.
+    - For each JSON object:
+      - Parses the JSON, transforms HTML entities if needed.
+      - Skips non-dict data or non-episode types.
+      - Uses socialUrl as the episode page URL and data.get('id') as the video_id.
+      - Adds a result entry pointing to DiscoveryGoIE for the episode (ie=DiscoveryGoIE.ie_key()).
+    - Returns a playlist_result with:
+      - entries: list of episode video entries.
+      - id: display_id.
+      - title: Og title with the suffix ' | Discovery GO' removed.
+      - description: Og description.
+
+Implementation details and behavior
+- Data extraction:
+  - Video metadata comes from JSON embedded in the page (data-video or data-json in a container element identified by a video-player-container div).
+  - Video object fields leveraged include: name (title), description.detailed, duration, show.name (series), season.number, episodeNumber, parental.rating, tags.
+- Formats:
+  - Supports HLS (mp4 via m3u8) and HDS (f4m) streaming formats.
+  - Uses existing helper methods _extract_m3u8_formats and _extract_f4m_formats, with appropriate IDs and fatal flags.
+  - Formats are sorted with _sort_formats.
+- Subtitles:
+  - Captions are optional and expected as a list with fileUrl and fileLang.
+  - Language defaults to 'en' if not provided.
+  - Correctly maps XML-based captions to 'ttml'.
+- Error handling:
+  - Distinguishes between subscription-restricted videos (authenticated True) and missing streams.
+  - Provides clear extractor errors to guide the user (e.g., cookies needed).
+- Geolocation:
+  - The single-video extractor is restricted to US; playlists inherit the same behavior via the base class.
+
+Overall structure
+- A shared base extractor (DiscoveryGoBaseIE) handles the heavy lifting of parsing video data, formats, and metadata.
+- DiscoveryGoIE handles single-video pages.
+- DiscoveryGoPlaylistIE handles shows/playlists, assembling a list of episode pages and delegating to DiscoveryGoIE for per-episode extraction.

@@ -1,0 +1,39 @@
+- Purpose
+  - A youtube-dl extractor for dagbladet.no video pages (DBTV). It identifies the real video source (YouTube or JWPlatform) and delegates extraction to the corresponding extractor.
+
+- Class and inheritance
+  - DBTVIE(InfoExtractor): implements the extraction logic.
+
+- URL patterns
+  - _VALID_URL matches dagbladet.no/video/... pages. Supports:
+    - /video/embed/<id>
+    - /video/<display_id>/<id>
+    - The id is either 11 alphanumeric characters or 8 alphanumeric characters.
+  - Aimed at converting the Dagbladet page into a URL that youtube-dl can delegate to (YouTube or JWPlatform).
+
+- URL extraction from pages
+  - _extract_urls(webpage) is a static method that scans a page for iframes embedding Dagbladet video URLs.
+  - Uses a regex to capture iframe src values pointing to dagbladet.no/video/embed/<id> (11-char or 8-char IDs) and returns a list of those URLs.
+
+- Core extraction logic
+  - _real_extract(self, url):
+    - Parses the url with _VALID_URL to obtain display_id and video_id.
+    - Builds a transparent info dictionary: {'_type': 'url_transparent', 'id': video_id, 'display_id': display_id}.
+    - If the video_id length is 11 (typical YouTube ID):
+      - Sets url to the video_id and ie_key to 'Youtube' to let the YouTube extractor handle it.
+    - Otherwise (8-char JWPlatform code):
+      - Sets url to 'jwplatform:' + video_id and ie_key to 'JWPlatform' to delegate to the JWPlatform extractor.
+    - Returns the info dict.
+
+- Key implementation details
+  - Delegation is done via a url_transparent result, enabling composition of extractors (the final metadata comes from Youtube or JWPlatform).
+  - The logic cleanly separates two possible embedded sources: YouTube (11-char ID) or JWPlatform (8-char ID).
+  - Tests cover typical usage (full YouTube-backed extraction) and embedded URL matching (embed path and another sample URL) with only_matching.
+
+- Tests
+  - _TESTS includes:
+    - A real video URL with an 11-char ID, expecting downstream extraction via YouTube and resulting metadata (title, description hash, etc.).
+    - Two other sample URLs used with only_matching to ensure proper URL pattern matching.
+
+- Summary
+  - The file provides a lightweight bridge: it converts certain Dagbladet video URLs into either YouTube or JWPlatform URLs, then defers to the appropriate extractor for the actual metadata and playback information. It also includes a utility to extract embedded Dagbladet video URLs from a page.

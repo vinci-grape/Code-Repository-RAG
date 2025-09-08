@@ -1,0 +1,101 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/extractor/iqiyi.py
+
+Purpose
+- Implement a YouTube-dl extractor for IQIYI (loveqi.com) videos and playlists, including login flow, API interaction, and M3U8-based formats.
+
+Main components
+
+1) Helper utilities
+- md5_text(text): returns MD5 hex of given text.
+- Uses various helper functions from youtube-dl utilities (e.g., removal of leading text, HTML cleaning, element extraction, RSA utility).
+
+2) IqiyiSDK
+- Purpose: Encapsulates the client-side signature/obfuscation logic that IQIYI uses to verify login requests.
+- Constructor: IqiyiSDK(target, ip, timestamp).
+- Core methods:
+  - split_sum(data): sums hex-digit values in a string and returns as string.
+  - digit_sum(num): sums digits of a number/string, returns string.
+  - even_odd(): returns (even_sum, odd_sum) derived from timestamp digits.
+  - preprocess(chunksize): MD5(target), split into 32/chunksize chunks, plus IP-partitioned digits from IP.
+  - mod(modulus): applies a transformation to target using first chunk and IP parts modulo modulus.
+  - split(chunksize): rebuilds target by interleaving chunks with IP parts depending on chunksize.
+  - handle_input16(), handle_input8(), handleSum(): various target-obfuscation steps using md5 and split_sum.
+  - date(scheme): appends date components (year/month/day) to target after MD5.
+  - split_time_even_odd(), split_time_odd_even(): insert md5(target) between modified time parts.
+  - split_ip_time_sum(), split_time_ip_sum(): append sum(ip)/timestamp components with chunks.
+- Effect: Given a target, IP and timestamp, it can compute a signature-like string used for login validation.
+
+3) IqiyiSDKInterpreter
+- Purpose: Decodes packed IQIYI SDK code and executes a sequence of obfuscation/transform functions on a target.
+- Constructor: IqiyiSDKInterpreter(sdk_code).
+- run(target, ip, timestamp):
+  - Decodes sdk_code via decode_packed_codes.
+  - Extracts function names via regex input=...\(input.
+  - Creates IqiyiSDK(target, ip, timestamp).
+  - Maps known function names to methods on the IqiyiSDK instance (handleSum, handleInput8, handleInput16, splitTimeEvenOdd, splitTimeOddEven, splitIpTimeSum, splitTimeIpSum).
+  - Executes each function in order:
+    - modN: sdk.mod(N)
+    - dateYMD patterns: sdk.date(...)
+    - splitN: sdk.split(N)
+    - If a function is unknown, raises ExtractorError.
+  - Returns sdk.target (the computed signature).
+
+4) IqiyiIE (InfoExtractor)
+- Purpose: Core extractor for IQIYI pages, handling single videos and playlists, with login support.
+- Metadata:
+  - IE_NAME = 'iqiyi'
+  - IE_DESC = '爱奇艺'
+  - _VALID_URL matches IQIYI and PPS.tv pages (HTML endpoints with video content).
+  - _NETRC_MACHINE = 'iqiyi'
+- _FORMATS_MAP: mapping from IQIYI internal format IDs to priority numbers for format preference (e.g., '96'->1, '5'->6, '18'->7).
+- _real_initialize(): triggers login by calling _login().
+- _rsa_fun(data): RSA encrypts data with a hardcoded public key (N, e). Used to encrypt passwords for login.
+- _login():
+  - Retrieves stored login info (username/password). If no username provided, skips login.
+  - Gets a token from http://kylin.iqiyi.com/get_token (SDK code and IP provided by server).
+  - Builds a login target URL including the RSA-encrypted password.
+  - Runs IQiyiSDKInterpreter on the server-provided SDK code to compute a signature.
+  - Calls http://kylin.iqiyi.com/validate with target, server, token, bird_src, sign, and timestamp.
+  - Checks response code; on failure, logs a warning and returns False; on success, returns True.
+- get_raw_data(tvid, video_id):
+  - Builds a signed request to IQIYI’s tmts API: http://cache.m.iqiyi.com/jp/tmts/{tvid}/{video_id}/
+  - Includes tvid, vid, src, sc (MD5 over timestamp + key + tvid), and timestamp.
+  - Uses geo_verification_headers for location checks and strips leading junk via transform_source.
+- _extract_playlist(webpage):
+  - Attempts to extract a playlist (album) from a page.
+  - Finds albumId and optional album title; collects video links on first page, then pages through additional results via cache.video.qiyi.com/jp/avlist/{album_id}/{page}/{PAGE_SIZE}/.
+  - For each vurl found, adds to entries as URL results.
+  - Returns playlist_result(entries, album_id, album_title) if links found.
+- _real_extract(url):
+  - Downloads the video page.
+  - Tries to locate tvid via data-(player|shareplattrigger)-tvid attribute; if not found, tries to treat page as a playlist via _extract_playlist.
+  - If tvid found, locates video_id via data-(player|shareplattrigger)-videoid.
+  - Fetches raw data up to 5 times until a valid data block is returned:
+    - If code != 'A00000' and code == 'A00111', treats as geo-restricted.
+    - On success, parses data. For each stream in data['vidl'] with 'm3utx' present, creates a format dict:
+      - url: stream['m3utx']
+      - format_id: stream['vd'] (as string)
+      - ext: 'mp4'
+      - protocol: 'm3u8_native'
+      - preference: based on _FORMATS_MAP
+  - Sorts formats, extracts title from page via:
+    - element by id 'widget-videotitle'
+    - or element with class 'mod-play-tit'
+    - or a regex-based title extraction
+  - Returns dict with id, title, formats.
+
+Key implementation details
+- RSA login flow and signature generation are implemented via:
+  - _login() using a server-provided SDK (IQIYI's own JS code).
+  - IqiyiSDK and IqiyiSDKInterpreter performing the obfuscated/signature assembly.
+  - RSA uses a hardcoded public key (N and e) and ohdave_rsa_encrypt.
+- get_raw_data builds a signed request with an MD5-based ‘sc’ parameter derived from timestamp and a secret key.
+- Playlist handling flows through two stages:
+  - Direct links on the page (first page), then
+  - Additional pages retrieved via a separate JSON endpoint that returns vlist items.
+- Video extraction handles multiple quality streams (video formats) provided as m3u8 URLs (protocol m3u8_native) and assigns a preference level according to _FORMATS_MAP.
+- Geo-restriction handling: if server reports A00111, extractor marks geo-restricted and raises accordingly; otherwise raises a generic error.
+- Robust title extraction with multiple fallbacks: widget-videotitle, mod-play-tit, or a regex-based title from HTML.
+- Uses youtube-dl utilities for HTTP requests, JSON parsing, HTML extraction, and error handling.
+
+Overall, this file provides a full IQIYI extraction flow: optional login via IQIYI’s SDK-based validation, fetching and validating video data, assembling M3U8-based formats with appropriate quality preferences, and handling of playlists/albums in addition to single videos.

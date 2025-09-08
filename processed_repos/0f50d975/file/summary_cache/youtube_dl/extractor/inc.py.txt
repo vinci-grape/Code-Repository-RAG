@@ -1,0 +1,44 @@
+Summary of IncIE in ./youtube-dl/youtube_dl/extractor/inc.py
+
+Purpose:
+- IncIE extracts video information from INC.com pages that embed Kaltura players and delegates actual video extraction to the Kaltura extractor.
+
+Key components:
+- Class IncIE(InfoExtractor): Defines the extractor for INC URLs.
+- _VALID_URL: Regex matching INC article/video pages that end with .html and contain an id segment. Pattern: https?://(www.)?inc.com/(any non-slash segments)/(id).html
+- _TESTS: Includes test cases with expected metadata (ids, titles, descriptions, timestamps, and file extensions) and a test with only_matching.
+
+Main workflow in _real_extract:
+1. Display ID:
+   - display_id = self._match_id(url)
+
+2. Page retrieval:
+   - webpage = self._download_webpage(url, display_id)
+
+3. Partner ID extraction:
+   - Attempts to locate a JavaScript variable _bizo_data_partner_id using a regex:
+     var           _?bizo_data_partner_id = "12345"
+   - If not found, defaults to '1034971'.
+
+4. Kaltura video ID extraction:
+   - Primary method: search for a Kaltura player element id pattern:
+     id="kaltura_player_<id>"
+     and capture the <id> portion as the kaltura_id.
+   - If the above fails, fallback to parsing a JSON structure in the page:
+     pageInfo.videos = [...]
+     and extract vid_kaltura_id from that JSON.
+   - The code combines the two steps with a logical OR to obtain kaltura_id.
+
+5. Build Kaltura URL and delegate extraction:
+   - Returns a URL result that points to the Kaltura extractor:
+     self.url_result('kaltura:%s:%s' % (partner_id, kaltura_id), KalturaIE.ie_key())
+   - This delegates the actual video extraction to KalturaIE using the partner and video IDs.
+
+Important implementation details:
+- Delegation to KalturaIE: The extractor does not fetch metadata itself from Kaltura; it hands off to KalturaIE by constructing a Kaltura URL in the form kaltura:<partner_id>:<kaltura_id>.
+- Robust ID extraction: Uses a primary method (kaltura_player_*) and a JSON fallback (pageInfo.videos) to obtain the Kaltura video ID.
+- Default partner ID: If the partner ID regex fails, a sensible default ('1034971') is used to avoid failure.
+- Tests indicate support for multiple INC pages, including those with explicit Kaltura player IDs and those where the information is embedded differently.
+
+Overall functionality:
+- IncIE is a thin wrapper around Kaltura for INC.com pages. It detects the Kaltura video associated with an INC article, gathers the necessary partner and video IDs from the page, and then delegates to KalturaIE to perform the actual video extraction.

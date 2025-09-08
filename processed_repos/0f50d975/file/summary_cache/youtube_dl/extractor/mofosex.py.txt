@@ -1,0 +1,45 @@
+Here’s a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/mofosex.py:
+
+- Purpose
+  - Implements two extractors for mofosex.com:
+    - MofosexIE: extracts video information from standard video pages.
+    - MofosexEmbedIE: handles embedded video pages and redirects to the standard video page for extraction.
+
+- Key classes
+  - MofosexIE (inherits KeezMoviesIE)
+    - _VALID_URL: matches URLs like http(s)://www.mofosex.com/videos/{id}/{display_id}.html
+    - _TESTS: includes a valid test with expected fields (id, display_id, ext, title, thumbnail, upload_date, view_count, like_count, dislike_count, age_limit) and a secondary test for an unavailable video (only_matching)
+    - _real_extract(url)
+      - Uses self._extract_info(url) to obtain the base info (from KeezMoviesIE), including id, display_id, title, ext, thumbnail.
+      - Scrapes additional data from the page:
+        - view_count: parsed from a VIEWS: section and converted with str_to_int
+        - like_count: parsed from an element with id="amountLikes" via int_or_none
+        - dislike_count: parsed from an element with id="amountDislikes" via int_or_none
+        - upload_date: parsed via unified_strdate from the Added: field
+        - thumbnail: refreshed via _og_search_thumbnail
+      - Updates the info dictionary with view_count, like_count, dislike_count, upload_date, and thumbnail, then returns it.
+
+  - MofosexEmbedIE (inherits InfoExtractor)
+    - _VALID_URL: matches embed URLs with a videoid parameter, e.g. http(s)://www.mofosex.com/embed/?videoid=123456
+    - _TESTS: includes an only_matching test for the embed URL pattern
+    - _extract_urls(webpage) (static)
+      - Extracts possible embedded mofosex URLs from iframes using a regex that targets src attributes containing videoid.
+    - _real_extract(url)
+      - Extracts video_id via _match_id.
+      - Redirects extraction to the standard video page:
+        - Returns a url_result pointing to http://www.mofosex.com/videos/{video_id}/{video_id}.html
+        - Uses MofosexIE.ie_key() to ensure the resulting URL is processed by MofosexIE
+        - Passes video_id as the video_id in the result
+
+- Implementation details
+  - Leverages KeezMoviesIE for base metadata (id, display_id, title, ext, thumbnail), then augments with additional statistics.
+  - Uses utility helpers:
+    - int_or_none and str_to_int for numeric fields
+    - unified_strdate for robust date parsing
+    - _og_search_thumbnail to obtain thumbnail from Open Graph data
+  - Regex usage:
+    - Video page URL pattern uses named groups 'id' and 'display_id'
+    - Embedding extraction uses a regex to find iframe src attributes pointing to mofosex embed URLs with videoid
+  - Error handling via fatal=False in regex searches to gracefully skip missing data
+
+Overall, the file provides two extractors: one for standard video pages that enriches the base metadata with view/like/dislike counts and upload date, and an embed-based extractor that redirects to the standard page for extraction.

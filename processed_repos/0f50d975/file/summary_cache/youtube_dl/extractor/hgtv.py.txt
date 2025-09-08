@@ -1,0 +1,37 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/hgtv.py
+
+- Purpose
+  - Implement an information extractor for HGTV show pages (HGTV.com) that produces a playlist of the show’s video releases.
+
+- Key class
+  - HGTVComShowIE (inherits from InfoExtractor)
+    - IE_NAME: 'hgtv.com:show'
+    - _VALID_URL: matches HGTV show pages of the form https://www.hgtv.com/shows/<show-name>/<id>
+    - _TESTS: Includes two tests
+      - First test for a show page that contains a data-module="video" block and expects a playlist with at least 15 videos and a specific title.
+      - Second test for a page using data-deferred-module="video" with only_matching True (ensures the URL is recognized but not necessarily fully extracted in that test).
+
+- Main functionality (_real_extract)
+  - Extract display_id from the URL using _match_id(url).
+  - Download the page HTML via _download_webpage(url, display_id).
+  - Locate the embedded JSON config:
+    - Look for a script/config block associated with a video module, using a regex that matches either data-module="video" or data-deferred-module="video" and a following script tag with type="text/x-config".
+    - Capture the JSON content inside that script tag.
+    - Parse the JSON via _parse_json(..., display_id) and select config = ...['channels'][0].
+  - Build playlist entries:
+    - For each video in config['videos'] that has a releaseUrl, create a URL result using self.url_result(video['releaseUrl']).
+  - Return a playlist result with:
+    - entries: the list of video URL results
+    - display_id: the show id
+    - title: config.get('title')
+    - description: config.get('description')
+
+- Important implementation details
+  - The code searches for the video configuration inside a data-module/data-deferred-module="video" block and a following script tag of type text/x-config, allowing it to handle both immediate and deferred video modules.
+  - The JSON config is expected to contain a channels array; the first channel (config['channels'][0]) holds:
+    - title and description for the playlist
+    - videos: a list where each video may include a releaseUrl to the actual video page
+  - Only videos with a releaseUrl are turned into individual entries; others are skipped.
+  - The extractor returns a playlist rather than a single video, aggregating all release URLs found.
+
+Overall, HGTVComShowIE fetches an HGTV show page, locates a JSON config embedded in the page describing the show’s videos, and exposes those videos as a playlist with the show’s title and description.

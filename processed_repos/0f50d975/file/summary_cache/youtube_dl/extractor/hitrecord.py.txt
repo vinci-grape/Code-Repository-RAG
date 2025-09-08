@@ -1,0 +1,30 @@
+- Purpose: HitRecordIE is a YouTube-DL extractor for HitRecord record pages. It fetches metadata from HitRecord’s API and returns a standardized info dictionary for download.
+
+- URL pattern: _VALID_URL matches https://hitrecord.org/records/{id} (id is digits). _TEST uses id 2954362.
+
+- Data source: In _real_extract, it extracts the id with _match_id(url) and downloads JSON from https://hitrecord.org/api/web/records/{id} via _download_json.
+
+- Essential fields extracted:
+  - id: video_id from URL
+  - url: direct MP4 video URL found at video['source_url']['mp4_url']
+  - title: video['title']
+  - description: clean_html(video.get('body')) to sanitize HTML
+  - duration: float_or_none(video.get('duration'), 1000) converting milliseconds to seconds
+  - timestamp: int_or_none(video.get('created_at_i'))
+  - uploader: safe access to video['user']['username'] (compat_str)
+  - uploader_id: safe access to video['user']['id'] (as string)
+  - view_count: int_or_none(video.get('total_views_count'))
+  - like_count: int_or_none(video.get('hearts_count'))
+  - comment_count: int_or_none(video.get('comments_count'))
+  - tags: parsed from video['tags'] if present
+
+- Tags handling: Uses try_get to retrieve video['tags'] as a list. If present, builds a list of t['text'] for each dict t that has a text value of type compat_str. This robustly handles missing or malformatted entries.
+
+- Utilities used:
+  - clean_html: sanitizes description
+  - float_or_none: converts duration (ms) to seconds, with a fallback
+  - int_or_none: safely converts numeric fields to int
+  - try_get: safely accesses nested dict fields without raising KeyError
+  - compat_str: ensures string type compatibility
+
+- Output structure: Returns a dict with keys id, url, title, description, duration, timestamp, uploader, uploader_id, view_count, like_count, comment_count, tags. The _TEST entry demonstrates the expected info_dict fields, including ext: 'mp4' inferred from the mp4_url, and a sample md5 for the downloaded video file.

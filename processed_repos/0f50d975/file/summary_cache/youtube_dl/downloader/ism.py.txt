@@ -1,0 +1,71 @@
+Concise, comprehensive summary of ./youtube-dl/youtube_dl/downloader/ism.py
+
+Purpose
+- Implement downloading of ISM (Smooth Streaming) fragments.
+- Write a PIFF/ISOM header (PIFF) once the track_id is known, so the output can be saved as a PIFF/ISMA compatible file.
+- Integrate with youtube-dl’s fragment downloading framework (FragmentFD).
+
+Main components
+
+1) Bit/box helpers and constants
+- box(box_type, payload): construct a generic MP4/ISOBMFF box with 4-byte size and type.
+- full_box(box_type, version, flags, payload): same as box but with version and flags (for “full” boxes).
+- Struct helpers (u8, u88, u16, u1616, u32, u64, s88, s16, s1616, s32): big-endian pack/unpack helpers for various field sizes.
+- unity_matrix: a standard 32-bit matrix used in moov/trek metadata.
+- Flag constants:
+  - TRACK_ENABLED, TRACK_IN_MOVIE, TRACK_IN_PREVIEW for trak box flags.
+  - SELF_CONTAINED for data reference (ftyp/dinf).
+
+2) PIFF header writer
+- write_piff_header(stream, params):
+  - Builds a complete PIFF/ISOM header for a single track, including:
+    - ftyp: major brand 'isml', minor version 1, compatible brands 'piff', 'iso2'.
+    - moov with mvhd (movie header), trak (track header), and mdia (media) with mdhd, hdlr, minf, stbl, etc.
+    - Audio vs video branching:
+      - Audio: builds mp4a sample entry (channels, bits per sample, sampling rate). If fourcc is AACL, uses appropriate entry.
+      - Video: builds avc1 sample entry; if H264/AVC1, constructs avcC box from codec_private_data (parses SPS/PPS, nal_unit_length_field, etc.).
+    - For video, includes width/height, resolution hints, and AVC configuration data (avcC).
+  - Writes the final moov box into the destination stream.
+- extract_box_data(data, box_sequence):
+  - Recursively traverses nested MP4 boxes to extract the data of a nested box sequence.
+  - Used to locate specific boxes (e.g., tfhd) within a fragment.
+
+3) ISM fragment downloader
+- IsmFD(FragmentFD):
+  - FD_NAME = 'ism'
+  - real_download(self, filename, info_dict):
+    - Determines fragments to download:
+      - If test mode, only the first fragment; otherwise all fragments.
+    - Prepares download context and starts fragment download via internal helpers.
+    - Handles retries per fragment (fragment_retries) with skip_unavailable_fragments option.
+    - track_written flag ensures PIFF header is written only once:
+      - On first fragment where writing is needed, calls extract_box_data to pull the tfhd box data from the fragment (box path: moof -> traf -> tfhd).
+      - Extracts track_id from tfhd (offset 4:8) and stores it into info_dict['_download_params']['track_id'] as a 32-bit unsigned int.
+      - Calls write_piff_header(ctx['dest_stream'], info_dict['_download_params']) to write the PIFF header, enabling proper metadata for the output file.
+    - Appends each downloaded fragment to the destination via _append_fragment(ctx, frag_content).
+    - If an HTTP error occurs, retries up to fragment_retries and reports retries, skips, or errors accordingly.
+    - After processing all fragments, finalizes with _finish_frag_download(ctx) and returns True on success.
+
+Key implementation details
+
+- PIFF header construction is exhaustive, including:
+  - File type (ftyp) and Movie Box (moov) with mvhd, trak, mdia, minf, stbl, etc.
+  - Sample descriptions for audio (mp4a) and video (avc1) with appropriate decoder config (avcC) for H.264.
+  - Video-specific fields: width, height, resolution hints, and AVC configuration derived from codec_private_data.
+  - Data references (dinf/url) set as SELF_CONTAINED, implying the fragment data is self-contained.
+- The code is robust to missing or non-standard fields by using defaults (timescale, language, dimensions, etc.).
+- Frame-level behavior:
+  - It first determines the track_id by inspecting the first fragment’s tfhd box inside the mp4-like structure of the fragment (navigating moof/traf/tfhd).
+  - After obtaining track_id, it builds and writes a complete PIFF header before appending any fragment data to the output stream.
+- Error handling and retries:
+  - Per-fragment retry mechanism controlled by fragment_retries.
+  - If a fragment repeatedly fails and skip_unavailable_fragments is True, it logs a skip and continues; otherwise, it aborts with an error.
+- Test mode:
+  - When test mode is enabled (info_dict['test'] is true), only the first fragment is downloaded and processed.
+
+How it fits in the downloader workflow
+- This module integrates with youtube-dl’s fragment download framework via FragmentFD and IsmFD.
+- It is specialized to ISM/PIFF streaming (Smooth Streaming) manifests, enabling proper PIFF output by materializing a header once the track metadata (especially track_id) is discovered from the first fragment.
+- It relies on fragment-level download, extraction of the tfhd box, and then streaming of fragments into a PIFF-compatible file.
+
+In short, the file provides an ISM downloader that parses and gathers necessary track metadata from fragments, writes a complete PIFF header, and then downloads and appends ISM fragments to the output, with robust retry/error handling and test-mode support.

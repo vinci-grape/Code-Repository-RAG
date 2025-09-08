@@ -1,0 +1,67 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/markiza.py
+
+Overview
+- Provides two extractors for the Markiza video site: MarkizaIE (video pages) and MarkizaPageIE (pages listing multiple videos).
+- Integrates with JWPlayer data via a JSON endpoint and the shared JWPlayer parsing utilities in youtube-dl.
+
+Key classes and responsibilities
+- MarkizaIE (InfoExtractor)
+  - Purpose: Extracts information for individual video pages on videoarchiv.markiza.sk.
+  - URL pattern: _VALID_URL matches video pages under videoarchiv.markiza.sk with /video/... or /embed/ and a numeric id.
+  - Core flow (in _real_extract):
+    - Derives video_id from URL.
+    - Downloads JSON data from http://videoarchiv.markiza.sk/json/video_jwplayer7.json with id as a query param.
+    - Parses the JWPlayer data using _parse_jwplayer_data with m3u8_id='hls' and mpd_id='dash'.
+    - If the parsed info is a playlist:
+      - Sets id to video_id and title from data['details']['name'] via try_get.
+    - If not a playlist (single video):
+      - Sets duration by parsing data['details']['duration'] (string) via parse_duration.
+    - Returns the extracted info dict (which may include stream formats, title, description, thumbnail, duration, etc., as produced by _parse_jwplayer_data).
+  - Important implementation details:
+    - Uses _download_json to fetch data and _parse_jwplayer_data to convert JWPlayer data into the standard youtube-dl info dict.
+    - For playlists, only id and title are set from the JSON; for single videos, duration is added.
+    - Uses try_get with compat_str to safely extract fields.
+
+- MarkizaPageIE (InfoExtractor)
+  - Purpose: Extracts a playlist of videos from pages that list multiple Markiza videos (e.g., category/host pages).
+  - URL pattern: _VALID_URL matches listing pages on markiza.sk and tvnoviny.sk with a numeric id followed by an underscore.
+  - Suitability logic:
+    - Defers to MarkizaIE if it would handle the URL; otherwise, it handles the page.
+    - Implemented via suitable() to return False if MarkizaIE.suitable(url) is True; else uses the parent class’ suitability.
+  - Core flow (in _real_extract):
+    - Derives playlist_id from URL.
+    - Downloads the page with expected_status=500 (some hosts return 500 even when content is OK; this is treated as acceptable).
+    - Extracts video IDs from the page by searching for patterns that render video IDs via:
+      - initPlayer_..., data-entity="...", or id="player_..." followed by digits.
+    - Builds a list of entries where each video_id is turned into a URL to MarkizaIE video page: http://videoarchiv.markiza.sk/video/{video_id}
+    - Deduplicates preserving order using orderedSet.
+    - Returns a playlist result containing the collected entries and the playlist_id.
+  - Important implementation details:
+    - Uses a combination of regex patterns to locate video IDs embedded in the page HTML.
+    - The entries are created as url_result entries pointing to MarkizaIE for actual extraction.
+    - Relies on the shared playlist_result to present a multi-item playlist.
+
+Data flow and helpers
+- _download_json: Fetches JSON data for a specific video, given the video_id.
+- _parse_jwplayer_data: Converts JWPlayer JSON into the standard info dict (formats, title, description, thumbnails, duration, etc.). Accepts m3u8_id and mpd_id to identify streaming formats.
+- try_get: Safe dictionary access helper to extract nested fields without raising exceptions.
+- parse_duration: Converts duration strings (from data['details']['duration']) into seconds.
+- orderedSet: Used to deduplicate video IDs while preserving order when building the playlist from page HTML.
+- compat_str: Ensures string compatibility across Python versions when extracting fields.
+
+Tests and expectations
+- MarkizaIE tests:
+  - Verifies extraction for a specific video returning id, title, description md5, thumbnail pattern, duration, and mp4 extension.
+  - Verifies extraction for a playlist page returning playlist_id, title, and a playlist_count (23).
+  - Includes several only_matching tests to ensure non-video pages are not misidentified as videos.
+- MarkizaPageIE tests:
+  - Similar test with skip_download for metadata when listing pages (collects video links and builds a playlist).
+  - Again includes multiple only_matching URLs to ensure proper demarcation of page types.
+
+Important implementation notes
+- The two extractors are designed to avoid overlap: MarkizaIE handles direct video pages; MarkizaPageIE handles listing pages only if MarkizaIE cannot handle them.
+- The JSON endpoint and JWPlayer parsing are central to extracting video metadata and streaming formats.
+- Playlist handling is distinct: for playlists, the code avoids setting duration and instead assigns id and title from the data object.
+- The code accounts for inconsistent host responses (500 status on some listing pages) by tolerant status handling.
+
+In short, this module provides a robust extraction strategy for Markiza, with a direct video extractor (MarkizaIE) and a listing-page extractor (MarkizaPageIE) that builds playlists by discovering video IDs on the page and delegating to MarkizaIE for actual video extraction.

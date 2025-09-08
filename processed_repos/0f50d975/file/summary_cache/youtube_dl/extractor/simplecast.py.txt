@@ -1,0 +1,64 @@
+- Purpose
+  - A youtube-dl extractor for Simplecast-hosted podcasts. It retrieves episode and podcast data from Simplecast API endpoints, parses them into youtube-dl’s standard info dicts, and supports individual episodes, episode pages, and podcast playlists.
+
+- Key components
+  - SimplecastBaseIE (InfoExtractor)
+    - Common helpers and data parser used by all Simplecast extractors.
+    - _UUID_REGEX and _API_BASE define ID pattern and API base URL.
+    - _call_api(path_tmpl, video_id): fetches JSON from the API using a templated path (e.g., episodes/{id}).
+    - _call_search_api(resource, resource_id, resource_url): calls the search API for a given resource type (episode, site, podcast) by posting the resource URL.
+    - _parse_episode(episode): converts a raw episode JSON object into a canonical info dict with fields like id, display_id, title, url, webpage_url, channel_url, series, season_number, season_id, thumbnail, episode_id, episode_number, description, timestamp, duration, filesize, etc. Handles:
+      - audio file URL selection from several possible fields
+      - season_id extraction from season.href (UUID)
+      - channel URL extraction from episode web URL
+      - safe extraction via helpers: clean_podcast_url, int_or_none, parse_iso8601, strip_or_none, try_get
+
+  - SimplecastIE
+    - For individual episodes accessible via api.simplecast.com/episodes/{uuid} or the player URL.
+    - IE_NAME = 'simplecast'
+    - _VALID_URL matches either api or player URLs containing a UUID.
+    - _extract_urls(webpage): static method that extracts embedded Simplecast URLs from iframes (embed.simplecast.com/{uuid} or player.simplecast.com/{uuid}) using a regex.
+    - _real_extract(url):
+      - Extracts episode_id from the URL.
+      - Fetches episode data via _call_api('episodes/%s', episode_id).
+      - Returns the parsed episode via _parse_episode.
+
+  - SimplecastEpisodeIE
+    - For episode pages on a Simplecast site (e.g., something.simplecast.com/episodes/slug).
+    - IE_NAME = 'simplecast:episode'
+    - _VALID_URL matches the episodes page pattern (subdomain.simplecast.com/episodes/{slug}).
+    - _real_extract(url):
+      - Uses _match_id to get the slug, then calls _call_search_api('episode', slug, url) to fetch the episode data.
+      - Returns the parsed episode via _parse_episode.
+
+  - SimplecastPodcastIE
+    - For podcast home pages that list episodes (the site/pages, subdomain.simplecast.com).
+    - IE_NAME = 'simplecast:podcast'
+    - _VALID_URL matches a podcast subdomain page (excluding endpoints like /episodes/... or api/cdn paths).
+    - _TESTS include:
+      - A playlist test for a podcast URL, expecting a playlist with an id and title and a minimum episode count.
+      - A secondary test for the /episodes path URL with only_matching.
+    - _real_extract(url):
+      - Extracts the subdomain (podcast site) via _match_id.
+      - Calls _call_search_api('site', subdomain, url) to fetch site data, which contains the podcast info.
+      - podcast_id and podcast_title are retrieved from the site data.
+      - entries() internal generator:
+        - Retrieves episodes with _call_api('podcasts/%s/episodes', podcast_id).
+        - Iterates over episodes (episodes.get('collection') or []), parses each with _parse_episode, and sets info['series'] to the podcast title.
+      - Returns a playlist_result over entries(), with podcast_id and podcast_title as playlist id and title.
+
+- Important implementation details
+  - Data mapping: _parse_episode normalizes various possible API fields into a consistent info_dict suitable for youtube-dl downstream processes.
+  - Robust URL handling: the code attempts multiple fallbacks for audio URLs (audio_file.url, audio_file_url, enclosure_url) and uses clean_podcast_url to sanitize the final URL.
+  - Time and size parsing: uses parse_iso8601 for timestamps, int_or_none for integers (duration, episode numbers, filesize).
+  - Season and channel extraction: extracts season_id from season href using a UUID regex; derives channel_url from episode.webpage_url via a regex when possible.
+  - API usage: relies on a base helper to call api.simplecast.com endpoints and a search API for resolving episodes/sites/podcasts by URL/slug.
+  - Playlists: podcast extraction aggregates episodes into a playlist via playlist_result, enriching episode entries with the podcast title as the series.
+  - Testing hooks: defines _COMMON_TEST_INFO and _TESTS to validate correctness against known Simplecast data.
+
+- Summary of how to use
+  - SimplecastIE: fetch a specific episode via api.simplecast.com/episodes/{uuid} or the corresponding player URL.
+  - SimplecastEpisodeIE: fetch an episode page via something.simplecast.com/episodes/{slug}.
+  - SimplecastPodcastIE: fetch a podcast page via something.simplecast.com (subdomain), returning a playlist of episodes for the podcast.
+
+Overall, the file provides a cohesive set of extractors for Simplecast-hosted podcasts, handling individual episodes, episode pages, and entire podcast feeds by leveraging Simplecast’s API and search endpoints, and translating the data into youtube-dl’s standard information model.

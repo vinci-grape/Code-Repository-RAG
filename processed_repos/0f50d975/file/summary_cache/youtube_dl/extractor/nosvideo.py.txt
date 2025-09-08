@@ -1,0 +1,41 @@
+- Purpose: Implement NosVideoIE, a youtube-dl extractor for nosvideo.com to fetch video metadata and direct URL(s).
+
+- Key class and helpers:
+  - NosVideoIE(InfoExtractor): Main extractor class.
+  - _VALID_URL: Regex matching NOS Video URLs for a video ID (embed/ or ?v=) with a 12-char alphanumeric id.
+  - _PLAYLIST_URL: Template for XML playlist URL: http://nosvideo.com/xml/{xml_id}.xml
+  - _FILE_DELETED_REGEX: Used to detect a “File Not Found” page.
+  - _TEST: Sample test case with expected id, md5, title, and thumbnail pattern.
+
+  - _x alias: xpath_with_ns helper bound to the xspf namespace, used for parsing the XML playlist.
+
+- Main workflow (_real_extract):
+  1. Extract video_id from URL using _match_id.
+  2. Prepare a POST request to initiate the download:
+     - Fields: id=video_id, op=download1, method_free=Continue to Video
+     - Content-type: application/x-www-form-urlencoded
+  3. Download the initial page with the POST request. If the page contains a “File Not Found” message, raise ExtractorError marked as expected.
+  4. Extract an XML id from the page with regex r'php\|([^\|]+)\|'. Build the XML playlist URL using _PLAYLIST_URL and the xml_id.
+  5. Download and parse the XML playlist (XML with XSPF namespace).
+  6. Locate the first xspf:track element. If missing, raise ExtractorError (expected).
+  7. From the track, read:
+     - title (xspf:title), trimmed if present
+     - url (xspf:file) – required
+     - thumbnail (xspf:image) – optional
+  8. Build a formats list with a single entry:
+     - format_id: 'sd'
+     - url: the extracted video URL
+  9. Return a dict with:
+     - id: video_id
+     - title: (trimmed) title
+     - thumbnail: thumbnail URL (if any)
+     - formats: list containing the single format
+
+- Important implementation details:
+  - Uses sanitized_Request and urlencode_postdata to perform the POST to trigger the video download.
+  - Uses _download_webpage and _download_xml to fetch pages/XML.
+  - Checks for file existence via a regex instead of relying on HTTP status.
+  - Robust XML parsing with namespace-aware XPath (_x) to access xspf:track, xspf:title, xspf:file, and xspf:image.
+  - Errors are raised as ExtractorError with appropriate guidance (e.g., missing track, file not found).
+
+- Output: A dict with video id, title, optional thumbnail, and a single SD format URL.

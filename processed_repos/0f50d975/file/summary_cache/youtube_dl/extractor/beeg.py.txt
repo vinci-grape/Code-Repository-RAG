@@ -1,0 +1,48 @@
+Summary of ./youtube-dl/youtube_dl/extractor/beeg.py
+
+Overview
+- BeegIE is an InfoExtractor for Beeg video pages (handles beeg.com and beeg.porn, including paths like /video or direct ids).
+- It fetches video information from Beeg’s API (v1 or v2 via api/v6) and constructs a list of available formats along with metadata such as title, description, timestamp, duration, tags, series, and age restrictions.
+
+Main functionality
+- URL matching: Validates and extracts a numeric video ID from Beeg URLs using _VALID_URL.
+- Webpage retrieval: Downloads the page to extract auxiliary data (notably the Beeg API version string beeg_version).
+- API versioning:
+  - If the numeric video_id length >= 10, assumes API v2 and builds a query with v=2. It also processes a t parameter in the URL (if present) to supply start/end times as s and e.
+  - If video_id is shorter, uses v=1.
+- API access: Tries two base paths for the API:
+  - First: https://beeg.com/api/v6/{beeg_version}/video/{video_id}
+  - Second: https://api.beeg.com/api/v6/{beeg_version}/video/{video_id}
+  - Uses fatal flag to control error handling (fatal only for the second path), and stops on the first successful response.
+- Formats extraction:
+  - Iterates over items in the JSON response, where keys are format identifiers (e.g., "720p").
+  - Derives height from the format_id using a regex that matches digits followed by 'p' (e.g., "720p" -> 720).
+  - Skips entries without a valid height or with empty URLs.
+  - Builds each format URL by replacing a {DATA_MARKERS} placeholder with a real value that includes the Beeg version, then converts to an absolute URL using https as default.
+  - Stores each format with fields: url, format_id, height; then sorts formats with _sort_formats.
+- Metadata extraction:
+  - id: video_id (fallback to original id if API returns none)
+  - display_id: code from the API data (video.get('code'))
+  - title: video['title']
+  - description: video.get('desc')
+  - series: video.get('ps_name')
+  - timestamp: unified_timestamp(video.get('date'))
+  - duration: int_or_none(video.get('duration'))
+  - tags: parsed from a comma-separated video['tags'] string if present
+  - age_limit: derived via _rta_search(webpage) from the page content (adult content restriction)
+  - formats: list of constructed formats
+- Returns a dictionary with the above fields, including formats and age_limit.
+
+Key implementation details
+- beeg_version extraction: from the page using a regex on a JavaScript-like variable beeg_version; defaults to '1546225636701' if not found.
+- Dynamic API call strategy: supports both v1 and v2 formats depending on ID length and uses a fallback mechanism across two potential API host paths.
+- URL construction: replaces {DATA_MARKERS} in the API-provided video URL with a Beeg-specific marker string that includes the version, ensuring correct data markers for video URLs.
+- Format parsing: relies on format_id patterns like "720p" to derive height; ignores non-conforming keys.
+- Robustness: handles missing fields gracefully (using defaults or None) and uses int_or_none/unified_timestamp for safe type conversion.
+- Reuse of generic helpers: uses _proto_relative_url to normalize URLs, _sort_formats to order formats, and _rta_search for age restrictions.
+
+Tests and expectations
+- The _TESTS section includes scenarios for:
+  - A typical Beeg page with a direct numeric ID (beeg.com/5416503) including expected metadata, md5 for description, and a specific timestamp/duration.
+  - Variants with t query parameter and different host variants (beeg.com, beeg.porn, with/without /video path), marked as only_matching where appropriate to validate URL matching behavior.
+- Expected fields in full extraction include id, display_id, title, description, series, timestamp, duration, tags, formats, and age_limit.

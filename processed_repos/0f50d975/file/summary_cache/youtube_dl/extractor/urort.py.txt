@@ -1,0 +1,69 @@
+Concise overview
+
+- Purpose: YouTube-DL extractor for NRK P3 Urørt (Urort) pages. It fetches band/artist tracks via a Breeze/URort API and exposes them as a playlist with multiple downloadable formats per track.
+
+Key components
+
+- Class UrortIE(InfoExtractor)
+  - IE_DESC: "NRK P3 Urørt"
+  - _VALID_URL: Matches URLs like https://urort.p3.no/#!/Band/<band-id>
+  - _TEST: Includes a sample test with a specific band URL, expected MP3 entry, and a filter to test selecting a single track (matchtitle)
+
+Main functionality (_real_extract)
+
+- Extract playlist_id from the URL using _match_id(url).
+- Build an OData filter string to request tracks for the band:
+  - fstr = quote("InternalBandUrl eq '<band-id>'")
+  - json_url = "http://urort.p3.no/breeze/urort/TrackDTOViews?$filter=%s&$orderby=Released%20desc&$expand=Tags%2CFiles" % fstr
+- Download JSON data with _download_json(json_url, playlist_id). This returns a list of tracks (songs).
+- For each track s:
+  - Build a list of formats from s['Files']:
+    - For each file f in s['Files'], create a format dict:
+      - 'tbr': f.get('Quality')
+      - 'ext': f['FileType']
+      - 'format_id': '<FileType>-<Quality>' (Quality optional; empty if missing)
+      - 'url': "http://p3urort.blob.core.windows.net/tracks/<FileRef>"
+      - 'preference': 3 if FileType == 'mp3' else 2
+  - Sort formats with self._sort_formats(formats).
+  - Build a track entry e with:
+    - 'id': "<BandId>-<TrackId>"
+    - 'title': s['Title']
+    - 'uploader_id': playlist_id
+    - 'uploader': s.get('BandName', playlist_id)
+    - 'thumbnail': "http://urort.p3.no/cloud/images/<Image>"
+    - 'upload_date': unified_strdate(s.get('Released'))
+    - 'formats': formats
+  - Append e to entries list.
+- Return a playlist dictionary:
+  - '_type': 'playlist'
+  - 'id': playlist_id
+  - 'title': playlist_id
+  - 'entries': entries
+
+Important implementation details
+
+- URL handling:
+  - Uses _VALID_URL to detect Urort band pages.
+  - Encodes the OData filter query with compat_urllib_parse.quote to form a valid URL.
+
+- Data model mapping:
+  - Tracks (s) contain fields like BandId, $id, Title, BandName, Image, Released.
+  - Files (f) within a track provide FileRef, FileType, and Quality used to construct downloadable formats.
+
+- Formats:
+  - Each track can have multiple formats (from s['Files']), with mp3 given higher preference.
+  - format_id combines FileType and Quality for easy selection (e.g., mp3-320k).
+  - Video/track URL is constructed from a blob storage path using FileRef.
+
+- Metadata:
+  - Thumbnails and upload dates are constructed from API fields (Image, Released).
+  - Title and uploader are taken from track and band data, with fallbacks if missing.
+
+- Output shape:
+  - Returns a playlist with multiple track entries, each containing a list of formats, suitable for downloading individual tracks.
+
+Usage note
+
+- The _TEST entry uses a matchtitle filter to test deterministic extraction when multiple tracks exist, ensuring the test picks a single expected track (The Bomb).
+
+In short, UrortIE is a YouTube-DL extractor that queries NRK P3 Urørt’s API for a band, builds a playlist of tracks with multiple format options, and provides standard metadata (title, uploader, upload date, thumbnail) for each track.

@@ -1,0 +1,65 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/sapo.py
+
+Purpose
+- Implement a YouTube-DL extractor for SAPO Vídeos. It parses SAPO video pages, fetches metadata via the SAPO RSS feed, and exposes video formats (SD and optional HD) with associated metadata.
+
+Main class and structure
+- Class: SapoIE(InfoExtractor)
+  - IE_DESC: "SAPO Vídeos"
+  - _VALID_URL: Regex matching SAPO video pages across several SAPO domains (pt/cv/ao/mz/tl) and IDs that are 20 alphanumeric characters.
+  - _TESTS: Three test cases demonstrating SD, HD, and v2 video formats with expected metadata (title, description, duration, uploader, dates, categories, etc.).
+
+Core functionality (_real_extract)
+- URL parsing:
+  - Extracts video_id from the URL using _VALID_URL via a regex match.
+- RSS feed retrieval:
+  - Builds the RSS feed URL: http://rd3.videos.sapo.pt/{video_id}/rss2
+  - Downloads XML and selects the first channel/item entry.
+- Metadata extraction from RSS item:
+  - title: item/title
+  - description: item/{http://videos.sapo.pt/mrss/}synopse
+  - thumbnail: item/{http://search.yahoo.com/mrss/}content url attribute
+  - duration: parse_duration(item/{http://videos.sapo.pt/mrss/}time)
+  - uploader: item/{http://videos.sapo.pt/mrss/}author
+  - upload_date: unified_strdate(item/pubDate)
+  - view_count: int(item/{http://videos.sapo.pt/mrss/}views)
+  - comment_count: int(item/{http://videos.sapo.pt/mrss/}comment_count)
+  - tags: item/{http://videos.sapo.pt/mrss/}tags
+  - categories: tags split by whitespace if tags exist, otherwise []
+  - age_limit: 18 if item/{http://videos.sapo.pt/mrss/}m18 text is 'true', else 0
+  - video_url: item/{http://videos.sapo.pt/mrss/}videoFile
+  - video_size: item/{http://videos.sapo.pt/mrss/}videoSize, split on 'x' to obtain width and height
+- Formats construction:
+  - SD format:
+    - url: video_url
+    - ext: mp4
+    - format_id: 'sd'
+    - width/height from video_size
+  - HD format (optional):
+    - Triggered if item/{http://videos.sapo.pt/mrss/}HD text == 'true'
+    - url: video_url with last segment '/mov/1' replaced by '/mov/39' (via regex substitution)
+    - ext: mp4
+    - format_id: 'hd'
+    - width: 1280, height: 720
+- Formats sorting:
+  - _sort_formats(formats) to order formats by quality/bitrate (as per YouTube-DL standard).
+- Return dictionary:
+  - id: video_id
+  - title, description, thumbnail, duration, uploader, upload_date
+  - view_count, comment_count
+  - categories, age_limit
+  - formats: list of gathered formats
+
+Key implementation details
+- XML namespace handling:
+  - Uses explicit namespaces when querying XML (e.g., {http://videos.sapo.pt/mrss/}) to access elements like time, synopse, author, tags, videoFile, videoSize, m18, and HD flag.
+- Helpers:
+  - parse_duration: converts duration string to seconds.
+  - unified_strdate: converts pubDate to YYYYMMDD.
+- HD URL handling:
+  - The HD version is accessed by modifying the SD video URL: replacing '/mov/1' with '/mov/39' to point to the HD asset.
+- Robustness:
+  - Assumes presence of fields in RSS item; uses direct .text access, with int() for numeric fields.
+
+What this file achieves
+- Enables YouTube-DL to extract metadata and download URLs for SAPO Vídeos by parsing the SAPO RSS feed, supporting both SD and optional HD formats, and exposing all relevant metadata (title, description, uploader, dates, views, tags/categories, and age restrictions).

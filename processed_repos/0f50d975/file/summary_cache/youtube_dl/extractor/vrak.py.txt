@@ -1,0 +1,62 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/vrak.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor for VRak TV video pages. It obtains the video from Brightcove by locating the Brightcove video ID on the VRak page and then delegates to the BrightcoveNewIE extractor for the actual video retrieval.
+
+- Key class
+  - VrakIE(InfoExtractor): main extractor class.
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?vrak\.tv/videos\?.*?\btarget=(?P<id>[\d.]+)'
+  - This matches VRak video pages that contain a target query parameter, capturing the id portion for internal use.
+
+- Testing
+  - _TEST provides a sample VRak URL and the expected information dictionary, including:
+    - id, ext, title, timestamp, upload_date, uploader_id, creator, age_limit, series, episode, tags
+  - 'params': {'skip_download': True} to avoid actual download during tests.
+
+- Brightcove integration
+  - BRIGHTCOVE_URL_TEMPLATE = 'http://players.brightcove.net/2890187628001/default_default/index.html?videoId=%s'
+  - The final video URL is built by inserting the Brightcove video ID into this template and then wrapped with geo restriction via smuggle_url.
+
+- Main extraction flow (_real_extract)
+  1) Extract internal video_id using self._match_id(url).
+  2) Download the VRak page HTML with self._download_webpage(url, video_id).
+  3) Title extraction:
+     - Try to parse a title from an HTML tag matching a pattern for a header with class "videoTitle".
+     - If not found, fall back to the Open Graph title via self._og_search_title(webpage).
+  4) Content data extraction:
+     - Locate a JSON blob in the page from data-player-options-content attribute using a regex, defaulting to {} if not found.
+     - Parse the JSON with self._parse_json(..., transform_source=unescapeHTML) to get a content dictionary.
+  5) Reference ID handling:
+     - ref_id = content.get('refId') or fallback to extracting refId from the page via a regex.
+  6) Brightcove ID extraction:
+     - Use a carefully crafted regex (with (?x) verbose mode) to locate a numeric Brightcove video ID that corresponds to the refId found earlier.
+  7) Return value:
+     - A dict describing a transparent URL to a Brightcove video, delegating actual video extraction to BrightcoveNewIE:
+       - '_type': 'url_transparent'
+       - 'ie_key': BrightcoveNewIE.ie_key() to indicate using the Brightcove extractor
+       - 'url': smuggle_url(self.BRIGHTCOVE_URL_TEMPLATE % brightcove_id, {'geo_countries': ['CA']}) to enforce Canadian geo restriction
+       - 'id': brightcove_id
+       - 'description': content.get('description')
+       - 'creator': content.get('brand')
+       - 'age_limit': parse_age_limit(content.get('rating'))
+       - 'series': content.get('showName') or content.get('episodeName')  # note: this fallback is intentional
+       - 'season_number': int_or_none(content.get('seasonNumber'))
+       - 'episode': title
+       - 'episode_number': int_or_none(content.get('episodeNumber'))
+       - 'tags': content.get('tags', [])
+
+- Important implementation details
+  - Data extraction source: relies on a JSON blob in the page's data-player-options-content attribute to obtain metadata (description, brand, showName, etc.).
+  - Robust title handling: prefers on-page title with a specific class; falls back to OG title if unavailable.
+  - Ref/brightcove linkage: derives a Brightcove video ID by parsing the content and page for a refId and corresponding Brightcove ID through a targeted regex.
+  - Geo restriction: wraps the Brightcove URL with CA geo restriction via smuggle_url to limit playback to Canada.
+  - Metadata handling: uses helper utilities to convert and sanitize values:
+    - int_or_none for numeric fields
+    - parse_age_limit for age rating
+    - unescapeHTML to clean JSON content
+    - smuggle_url to attach geo metadata
+  - Delegation model: returns a url_transparent dict pointing to BrightcoveNewIE, so the actual video extraction is performed by the Brightcove extractor with the appropriate metadata carried along.
+
+In short, the extractor fetches VRak video pages, pulls a Brightcove video ID from embedded content, builds a restricted Brightcove URL, and defers to BrightcoveNewIE for playback, while assembling metadata (title, description, series/episode info, age, tags, etc.) from the page’s JSON data.

@@ -1,0 +1,50 @@
+- Purpose: STVPlayerIE is a YouTube-DL extractor for STV's player. It resolves STV video/episode pages to a Brightcove video URL and provides metadata and subtitles.
+
+- Key components:
+  - Class STVPlayerIE(InfoExtractor)
+    - IE_NAME: 'stv:player'
+    - _VALID_URL: Matches STV player URLs for either /episode/... or /video/... with a 4-char alphanumeric ID.
+    - _PTYPE_MAP: Maps page types to API path segments:
+      - 'episode' -> 'episodes'
+      - 'video' -> 'shortform'
+    - BRIGHTCOVE_URL_TEMPLATE: Base Brightcove player URL used for final video embedding.
+    - _TESTS: Includes test cases for a shortform video (with expected metadata) and an episode URL (only_matching).
+
+- Core logic (_real_extract):
+  - Extracts type (episode/video) and video_id from the URL using the _VALID_URL pattern.
+  - Fetches the page HTML with _download_webpage (fatal=False) and extracts the Next.js data payload from the __NEXT_DATA__ script tag.
+  - Parses JSON from the Next data to obtain props and, specifically, playerApiCache.
+  - Tries to locate an API path (api_path) and corresponding response (resp) from playerApiCache by finding a key that starts with:
+    - '/episodes/' or '/shortform/'.
+    - If not found, falls back to constructing api_path from the episodeId (if available) or the original video_id, using _PTYPE_MAP to determine the path segment ('episodes' or 'shortform') and the episodeId.
+  - If the cached response (resp) does not contain 'results', fetches data from:
+    https://player.api.stv.tv/v1 + api_path
+    and uses resp['results'] as the result data.
+  - Extracts video information:
+    - video = result['video']; video_id = video['id'] (as string)
+  - Subtitles:
+    - Builds an English ('en') subtitles list from result['_subtitles'], mapping subtitle extensions to the correct format ('webvtt' becomes 'vtt').
+  - Programme info:
+    - programme = result.get('programme') or {}
+  - Returns a transparent URL entry for Brightcove:
+    - _type: 'url_transparent'
+    - id: video_id
+    - url: Brightcove player URL for the video, wrapped with smuggle_url to restrict geo (geo_countries: ['GB'])
+    - description: result.get('summary')
+    - duration: length of video in seconds (float_or_none(video.get('length'), 1000)) — length is in ms
+    - subtitles: constructed subtitles dictionary
+    - view_count: result.get('views') as int
+    - series: programme.get('name') or programme.get('shortName')
+    - ie_key: 'BrightcoveNew' (delegate to BrightcoveNew extractor)
+
+- Important implementation details:
+  - Robust page parsing: uses fatal=False for the initial page fetch and defaults to {} to tolerate missing data.
+  - Uses the embedded Next.js data (__NEXT_DATA__) to locate initial player state and API cache.
+  - Fallback mechanism: if initial cache doesn’t contain a direct API path, constructs one using episodeId or video_id and the _PTYPE_MAP.
+  - Lazy loading of results: if the local resp lacks 'results', fetches from STV’s API endpoint.
+  - Output is a url_transparent result pointing to BrightcoveNew with geo restriction for GB, so the actual video extraction is delegated to BrightcoveNew.
+  - Subtitles support: handles multiple subtitle extensions, converting webvtt to 'vtt' as needed.
+
+- Example behavior:
+  - For a shortform video URL, resolves to the Brightcove video via the /shortform path, provides duration, description, view count, and subtitles.
+  - For an episode URL, similar flow, pulling episode-related metadata and programme name for the series field.

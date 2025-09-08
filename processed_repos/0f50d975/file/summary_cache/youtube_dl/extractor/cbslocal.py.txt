@@ -1,0 +1,49 @@
+- Purpose: Provide extractors for CBS Local content on cbslocal.com, integrating with the Anvato backend and handling SendtoNews embeds when encountered.
+
+- Key classes:
+  - CBSLocalIE (inherits from AnvatoIE)
+    - _VALID_URL_BASE: matches CBS Local subdomains (http/https)
+    - _VALID_URL: video URLs in the form .../video/<id>
+    - _TESTS: includes a sample CBS Local video page with expected metadata (title, description, thumbnail, timestamp, upload_date, uploader, subtitles, categories, tags)
+    - _real_extract(url):
+      - Extracts the MCP ID from the URL.
+      - Delegates extraction to Anvato by returning a url_result pointing to the Anvato backend with a specific provider string:
+        "anvato:anvato_cbslocal_app_web_prod_...:<mcp_id>"
+      - Uses the Anvato extractor to fetch the actual video information.
+
+  - CBSLocalArticleIE (inherits from AnvatoIE)
+    - _VALID_URL: matches CBS Local article URLs, based on CBSLocalIE._VALID_URL_BASE plus a date/path pattern ending in a slug id.
+    - _TESTS: two tests
+      - First test: Anvato-backed article, with expected video metadata (id, title, description, timestamp, upload_date, etc.)
+      - Second test: a SendtoNews embedded article, expecting an embed id and playlist_count, with skip_download in params.
+    - _real_extract(url):
+      - display_id = self._match_id(url)
+      - webpage = self._download_webpage(url, display_id)
+      - Checks for a SendtoNews embed:
+        - sendtonews_url = SendtoNewsIE._extract_url(webpage)
+        - If found: return a URL result pointing to that embed using SendtoNewsIE’s extractor key.
+      - If not a SendtoNews embed:
+        - info_dict = self._extract_anvato_videos(webpage, display_id)  # from base AnvatoIE
+        - timestamp extraction:
+          - Tries to parse a date from HTML using a regex targeting elements with class "entry-date" or "post-date".
+          - If not found, falls back to the uploadDate meta tag via _html_search_meta('uploadDate', webpage) and parses it with parse_iso8601.
+          - Uses unified_timestamp to normalize the timestamp, with default=None if unavailable.
+        - Updates info_dict with:
+          - display_id
+          - timestamp
+        - Returns the enriched info_dict
+
+- Important implementation details:
+  - Both extractors subclass AnvatoIE and rely on its _extract_anvato_videos utility to pull metadata from Anvato when applicable.
+  - CBSLocalIE constructs the Anvato backend URL by appending the MCP ID to a fixed provider string:
+    "anvato_cbslocal_app_web_prod_547f3e49241ef0e5d30c79b2efbca5d92c698f67:<mcp_id>"
+  - CBSLocalArticleIE supports two content paths:
+    - Anvato-backed articles/pages
+    - SendtoNews embedded videos, routed to SendtoNewsIE
+  - Date handling:
+    - Attempts to extract a human-readable date from the page (class "entry-date" or "post-date") and converts it to a timestamp.
+    - If that fails, falls back to the uploadDate meta tag.
+  - Uses compat_urlparse for URL joining when delegating to other extractors.
+  - Tests validate metadata structure including id, ext, title, description, thumbnail, timestamp, upload_date, uploader, subtitles, categories, and tags for video pages; and proper routing for SendtoNews embeds.
+
+Overall, the file provides CBS Local video/article extraction by leveraging Anvato for most content while also handling SendtoNews embeds directly.

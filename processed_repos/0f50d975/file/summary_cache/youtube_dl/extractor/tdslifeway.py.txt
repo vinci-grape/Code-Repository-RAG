@@ -1,0 +1,25 @@
+- Purpose: A lightweight YouTube-DL extractor for Lifeway’s TDS (Training Delivery System). It identifies a course page and delegates to Brightcove to fetch the actual video.
+
+- Class: TDSLifewayIE(InfoExtractor)
+
+- URL pattern:
+  - _VALID_URL matches: https://tds.lifeway.com/v1/trainingdeliverysystem/courses/<id>/index.html
+  - <id> is captured as digits and used as the Brightcove videoId.
+
+- _TEST example:
+  - Provides a real Lifeway URL (with many query parameters) and the expected info_dict (id, ext mp4, title, thumbnail, upload_date, description, uploader_id, timestamp).
+  - Uses skip_download: True to avoid downloading the media in tests.
+  - add_ie: ['BrightcoveNew'] indicates the extractor relies on BrightcoveNew for the actual video data.
+
+- Brightcove integration:
+  - BRIGHTCOVE_URL_TEMPLATE = 'http://players.brightcove.net/2034960640001/default_default/index.html?videoId=%s'
+  - _real_extract(url):
+    - brightcove_id = self._match_id(url)
+    - Returns a url_result pointing to BrightcoveNew with the Brightcove URL and brightcove_id as the videoId.
+
+- Key implementation details:
+  - The extractor does not parse or extract metadata itself; it simply converts the Lifeway course page URL into a Brightcove player URL using the numeric course ID as the Brightcove videoId.
+  - Uses _match_id(url) to extract the numeric id from the path.
+  - The actual video metadata (title, description, etc.) is sourced from the BrightcoveNew extractor via the constructed Brightcove URL.
+
+In short: TDSLifewayIE maps Lifeway course pages to Brightcove videos by extracting the numeric ID from the URL and delegating to BrightcoveNew for the real media extraction.

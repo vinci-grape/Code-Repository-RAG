@@ -1,0 +1,59 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/spankbang.py
+
+What it does
+- Implements two extractors for SpankBang:
+  - SpankBangIE: extracts metadata and downloadable video formats for a single video.
+  - SpankBangPlaylistIE: extracts a playlist of SpankBang videos, returning entries that point to SpankBangIE for each video.
+
+Key classes and main functionality
+- SpankBangIE (InfoExtractor)
+  - URL pattern: handles standard video pages, mobile pages, and embed/play URLs from spankbang.com.
+  - Page retrieval: downloads the video page, forcing country=US via cookie; if the page indicates the video is removed, raises an ExtractorError.
+  - Formats extraction:
+    - Primary approach: looks for JavaScript-defined stream_url_* variables on the page. For each found entry, it builds a format using extract_format.
+    - Fallback approach: if no formats found, reads a stream key from the page and queries https://spankbang.com/api/videos/stream with a POST payload to obtain a stream dictionary, then extracts formats from that.
+    - extract_format logic:
+      - Converts format_id to a resolution dict via parse_resolution.
+      - Determines file extension via determine_ext.
+      - If the URL is HLS (m3u8) or ext is m3u8, uses _extract_m3u8_formats (entry_protocol m3u8_native, id 'hls').
+      - If the URL is DASH (mpd) or ext is mpd, uses _extract_mpd_formats (mpd_id 'dash').
+      - Otherwise, if ext is mp4 or resolution data is present, adds a simple format dict with url and format_id.
+  - Handling and sorting:
+    - Uses _sort_formats with a preference order: (preference, height, width, fps, tbr, format_id).
+  - Metadata extraction:
+    - Attempts to merge additional info from JSON-LD via _search_json_ld.
+    - Title: from an H1 tag.
+    - Description: parsed from a specific bottom-area div structure.
+    - Thumbnail: OpenGraph thumbnail.
+    - Uploader: parsed from HTML blocks containing profile/user info.
+    - Duration: parsed from a right-side block.
+    - View count: parsed and converted to int.
+    - Age limit: extracted via _rta_search (rating/age).
+  - Output: a dictionary with id, title, description, thumbnail, uploader, duration, view_count, formats, age_limit, merged with any JSON-LD info found.
+
+- SpankBangPlaylistIE (InfoExtractor)
+  - URL pattern: spankbang.com/<id>/playlist/<display_id>
+  - Page retrieval: downloads the playlist page with cookies country=US; mobile=on.
+  - Video entries extraction: builds a list of entries by parsing links in the playlist that point to individual video pages. Each entry uses the SpankBangIE as the extractor (via url_result) and passes the video_id corresponding to the video’s id in the path.
+  - Playlist title: optionally extracted from the page (non-fatal).
+  - Output: a playlist result containing the list of entries, the playlist id, and the title.
+
+Important implementation details
+- URL handling:
+  - For video extraction, the code fetches a variant URL by replacing /<video_id>/embed with /<video_id>/video to obtain the correct page content for parsing.
+  - Cookie hints (country=US, and mobile=on for playlists) are used to influence content served by the site.
+- Formats discovery:
+  - Primary: parse on-page variables named stream_url_* to collect formats.
+  - Secondary: if no formats found, use the site API with a stream key found in the page to fetch a JSON mapping of format_id to URL(s).
+  - Supports HLS (m3u8), DASH (mpd), and direct MP4 formats; falls back to MP4 when possible.
+- Metadata collection:
+  - Combines on-page scraped data with optional JSON-LD data from the page (via _search_json_ld).
+  - Uses multiple regexes to robustly extract title, description, uploader, duration, and view count.
+  - Age limit is extracted via a dedicated helper (_rta_search).
+- Playlist extraction:
+  - Builds video entries by locating links to individual videos within the playlist page and constructing proper SpankBangIE entries for each.
+  - Provides a playlist title if found and returns a playlist result with all entries.
+- Testing scaffolding:
+  - Includes _TESTS for various URL forms (including mobile, embed, and playlist cases) to validate behavior, including expected fields like id, ext, title, description, thumbnail, uploader, timestamp, upload_date, and age_limit.
+
+Overall, the file provides robust extraction of video metadata and multiple streaming formats from SpankBang, with a separate extractor to enumerate videos within playlists.

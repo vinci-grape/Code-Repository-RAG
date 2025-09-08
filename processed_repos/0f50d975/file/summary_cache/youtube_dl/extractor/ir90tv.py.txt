@@ -1,0 +1,40 @@
+- Purpose: Implement an information extractor for 90tv.ir videos in youtube-dl. It discovers the direct video URL and metadata from a 90tv.ir video page.
+
+- Key class
+  - Ir90TvIE(InfoExtractor): Inherits from the common InfoExtractor framework.
+
+- URL validation
+  - _VALID_URL = r'https?://(?:www\.)?90tv\.ir/video/(?P<id>[0-9]+)/.*'
+  - Matches URLs like http(s)://90tv.ir/video/12345/...
+
+- Tests
+  - _TESTS contains two cases:
+    - A full extract test with a real page, expecting id '95719', ext 'mp4', a specific title, and a thumbnail URL.
+    - A secondary case using the www domain with only_matching set to True (to verify the URL pattern matches without performing full extraction).
+
+- Core extraction logic (_real_extract)
+  - Extracts video_id via self._match_id(url).
+  - Downloads the page content with self._download_webpage(url, video_id).
+  - Title extraction:
+    - Uses self._html_search_regex(r'<title>([^<]+)</title>') to grab the page title.
+    - Strips the prefix '90tv.ir :: ' using remove_start from youtube-dl.utils.
+  - Video URL extraction:
+    - Finds the direct video URL from the HTML using self._search_regex(r'<source[^>]+src="([^"]+)"', webpage).
+  - Thumbnail extraction (optional):
+    - Attempts to extract poster URL with self._search_regex(r'poster="([^"]+)"', webpage, fatal=False); if not present, thumbnail will be None.
+  - Return value:
+    - A dict with:
+      - 'url': video_url
+      - 'id': video_id
+      - 'title': title
+      - 'video_url': video_url
+      - 'thumbnail': thumbnail
+    - The file extension (ext) is inferred by youtube-dl from the video URL (e.g., mp4), as reflected in tests.
+
+- Implementation details
+  - Relies on standard InfoExtractor utilities:
+    - _download_webpage to fetch page content
+    - _html_search_regex to pull out HTML elements
+    - _search_regex to locate the video source and poster attributes
+  - Uses remove_start to clean up the title for nicer metadata.
+  - The extractor assumes the video is available via a <source> tag in the page (HTML5 video element) and uses that src as the direct video URL.

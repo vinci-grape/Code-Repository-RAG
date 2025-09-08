@@ -1,0 +1,59 @@
+- Purpose
+  - A post-processing step in youtube-dl to embed a downloaded thumbnail into audio/video files after download.
+
+- Key class(es)
+  - EmbedThumbnailPPError: Specialized error for thumbnail embedding failures.
+  - EmbedThumbnailPP (inherits FFmpegPostProcessor): Main post-processor that handles embedding logic.
+
+- Initialization
+  - __init__(downloader=None, already_have_thumbnail=False)
+  - Stores whether a thumbnail already exists in the target file to control cleanup (e.g., whether to remove the thumbnail file after embedding).
+
+- Core workflow (run(info))
+  - Determine target file and a temporary filename (prepend 'temp' to the original filename).
+  - If there are no thumbnails, log a message and exit with no file changes.
+  - Use the last thumbnail in info['thumbnails']; verify the thumbnail file exists; if missing, warn and exit.
+  - WebP handling:
+    - Detect if the thumbnail file content is WebP even if extension is not .webp (reads header to verify).
+    - If detected, rename the file to have .webp extension and log that correction.
+  - Thumbnail format normalization:
+    - If the thumbnail extension is not jpg/png, convert the thumbnail to JPEG.
+    - Workaround for percent-sign handling: rename files replacing '%' with '#', run conversion via FFmpeg (mjpeg2jpeg), then restore/rename back to a proper name.
+    - Use run_ffmpeg to convert to JPEG and then clean up the intermediate file.
+  - Embedding logic by target file type:
+    - mp3:
+      - Use FFmpeg to embed the image as a single artwork stream with:
+        - -c copy, -map 0 -map 1
+        - metadata on the video stream: title="Album cover", comment="Cover (Front)"
+      - Run via run_ffmpeg_multiple_files with appropriate input pairing and a temporary output file.
+      - Cleanup: remove the thumbnail file if not already_present and replace the original mp3 with the new temp file.
+    - m4a/mp4:
+      - Require AtomicParsley (or atomicparsley) to be installed; abort with EmbedThumbnailPPError if not found.
+      - Build AtomicParsley command to set artwork, output to a temp file.
+      - RunAtomically: log command if verbose, capture stdout/stderr, raise EmbedThumbnailPPError on non-zero exit.
+      - Cleanup: remove thumbnail if not already_present.
+      - If output indicates no changes (b'No changes' in stdout), warn that the file format doesn't support embedding.
+      - Otherwise replace the original file with the new one (remove original, rename temp to original).
+    - Other formats: raise EmbedThumbnailPPError indicating only mp3 and m4a/mp4 are currently supported.
+  - Return value: always return a pair of ([], info) to indicate processing complete with no additional info dicts yielded.
+
+- Notable implementation details
+  - Uses a combination of FFmpeg-based embedding (for mp3) and AtomicParsley (for m4a/mp4) to support embedding artwork across formats.
+  - Robust handling for thumbnail formats and extensions, including:
+    - WebP extension correction if content is WebP.
+    - JPEG conversion for unsupported thumbnail formats, with a workaround for percent-sign filename issues.
+  - Path and filename handling:
+    - Uses encodeFilename to ensure correct encoding for filesystem operations.
+    - Uses prepend_extension to generate a temporary filename.
+    - Uses replace_extension, shell_quote, and related helpers from the codebase.
+  - Logging and user feedback:
+    - Reports progress and decisions via self._downloader.to_screen.
+    - Emits warnings for missing thumbnails, missing AtomicParsley, and formats that don’t support embedding.
+  - Error handling:
+    - Raises EmbedThumbnailPPError for critical failures (e.g., AtomicParsley missing, FFmpeg embedding failures, or unsupported formats).
+
+- Integration points
+  - Dependent on FFmpegPostProcessor base class and utilities from youtube-dl (check_executable, encodeArgument, encodeFilename, process_communicate_or_kill, etc.).
+  - Interacts with the downloader’s verbose/settings to decide whether to print debug information (AtomicParsley command line when verbose).
+
+In short, the module provides a post-processing step that intelligently embeds a downloaded thumbnail into MP3, M4A, or MP4 files, with format normalization, WebP handling, and AtomicParsley-based embedding for non-MP3 formats. It includes careful file handling, error reporting, and cleanup to ensure the final media file contains embedded artwork when supported.

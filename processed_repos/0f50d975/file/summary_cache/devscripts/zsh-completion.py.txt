@@ -1,0 +1,30 @@
+Concise summary:
+
+- Purpose: A Python script that generates a Zsh completion file for youtube-dl by introspecting youtube-dl’s option parser.
+
+- Main components:
+  - build_completion(opt_parser): Core function that builds the completion data.
+  - Uses opt_parser.option_groups to collect all options, then classifies them by metavar:
+    - FILE options (opts_file) for file flags
+    - DIR options (opts_dir) for directory flags
+  - Aggregates flag strings:
+    - fileopts: short and long flags for FILE options
+    - diropts: short and long flags for DIR options
+    - flags: all option strings via opt.get_opt_string()
+  - Reads a Zsh template (devscripts/zsh-completion.in), substitutes placeholders:
+    - {{fileopts}} with joined file option flags
+    - {{diropts}} with joined directory option flags
+    - {{flags}} with joined all flags
+  - Writes the resulting content to youtube-dl.zsh (ZSH_COMPLETION_FILE)
+
+- How it runs:
+  - Retrieves the parser via parser = youtube_dl.parseOpts()[0]
+  - Calls build_completion(parser) to generate the completion file
+
+- Implementation details:
+  - Adjusts sys.path to import youtube_dl from the repository layout.
+  - Uses a Unicode-friendly import (__future__ = unicode_literals).
+  - Relies on utility functions read_file and write_file for I/O.
+  - Keeps template-driven approach with a dedicated template file path (ZSH_COMPLETION_TEMPLATE).
+
+- Outcome: Generates a ready-to-use Zsh completion script for youtube-dl based on the current option definitions.

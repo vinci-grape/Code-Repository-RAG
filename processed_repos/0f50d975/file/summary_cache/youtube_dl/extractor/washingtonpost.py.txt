@@ -1,0 +1,50 @@
+Here is a concise, functional summary of the code in youtube_dl/extractor/washingtonpost.py:
+
+Main purpose
+- Provide YouTube-DL extractors for Washington Post content:
+  - WashingtonPostIE: handles individual Washington Post videos (via ArcPublishing).
+  - WashingtonPostArticleIE: handles Washington Post article pages that contain multiple video embeds, producing a playlist of the underlying videos.
+
+Key classes and their responsibilities
+- WashingtonPostIE (InfoExtractor)
+  - IE_NAME: 'washingtonpost'
+  - _VALID_URL: Matches either a washingtonpost:<uuid> shortcut or a Washington Post video/posttv URL that ends with a UUID (8-4-4-4-12 hex digits).
+  - _EMBED_URL: Regex for the embed URL pattern used to locate video iframes on pages: video/c/embed/<uuid>.
+  - _TESTS: Includes tests for a sample video URL (with expected id, title, description, times, etc.) and two only_matching cases for related pages.
+  - _extract_urls(webpage): Finds iframe embeds in a page whose src matches _EMBED_URL and returns those URLs.
+  - _real_extract(url): 
+    - Extracts the video UUID via _match_id.
+    - Returns a url_result pointing to ArcPublishing with id 'arcpublishing:wapo:<uuid>' and type 'ArcPublishing'. This delegates video extraction to the ArcPublishing-based extractor.
+
+- WashingtonPostArticleIE (InfoExtractor)
+  - IE_NAME: 'washingtonpost:article'
+  - _VALID_URL: Matches Washington Post article pages, capturing an id from the path.
+  - _TESTS: Demonstrates playlists for articles containing multiple video embeds; each entry is a WashingtonPost video (via the other extractor) with its own id.
+  - suitable(url): Returns False if WashingtonPostIE is suitable for the URL, otherwise uses the base class suitability check. This prevents overlapping extraction with the single-video extractor.
+  - _real_extract(url):
+    - Downloads the article page, gets the page title via OpenGraph title tag (_og_search_title).
+    - Extracts video UUIDs from the page by searching for:
+      - data-uuid or data-video-uuid attributes associated with elements like div class="posttv-video-embed".
+    - Builds a list of entries, each as a url_result pointing to WashingtonPostIE with id 'washingtonpost:<uuid>' and name 'WashingtonPost'.
+    - Returns a playlist structure with:
+      - _type: 'playlist'
+      - entries: list of per-video entries
+      - id: article page id
+      - title: page title
+
+Important implementation details
+- ID handling:
+  - WashingtonPostIE uses UUIDs (8-4-4-4-12 hex) as the primary video id.
+  - ArticleIE aggregates multiple UUIDs from a page and delegates each to WashingtonPostIE.
+- Delegation to ArcPublishing:
+  - For standalone videos, WashingtonPostIE delegates to the ArcPublishing extractor by returning a url_result with type 'ArcPublishing' and id prefixed with 'arcpublishing:wapo:'.
+- Embedding and extraction logic:
+  - _extract_urls scans for specific Washington Post embed iframes to capture video URLs.
+  - ArticleIE relies on specific HTML attributes (data-uuid/data-video-uuid) to discover all embedded videos within an article.
+- OpenGraph/title extraction:
+  - ArticleIE uses _og_search_title to derive the playlist title from the article page.
+- Tests illustrate typical Washington Post video URLs, their expected metadata, and how article pages yield playlists of multiple videos.
+
+Overall, the module provides two integration points:
+- Direct Washington Post video extraction via ArcPublishing.
+- Article-level extraction that compiles multiple embedded Washington Post videos into a single playlist by reusing the single-video extractor.

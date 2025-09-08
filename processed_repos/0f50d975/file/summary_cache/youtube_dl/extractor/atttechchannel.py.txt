@@ -1,0 +1,31 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/atttechchannel.py
+
+- Purpose: Implement a dedicated extractor for AT&T Tech Channel videos served via play-video.cfm pages.
+
+- Class and inheritance:
+  - ATTTechChannelIE(InfoExtractor): implements the extraction logic for this site.
+
+- URL matching:
+  - _VALID_URL: Regex that matches http(s)://techchannel.att.com/play-video.cfm/... and captures the trailing path as the display/id component.
+
+- Test data:
+  - _TEST provides a sample URL and the expected info dict, including id, display_id, extension (flv), title, description, thumbnail, and upload_date. It also marks skip_download in tests since this is an RTMP target.
+
+- Core extraction (_real_extract):
+  - display_id: derived from the URL using _match_id.
+  - webpage: HTML content downloaded from the page.
+  - video_url: extracted via regex searching for an RTMP URL pattern: "url: 'rtmp://...'" within the page.
+  - video_id: optional numeric media id extracted from the page with a non-fatal regex search (m mediaid = digits).
+  - title/description/thumbnail: obtained from Open Graph meta tags using _og_search_title/_og_search_description/_og_search_thumbnail.
+  - upload_date: parsed by looking for a release date in the form "Release date: DD/MM/YYYY" (case-insensitive for the month) and converting to the standard yyyymmdd format using unified_strdate.
+  - Returns a dict with:
+    - id: video_id (may be None if not found)
+    - display_id: the captured page path
+    - url: the RTMP video URL
+    - ext: 'flv' (always reported as flv in this extractor)
+    - title, description, thumbnail, upload_date: extracted as above
+
+- Notes on behavior:
+  - The extractor relies on an RTMP URL in the page and Open Graph metadata for metadata.
+  - If the release date isn’t found, upload_date will be None.
+  - The video_id is optional (fatal=False); if missing, the extractor still returns other metadata.

@@ -1,0 +1,75 @@
+concise summary of the code
+
+- Purpose
+  - Implement a Metacafe video extractor (MetacafeIE) for youtube-dl. It fetches and parses a Metacafe watch page to produce video formats and metadata, and it also supports delegating to external video extractors when the Metacafe URL actually points to an external host.
+
+- Key class and constants
+  - Class MetacafeIE(InfoExtractor)
+  - _VALID_URL: matches Metacafe watch URLs and captures video_id and display_id
+  - _DISCLAIMER and _FILTER_POST: potential endpoints for disclaimers and filtering (not directly invoked in this code path beyond declaration)
+  - IE_NAME = 'metacafe'
+  - _TESTS: multiple test cases covering normal Metacafe videos, external sources (YouTube, ThePlatform), age-restricted content, and other embeds (AnyClip, CBS, Movieclips)
+
+- Public/auxiliary methods
+  - report_disclaimer(self): prints a message when retrieving the disclaimer (used by some extraction flows, not explicitly shown in the main flow here)
+  - The code relies on standard InfoExtractor helpers:
+    - _download_webpage, _download_xml
+    - _html_search_meta, _search_regex, _parse_json
+    - _extract_m3u8_formats for HLS
+    - _sort_formats to order formats
+    - int_or_none for numeric fields
+    - mimetype2ext, determine_ext for extension handling
+    - compat utilities for URL/query parsing and unquoting
+
+- Main extraction flow (_real_extract)
+  - URL parsing and external source handling
+    - Extract video_id and display_id from the URL using _VALID_URL.
+    - If video_id matches two-part external pattern (prefix-id) like yt-abcdef or cb-123, delegate:
+      - yt- prefix => return a YouTube extractor result for the corresponding YouTube URL
+      - cb- prefix => return a ThePlatform extractor result for the_id
+  - Request preparation
+    - Build HTTP headers to disable Metacafe family filtering via a cookie: ffilter set to False.
+    - If video_id starts with an- (AnyClip), also add flashVersion cookie.
+  - Webpage retrieval and preliminary checks
+    - Download the page with headers.
+    - If a not-found indicator is present, raise ExtractorError with the page message.
+  - Metadata extraction
+    - Title: try og:title or twitter:title meta tags, else fall back to an H1 tag.
+    - Description, thumbnail, uploader nickname, duration, and age_limit are extracted later from page data.
+  - Video URL extraction (multi-layered, with fallbacks)
+    - First attempt: look for mediaURL or videoURL query parameters in the page. If found, URL-decode and determine extension. If a gdaKey is present, append “?__gda__=<key>”.
+    - Second attempt: look for a direct <video src="..."> tag.
+    - Third attempt: look for flashvars value, parse as a query-string dictionary, extract mediaURL and key from mediaData, and construct the final URL with a __gda__ key.
+    - Fourth attempt: if the page contains an embedded SWF config, follow the config URL to a SMIL document, parse the SMIL to assemble multiple format entries (base URL + per-video play_path with system-bitrate as format_id).
+    - Fifth attempt: parse a JSON-like flashvars block that contains a sources array; for each source, derive the URL and extension, and:
+      - If type is m3u8, use _extract_m3u8_formats to build HLS formats.
+      - Otherwise, add a simple format entry with url and ext.
+    - If none of the above yield a video URL, raise ExtractorError('Unsupported video type').
+  - Build final formats list
+    - If video_url is a list, treat as formats; otherwise create a single-format list with the discovered URL and extension.
+    - Sort formats with _sort_formats.
+  - Metadata assembly for return
+    - description: og:description / twitter:description / description meta
+    - thumbnail: og:image / twitter:image
+    - video_uploader: derived from a “submitter” pattern or a Google Ads targeting string
+    - duration: parsed from video:duration meta
+    - age_limit: 18 if a content rating is detected as restricted in the page, else 0
+  - Return dictionary
+    - id: video_id
+    - display_id: display_id
+    - description, uploader, title, thumbnail, age_limit, duration
+    - formats: the constructed formats list
+  - Notes on robustness
+    - Multiple fallback strategies cover most embedding methods Metacafe uses (direct mediaURL parameters, HTML5 video tag, flashvars with mediaData, SWF-based SMIL, and a JSON-based sources array).
+    - Handles external embeds by delegating to YouTube or ThePlatform when the video_id is prefixed accordingly.
+    - Attempts to gracefully handle unavailable pages and restricted content (age gating).
+
+- Implementation details of interest
+  - External delegation: recognizes yt- and cb- prefixes in the Metacafe video_id to route to YouTube or ThePlatform extractors.
+  - Family filter bypass: sends a cookie to disable the Metacafe family filter for most extractions.
+  - AnyClip special case: adds a flashVersion cookie to obtain proper mp4 links.
+  - GDA key handling: supports optional __gda__ query parameter when a gdaKey is present in the page.
+  - SMIL-based extraction: can parse SMIL documents via a SWF embed path to harvest multiple bitrates/formats.
+  - Flashvars/legacy embedding: robustly handles a variety of old and new Metacafe embedding approaches, including a JSON-like flashvars with a sources array and type hints (including m3u8).
+
+In short, MetacafeIE is a multi-strategy extractor designed to handle many embedding patterns Metacafe uses, with special handling for external platforms, and it outputs a standard dict with id, display_id, title, description, uploader, thumbnail, duration, age_limit, and a list of video formats.

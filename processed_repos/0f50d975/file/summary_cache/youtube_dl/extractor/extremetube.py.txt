@@ -1,0 +1,30 @@
+- Purpose: ExtremeTubeIE is a YouTube-dl extractor for ExtremeTube video pages. It relies on the KeezMoviesIE base class to handle common video extraction and then augments metadata from the ExtremeTube page.
+
+- Inheritance and reuse:
+  - Class ExtremeTubeIE(KeezMoviesIE) inherits from KeezMoviesIE.
+  - Uses KeezMoviesIE’s _extract_info(url) to obtain a starting (webpage, info) pair and basic video data (id, ext, etc.). The ExtremeTube-specific logic only fills in missing metadata.
+
+- URL matching:
+  - _VALID_URL targets ExtremeTube video pages and captures the video id: https://www.extremetube.com/(?:[^/]+/)?video/<id>
+
+- Tests:
+  - _TESTS includes a positive test with a known video, asserting id, extension (mp4), title, uploader, view_count, and age_limit (18).
+  - Several other tests are marked only_matching to ensure non-video pages or alternative paths are recognized but not extracted.
+
+- Main extraction flow (_real_extract):
+  - Retrieve (webpage, info) via self._extract_info(url) (provided by KeezMoviesIE).
+  - If info['title'] is missing, attempt to extract it from the page using the regex that finds an h1 tag with a title attribute: <h1 ... title="...">.
+  - Extract uploader name with a non-fatal regex matching: Uploaded by: </...> <a...>UploaderName</a>.
+  - Extract view_count with a non-fatal regex capturing number-like text after a “Views:” label, then convert to int using str_to_int.
+  - Update the info dictionary with 'uploader' and 'view_count'.
+  - Return the enriched info dictionary.
+
+- Implementation details:
+  - Uses str_to_int to robustly convert numbers (with digits, commas, or dots) to integers.
+  - Non-fatal extraction (fatal=False) allows the extractor to proceed even if uploader or view_count aren’t found.
+  - Title extraction is a fallback if KeezMoviesIE doesn’t provide it, relying on the page’s h1 element with a title attribute.
+  - Keeps age_limit handling via the base test data; ExtremeTube pages typically have an age restriction of 18.
+
+- Key behavior summary:
+  - Primarily augments KeezMoviesIE metadata with ExtremeTube-specific fields (uploader and view_count) when available.
+  - Provides a robust fallback for title extraction and tolerant parsing for optional fields.

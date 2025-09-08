@@ -1,0 +1,87 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/mit.py
+
+Overview
+- The file defines two extractors for MIT-related video content:
+  - TechTVMITIE: extracts videos from techtv.mit.edu.
+  - OCWMITIE: extracts videos from MIT OpenCourseWare pages by locating embedded YouTube videos and delegating to the YouTube extractor.
+
+Key classes and main functionality
+
+1) TechTVMITIE (MIT TechTV videos)
+- Purpose: scrape video metadata and direct formats from techtv.mit.edu.
+- Class attributes:
+  - IE_NAME = 'techtv.mit.edu'
+  - _VALID_URL matches URLs like http(s)://techtv.mit.edu/videos/<id> or /embeds/<id>
+  - _TEST: example URL with expected id, extension, title, and description md5.
+- _real_extract(self, url) flow:
+  - Extract video_id from URL.
+  - Download the page for the video (http://techtv.mit.edu/videos/<id>).
+  - Remove HTML comments from the page to clean it up.
+  - Compute base_url:
+    - Find ipadUrl: '...cloudfront.net/' from the page.
+    - Use _proto_relative_url to convert it to an http URL (defaulting to http:).
+  - Parse video formats:
+    - Extract JSON text from the page: bitrates: [ ... ]
+    - json.loads to get a list of format entries.
+    - Build a formats list where each item includes:
+      - format_id: f['label']
+      - url: base_url + f['url'] with the scheme removed (partition(':')[2])
+      - ext: extension from the URL (partition(':')[0])
+      - format: f['label']
+      - width: f['width']
+      - vbr: f['bitrate']
+- Metadata extraction:
+  - title: from element with id 'edit-title' (on the cleaned page)
+  - description: from element 'edit-description', passed through clean_html
+  - thumbnail: extracted via regex on the raw page (playlist: ... url: '...') 
+- Return: a dict with id, title, formats, description, thumbnail.
+
+Key implementation details for TechTVMITIE
+- Uses a JSON-based approach for available bitrates/formats instead of discrete HTML video tags.
+- Constructs full video URLs by combining a base CloudFront URL (ipadUrl-derived) with path parts from each format entry.
+- Parses title/description from specific page elements after removing HTML comments.
+- Thumbnail extraction via a regex looking for a playlist URL pattern.
+
+2) OCWMITIE (MIT OpenCourseWare videos, embedded YouTube)
+- Purpose: extract MIT OCW course videos by locating embedded YouTube videos on OCW pages, then delegating to YouTube for actual video retrieval.
+- Class attributes:
+  - IE_NAME = 'ocw.mit.edu'
+  - _VALID_URL matches OCW course pages: /^https?:\/\/ocw\.mit\.edu\/courses\/(?P<topic>[a-z0-9\-]+)/
+  - _BASE_URL = 'http://ocw.mit.edu/'
+  - _TESTS: two example pages with expected YouTube IDs and metadata (ext, title, upload_date, uploader, etc.).
+- _real_extract(self, url) flow:
+  - Extract topic from the URL using _VALID_URL.
+  - Download the course page.
+  - title = HTML meta WT.cg_s
+  - description = HTML meta Description
+  - Try to locate embedded YouTube video:
+    - First, search for ocw_embed_chapter_media(...). If found:
+      - Clean quotes from the captured string, split by comma, pick yt = metadata[1] (the YouTube URL).
+    - If not found, search for ocw_embed_media(...). If found:
+      - Similar processing to extract yt (YouTube URL).
+    - If neither is found, raise ExtractorError('Unable to find embedded YouTube video.')
+  - Extract YouTube video_id from yt using YoutubeIE.extract_id(yt).
+  - Return a transparent URL result that points to YouTube:
+    - _type: 'url_transparent'
+    - id: video_id
+    - title: title
+    - description: description
+    - url: yt
+    - ie_key: 'Youtube'
+  - This causes youtube-dl to delegate to the YouTube extractor for actual video retrieval.
+
+Key implementation details for OCWMITIE
+- Uses two possible OCW embed patterns (ocw_embed_chapter_media and ocw_embed_media) to locate the YouTube video URL.
+- Cleans quotes and splits metadata to retrieve the YouTube URL, then extracts the video ID.
+- Returns a url_transparent result, effectively chaining to the YouTube extractor for final video data (format, streams, etc.).
+
+Why this matters
+- The file expands youtube-dl’s MIT coverage with two targeted extractors:
+  - TechTVMITIE handles a direct MIT TechTV video portal, discovering multiple formats from a JSON-like bitrate list and assembling direct video URLs.
+  - OCWMITIE handles MIT OCW course pages by locating embedded YouTube videos and delegating to the standard YouTube extractor, ensuring compatibility with YouTube-hosted OCW content.
+
+Dependencies and helpers used
+- InfoExtractor base class for standard extraction scaffolding.
+- YoutubeIE for delegating to YouTube extraction.
+- Utilities: clean_html, ExtractorError, get_element_by_id for safe HTML/text extraction.
+- Regular expressions and json for parsing page content and format data.

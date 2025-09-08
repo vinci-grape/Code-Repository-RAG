@@ -1,0 +1,89 @@
+Concise yet comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/ustream.py
+
+Overview
+- Implementations of two extractors for Ustream:
+  - UstreamIE: handles individual videos and embedded/recorded pages.
+  - UstreamChannelIE: handles Ustream channel pages, producing a playlist of videos from a channel.
+
+Key URL patterns
+- UstreamIE (_VALID_URL): matches:
+  - http(s)://www.ustream.tv/recorded/<id>
+  - http(s)://www.ustream.tv/embed/recorded/<id>
+  - http(s)://www.ustream.tv/embed/<id> (embed)
+  - Also supports video.ibm.com domain variants for embedding
+- UstreamChannelIE (_VALID_URL): matches channel pages:
+  - http(s)://www.ustream.tv/channel/<slug>
+
+Main functionality and data flow
+- UstreamIE
+  - _real_extract(url):
+    - If the URL is an embedded/recorded type, it redirects to the desktop recorded URL or builds a playlist from embedded content.
+    - For normal video pages, fetches video metadata from https://api.ustream.tv/videos/<video_id>.json.
+    - If API returns an error, raises ExtractorError.
+    - Builds a list of available formats:
+      - Primary formats from video['media_urls'] (direct URLs with ext inferred from the key).
+      - If no formats found, attempts to fetch HLS/DASH streams via _get_streams:
+        - _get_streams(url, video_id, app_id_ver) calls _get_stream_info to obtain stream data, retrying up to 3 times to obtain stream(s).
+        - HLS: uses _extract_m3u8_formats to parse the m3u8 URL(s) when present.
+        - DASH (commented/outdated in current code): has a _parse_segmented_mp4 implementation to construct formats from segmented MP4/DASH-like data.
+      - Sorts formats with _sort_formats.
+    - Assembles metadata:
+      - title, description, timestamp, duration, view_count, uploader, uploader_id
+      - thumbnails list from video['thumbnail']
+    - Returns a dict with id, title, description, thumbnails, timestamp, duration, view_count, uploader, uploader_id, formats.
+  - _extract_url(webpage): utility to pull an embedded Ustream URL from an iframe in a page.
+  - _get_stream_info(url, video_id, app_id_ver, extra_note=None):
+    - Builds a dynamic Ustream connection info URL with randomized IDs and application version.
+    - Calls a viewer-type endpoint to retrieve connection host and connectionId.
+    - Uses those to query the actual stream data endpoint and returns the stream info.
+  - _get_streams(url, video_id, app_id_ver):
+    - Repeats up to 3 times to fetch stream information until a 'stream' entry is found in the response.
+  - _parse_segmented_mp4(dash_stream_info):
+    - Intended to parse DASH-like segmented MP4 data to build formats with http_dash_segments protocol.
+    - Uses a template with placeholders (%) to construct fragment URLs for each segment.
+    - Builds a format dict per stream with:
+      - format_id (dash-<type>-<bitrate>), protocol 'http_dash_segments', ext derived from content type, width/height if present
+      - fragments: list of fragment URLs (data URIs pointing to a placeholder MPD)
+      - vcodec/acodec and bitrate/adaptive bitrate (distinguish video vs audio)
+    - Note: This path is not currently wired into the active flow (DASH handling is commented out in _real_extract).
+
+- UstreamChannelIE
+  - _real_extract(url):
+    - Extracts display_id (slug) from URL, downloads channel page.
+    - Reads channel_id from meta tag 'ustream:channel_id' in the HTML.
+    - Iteratively fetches JSON at /ajax/socialstream/videos/<channel_id>/1.json to paginate:
+      - Collects video IDs from data-content-id attributes in the JSON response.
+      - Follows nextUrl to keep paging until exhausted.
+    - Builds a list of entries as Ustream video URLs: http://www.ustream.tv/recorded/<video_id>.
+    - Returns a playlist with:
+      - _type: 'playlist'
+      - id: channel_id
+      - display_id: slug
+      - entries: list of url_result entries for each video (type 'Ustream').
+
+Important implementation details
+- Uses YouTube-DL infrastructure:
+  - InfoExtractor base class, _download_json, _download_webpage, _search_regex, _parse_json, _html_search_meta, _extract_m3u8_formats, _sort_formats, url_result, playlist_result, etc.
+- Randomized host/ids in stream-info requests to emulate Ustream’s dynamic endpoints:
+  - http://r<random>-1-<video_id>-recorded-lp-live.ums.ustream.tv/1/ustream
+  - Parameters include type, appId, appVersion, rsid (random), rpin, referrer, media, application.
+- Fallback flow:
+  - Primary: video['media_urls'] directly provides formats.
+  - If not available, fetches HLS (m3u8) via stream info obtained by _get_streams.
+  - DASH path exists but is not actively used in the current code (commented DASH handling).
+- Data extraction and normalization:
+  - Handles both direct URLs and m3u8/HLS streams.
+  - Builds descriptive metadata from API payload: title, description, timestamp (created_at), duration (length), view_count, uploader (owner.username), uploader.id.
+  - Thumbnails constructed from video['thumbnail'] dictionary.
+- Error handling:
+  - If API returns an error, raises ExtractorError with the message.
+- Tests:
+  - Includes several sample test cases for recorded videos, embed scenarios, and channel pages, covering metadata, formats, and edge conditions (e.g., pro broadcaster removal).
+
+Summary of key classes/functions
+- UstreamIE (InfoExtractor)
+  - _VALID_URL, _TESTS, _extract_url, _real_extract, _get_stream_info, _get_streams, _parse_segmented_mp4
+- UstreamChannelIE (InfoExtractor)
+  - _VALID_URL, _TEST, _real_extract
+
+Overall, the file implements a robust extractor for Ustream, supporting direct video access, embedded views, and channel playlists, with a fallback path to obtain HLS streams when direct media URLs are unavailable. It also includes a (partially implemented) mechanism for parsing DASH/segmented MP4 streams.

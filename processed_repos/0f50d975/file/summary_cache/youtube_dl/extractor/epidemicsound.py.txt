@@ -1,0 +1,75 @@
+Concise but comprehensive summary of epidemicsound.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Epidemic Sound track pages, producing standardized information and downloadable formats for tracks.
+
+- Key class
+  - EpidemicSoundIE(InfoExtractor)
+    - Inherits from InfoExtractor and implements _real_extract to fetch and parse track data.
+
+- URL handling
+  - _VALID_URL = r'https?://(?:www\.)?epidemicsound\.com/track/(?P<id>[0-9a-zA-Z]+)'
+  - Extracts a track ID from URLs like https://www.epidemicsound.com/track/{id}/
+
+- Test cases (_TESTS)
+  - Provides two sample track URLs with expected:
+    - id/display_id
+    - extension (mp3)
+    - duration, tags, title, timestamp, thumbnail
+    - release_timestamp (where applicable)
+    - MD5 for the resulting file to validate download
+    - Ensures the “best” format is selected (format: 'full' in tests)
+
+- Data retrieval
+  - Uses _match_id(url) to obtain video_id.
+  - Fetches JSON data from https://www.epidemicsound.com/json/track/{video_id} via _download_json.
+
+- Formats extraction (formats variable)
+  - Builds a list of formats from json_data['stems'] using a traversal with Ellipsis to cover nested structures.
+  - For each stem, expects fields:
+    - format (e.g., 'full' or other)
+    - format_id (alternative if missing)
+    - url (lqMp3Url as a potential field)
+    - format_note (s3TrackId used to annotate)
+  - Helper function fmt_or_none(f):
+    - Normalizes missing fields: if 'format' missing, copies from 'format_id' and vice versa.
+    - Skips formats missing both 'url' or 'format'.
+    - Converts format_note to 'format_note' prefixed with 'track ID ' if present.
+    - Sets 'preference' to -1 for 'full' format, else -2 (to influence sorting among formats).
+    - Ensures 'format' and 'format_id' exist consistently.
+  - Uses traverse_obj to map stem data to a dict with:
+    - 'format' (0 index or string)
+    - 'format_note' (1 index, with fallback)
+    - 'format_id' (1 index)
+    - 'url' (1 index)
+  - Applies fmt_or_none to each format entry.
+  - Calls _sort_formats(formats) to order formats by quality/preference.
+
+- Metadata extraction (info dict)
+  - Gathers core info from json_data with traverse_obj:
+    - 'id': json_data['id']
+    - 'tags': json_data['metadataTags'] (list of tags)
+    - 'title': json_data['title']
+    - 'duration': json_data['length'] (converted via float_or_none)
+    - 'timestamp': unified_timestamp(json_data['added'])
+    - 'thumbnail': json_data['imageUrl'] or json_data['cover']
+    - 'age_limit': 18 if json_data['isExplicit'] is truthy, else None
+    - 'release_timestamp': unified_timestamp(json_data['releaseDate'])
+  - Merges additional fields:
+    - 'categories': json_data['genres'] elements' 'tag'
+    - 'tags': json_data['metadataTags']
+  - Adds:
+    - 'display_id': video_id
+    - 'formats': formats (constructed earlier)
+  - Returns the final info dictionary.
+
+- Important implementation details
+  - Robust format normalization: ensures both 'format' and 'format_id' are set and coherent.
+  - format_note handling: prefixes with 'track ID ' when present, and maps from s3TrackId if provided.
+  - Preference logic: full formats are preferred over lower-quality ones via 'preference' values.
+  - Time and date handling: uses unified_timestamp to convert date fields to standard UNIX timestamps.
+  - Thumbnail fallback: supports multiple possible image fields ('imageUrl' or 'cover').
+  - Safe traversal: heavily relies on traverse_obj to gracefully extract nested fields and avoid KeyError.
+
+- Overall flow
+  - Extract track id → fetch JSON data → assemble and normalize formats → build metadata → return a unified info dictionary compatible with YouTube-DL’s expectations.

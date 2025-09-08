@@ -1,0 +1,32 @@
+Concise summary of the file: youtube-dl/youtube_dl/extractor/vh1.py
+
+- Purpose
+  - Implements an extractor for VH1 videos, built on top of MTV-style extraction infrastructure.
+
+- Main class
+  - VH1IE(MTVServicesInfoExtractor): VH1 extractor for vh1.com content.
+  - IE_NAME = 'vh1.com'
+  - _FEED_URL = 'http://www.vh1.com/feeds/mrss/' (MRSS feed used by the parent class)
+  - _VALID_URL = r'https?://(?:www\.)?vh1\.com/(?:video-clips|episodes)/(?P<id>[^/?#.]+)'
+    - Matches VH1 video-clips and episodes pages, capturing an id.
+
+- Key components and behavior
+  - Inherits from MTVServicesInfoExtractor, so it relies on shared MTV extraction logic (e.g., handling MRSS feeds, triforce MGID extraction, and video info aggregation).
+  - _real_extract(self, url)
+    - Extracts the page-specific identifier with _match_id(url) into playlist_id.
+    - Downloads the webpage with _download_webpage(url, playlist_id).
+    - Gets the MGID (a unique media ID) from the page using _extract_triforce_mgid(webpage).
+    - Retrieves the actual video/playlist information with _get_videos_info(mgid).
+    - Returns the assembled info (likely a playlist or video entry) produced by the parent class.
+
+- Important implementation details
+  - The extractor delegates most logic to the parent class (MTVServicesInfoExtractor), specifically:
+    - _extract_triforce_mgid(webpage): to obtain the MGID from VH1 page content.
+    - _get_videos_info(mgid): to fetch and assemble the video information using the MGID (which leverages the MRSS feed and VH1-specific metadata).
+  - _FEED_URL points to VH1’s MRSS feed, enabling the parent class to build consistent metadata for VH1 content.
+  - Tests (_TESTS) illustrate:
+    - A typical episode page yields a playlist with a title and description.
+    - A video clip page yields a single video with fields like id, ext (e.g., mp4), title (formatted string with date and episode info), description (md5 hash), upload_date, and timestamp.
+  - The clip test includes a skip_download parameter for m3u8 downloads, showing support for alternative formats without fetching the actual media file.
+
+In short, VH1IE is a thin wrapper around MTVServicesInfoExtractor tailored for VH1, using page-derived MGID (via triforce) to fetch and return video/playlist metadata from VH1’s MRSS feed.

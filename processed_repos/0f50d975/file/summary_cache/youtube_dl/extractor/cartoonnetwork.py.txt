@@ -1,0 +1,62 @@
+Concise but comprehensive summary of the code
+
+Purpose
+- Implement a URL extractor for Cartoon Network video pages in youtube-dl.
+- Inherits from TurnerBaseIE to reuse Turner/TurnerNetwork logic.
+- Produces a standard video info dict including IDs, title, description, series/episode info, and direct video formats (via NLTV/Turner helper).
+
+Key components
+- CartoonNetworkIE(TurnerBaseIE): Main extractor class.
+- _VALID_URL: Regular expression to identify Cartoon Network video pages. Example matched pattern:
+  https://www.cartoonnetwork.com/video/<path-separated>/<id>-clip.html or -episode.html
+  The id portion is captured as the display_id.
+- _TEST: Unit-test data for one sample URL, including expected id, title, ext, and description hash. Uses skip_download to only fetch metadata.
+
+Main workflow (_real_extract)
+1) Determine display_id from URL using the _VALID_URL capture group.
+2) Download the target webpage.
+3) Nested helper: find_field(global_re, name, content_re=None, value_re='[^"]+', fatal=False)
+   - Builds a regex to read values from the page’s JavaScript globals, specifically:
+     (?:_cnglobal\.currentVideo\.<global_re><optional content_re>) = "<value>";
+   - If fatal is True and not found, raises extraction error.
+   - Supports optional content_re used to narrow to metadata (video_metadata.content_...).
+   - Returns the extracted string value.
+4) Extract core fields via find_field:
+   - media_id: from mediaId with expected 40 hex digits; required (fatal=True).
+   - title: from episodeTitle; supports content_re of episodeName or name; required (fatal=True).
+5) Retrieve base streaming info via:
+   - info = self._extract_ngtv_info(media_id, {'networkId': 'cartoonnetwork'}, {
+       'url': url,
+       'site_name': 'CartoonNetwork',
+       'auth_required': find_field('authType', 'auth type') != 'unauth',
+     })
+   This leverages Turner-based logic to resolve actual video formats (e.g., MP4 or HLS).
+6) Series info:
+   - series: from propertyName (fallback to showName), or meta tag partOfSeries.
+   - Update info with:
+     - id: media_id
+     - display_id: display_id
+     - title: title
+     - description: HTML meta description
+     - series: series
+     - episode: title
+7) Season/Episode numbers:
+   - For each field in ('season', 'episode'):
+     - Look up fieldName = e.g., 'seasonNumber' or 'episodeNumber'
+     - Try to extract a numeric value via find_field(..., value_re=r'\d+')
+     - If not found, try meta tag with the same fieldName
+     - Convert to int safely via int_or_none and store as '<field>_number' in info
+8) Return the composed info dict.
+
+Important implementation details
+- The extraction relies on parsing JavaScript global variables (_cnglobal.currentVideo.*) and optional video metadata (video_metadata.content_*), rather than purely HTML metadata.
+- The auth_required flag is derived from the authType value, treating anything other than 'unauth' as authenticated-required.
+- Uses TurnerBaseIE’s _extract_ngtv_info to fetch actual video URLs/formats (supporting m3u8/MP4 as indicated in tests).
+- Fallbacks:
+  - series may be found from propertyName/series or from the partOfSeries meta tag.
+  - description is pulled from the standard meta description tag.
+  - season/episode numbers have safe fallbacks to meta tags and safe integer parsing.
+- The _TEST data shows intended output fields: id, ext (mp4), title, description hash, and a scenario with skip_download to just fetch metadata.
+
+Overall
+- This module adds Cartoon Network support by locating a video’s media_id and metadata on Cartoon Network video pages, then delegating to the Turner/NLTV-based extractor to resolve formats, and finally assembling a rich info dict including identifiers, title, description, series/episode data, and numeric season/episode fields.

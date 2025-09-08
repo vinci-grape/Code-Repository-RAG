@@ -1,0 +1,57 @@
+This file implements a Channel 9 extractor for youtube-dl (Channel9IE). It handles both individual Channel 9 content pages and RSS/playlist feeds, extracting video formats, metadata, and related assets.
+
+Main components and functionality
+- Class Channel9IE(InfoExtractor)
+  - Description and name: IE_DESC = 'Channel 9', IE_NAME = 'channel9'
+  - _VALID_URL: Regex that matches Channel 9 URLs (including channel9.msdn.com and short s.ch9.msd) and captures contentPath and optional RSS segment.
+  - _RSS_URL: Base URL used to fetch RSS feeds for a given content path.
+  - _extract_urls(webpage): Static method that extracts iframe URLs pointing to Channel 9 players from a page (used for discovering content embeds).
+  - _extract_list(video_id, rss_url=None): Fetches an RSS feed for a given content path and builds a playlist from the <item><link> entries. Returns a playlist result with the title taken from the RSS feed.
+  - _real_extract(url): Core extraction logic:
+    - If URL ends with /RSS, delegates to _extract_list(content_path, url).
+    - Otherwise downloads the page and looks for the data-episode attribute. If present:
+      - Parses episode data JSON, obtains contentId and API endpoint, and detects if it is a session ('/Sessions(' in the API path).
+      - Builds an OData content URL and fetches content data (JSON) including fields like Title, Description/Body, MediaLengthInSeconds, PublishedDate, Rating, Views, Captions, Slides, ZipFile, Authors, Speakers, VideoMP4* and VideoWMV* URLs.
+      - Builds available formats in two stages:
+        1) In-page formats from a <select name="format"> element. Each option contributes a format with a URL, a human-readable format label, and a derived internal format_id (via SITE_QUALITIES mapping). mp3 is marked with vcodec: 'none'.
+        2) Additional formats from API fields (VideoMP4Low, VideoWMV, VideoMP4Medium, VideoMP4High, VideoWMVHQ). Dedupe against already collected URLs.
+      - Determines subtitles from Captions (per-language, with .vtt extension).
+      - Collects common metadata: id, title, description, thumbnail, duration, timestamp, ratings, view counts, subtitles.
+      - If a session: collects speakers (FullName) and adds session_code, session_room, session_speakers; else collects authors (DisplayName) and adds authors.
+      - Constructs possible content items:
+        - Slides (title + '-Slides', slides URL)
+        - Zip (title + '-Zip', zip URL)
+        - Main video formats (title, with 'formats' list)
+      - Returns a playlist_result of these contents (a single item for the main video plus optional slides/zip as separate items).
+      - If nothing meaningful is found (no formats, slides, or zip), raises ExtractorError.
+    - If no episode_data is found on the page, falls back to _extract_list(content_path) (i.e., treat as a RSS/playlist index).
+
+Key implementation details
+- Formats handling
+  - Two sources for formats: in-page <select> options and API-provided URLs (VideoMP4Low/Medium/High, VideoWMV variants).
+  - QUALITY handling via:
+    - QUALITIES = ('mp3','wmv','mp4','wmv-low','mp4-low','wmv-mid','mp4-mid','wmv-high','mp4-high')
+    - quality_key = qualities(QUALITIES) provides a consistent quality ranking.
+    - A helper quality(quality_id, format_url) returns a large number (len(QUALITIES)) if the format URL contains '_Source.' (special case for source media), otherwise uses quality_key(quality_id).
+  - Dedupe logic using a set of URLs to avoid duplicates from both sources.
+  - vcodec is set to 'none' for mp3 formats (audio-only) and left as None otherwise.
+  - Formats are sorted with _sort_formats(formats) before use.
+- Metadata and content structure
+  - Subtitles collected from Captions as language → list of {url, ext: 'vtt'} entries.
+  - Common metadata includes:
+    - id, title, description (cleaned HTML from Description or Body), thumbnail, duration, timestamp, avg_rating, rating_count, view_count, comment_count, subtitles.
+  - Session-specific fields: session_code, session_room, session_speakers (list of speaker names).
+  - Non-session videos: authors (list of author names).
+- Attachments
+  - Slides and ZipFile are treated as separate content items in the final playlist, each inheriting the common metadata but with a distinct title (title + '-Slides', title + '-Zip').
+- RSS handling
+  - RSS-based extraction uses _extract_list to convert channel/item/link entries into a playlist, with each link turned into a Channel9IE object via url_result (so nested extraction happens).
+  - The _TESTS include RSS playlist examples and “only_matching” tests to verify URL matching without full extraction.
+
+Usage scenarios supported
+- Direct content pages with data-episode attribute: fetchs OData content, gathers formats, slides, zip, captions, authors/speakers, and returns a playlist with one main item plus optional attachments.
+- Channel 9 RSS pages: fetches RSS and creates a playlist from item links.
+- Pages with in-page format select: collects formats from the select options.
+- Handles both sessions (talks) and non-sessions (blog posts or generic videos) with appropriate metadata fields.
+
+Overall, Channel9IE provides robust support for Channel 9’s video content and RSS playlists, extracting multiple formats, subtitles, and rich metadata, and organizing slides/zip files as separate playlist items when available.

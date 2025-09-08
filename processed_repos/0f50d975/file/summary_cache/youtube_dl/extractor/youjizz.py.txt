@@ -1,0 +1,49 @@
+- What it is
+  - YouJizzIE is a subclass of InfoExtractor for extracting video information from youjizz.com pages. It parses video formats (including HLS), metadata (title, duration, uploader), and age restrictions.
+
+- URL matching
+  - _VALID_URL handles both:
+    - http(s)://...youjizz.com/videos/<title>-<id>.html
+    - http(s)://...youjizz.com/videos/embed/<id>
+  - It captures video_id from either id or embed_id group.
+
+- Core workflow (_real_extract)
+  - Download webpage for the given URL.
+  - Extract title from the HTML <title> tag.
+  - Parse encodings JSON from the page:
+    - Looks for a JavaScript-like Encodings array via regex and loads it with _parse_json (defaulting to []).
+    - Each encoding dict should have a 'filename' (URL to the video file) and optionally 'name' or 'quality' for format_id.
+  - Build formats list:
+    - If encoding URL ends with m3u8, use _extract_m3u8_formats with entry_protocol='m3u8_native' and m3u8_id='hls'.
+    - If not m3u8, create a format dict with:
+      - url: encoding['filename']
+      - format_id: encoding.get('name') or encoding.get('quality')
+      - height: parsed from format_id if it contains a number like "720p" (via regex).
+  - If at least one format is found, attach them to info_dict['formats'].
+  - If no formats are found:
+    - Work around a likely broken HTML by inserting a space after "controls" in the markup.
+    - Fall back to parsing HTML5 media entries with _parse_html5_media_entries and use the first result as info_dict.
+  - Duration:
+    - Try to extract text after <strong>Runtime:</strong> and convert to seconds with parse_duration.
+  - Uploader:
+    - Extract text after "Uploaded By" link.
+  - Age limit:
+    - Determine via _rta_search(webpage) (likely parses a country/age restriction tag from the page).
+
+- Metadata and return
+  - Final info_dict updated with:
+    - id: video_id
+    - title: extracted page title
+    - age_limit: from _rta_search
+    - duration: parsed duration (if found)
+    - uploader: extracted uploader (if found)
+  - Return the consolidated info_dict (with either 'formats' or HTML5 fallback data).
+
+- Key implementation details
+  - Resilient encoding parsing: uses _search_regex to locate the encodings block and _parse_json with fatal=False to avoid hard failures if missing.
+  - Flexible format handling: supports both HLS (m3u8) and direct file URLs; derives height from format_id when possible.
+  - Fallback path for broken HTML: explicitly adjusts the HTML to enable HTML5 media parsing when explicit formats aren’t available.
+  - Tests cover a real YouJizz URL (expecting mp4 format and metadata) and two “only_matching” cases for URL patterns.
+
+- Tests
+  - _TESTS includes a real video page expecting id 2189178, ext mp4, title “Zeichentrick 1”, age_limit 18, duration 2874, plus two non-matching example URLs for pattern validation.

@@ -1,0 +1,73 @@
+Concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/odnoklassniki.py
+
+Purpose
+- Implement an InfoExtractor for Odnoklassniki (ok.ru) videos, capable of parsing various Odnoklassniki video pages, extracting metadata, and gathering available video formats (MP4, HLS, DASH, RTMP) with proper handling for embedded YouTube videos and paid content.
+
+Key class
+- OdnoklassnikiIE(InfoExtractor)
+  - _VALID_URL: Regex matching Odnoklassniki/ok.ru video URLs (including www, m, mobile subdomains) and several path patterns (video embed, moviePlayer, live, dk with st.mvId, etc.). Captures the video id.
+  - _TESTS: A set of tests validating different scenarios:
+    - Metadata in JSON: standard video page with title, duration, uploader, like_count, etc.
+    - metadataUrl path: metadata can be fetched via a metadata URL.
+    - YouTube embed: provider USER_YOUTUBE, ensuring URL-transparent handling.
+    - Missing embedded title scenario.
+    - Various “only_matching” test URLs covering embedded players and live/paid cases.
+
+Main functionality
+- _extract_url(webpage): Static helper that scans a page for an iframe embedding an Odnoklassniki video and returns the embedded URL if found. It looks for an iframe src that matches //odnoklassniki.ru/videoembed/... or ok.ru/videoembed/... and returns it.
+
+- _real_extract(url):
+  1. Parse start_time from the URL query parameter fromTime if present.
+  2. Extract video_id from the URL using _match_id(url).
+  3. Download the page at http://ok.ru/video/{video_id}.
+  4. Detect page-level errors via class="vp_video_stub_txt" and raise ExtractorError if found.
+  5. Locate the JSON "player" data in data-options attribute that contains the embedded video configuration, using a regex that matches the JSON blob around the video_id.
+  6. Parse the player JSON to obtain flashvars. If flashvars contain metadata, parse it as JSON; otherwise fetch metadata from flashvars['metadataUrl'] (URL-unquoting and POST data may be needed with st.location if present).
+  7. Retrieve movie and provider information from metadata:
+     - title: movie['title'] unless provider == 'UPLOADED_ODKL' where it uses movie['title'] directly; some embedded videos may omit title in movie dict, in which case the code falls back and expects other extractors to handle actual embed.
+     - thumbnail, duration, uploader, uploader_id
+     - upload_date (via ya:ovs:upload_date meta tag)
+     - age_limit (via ya:ovs:adult meta tag; true -> 18, else 0)
+     - like_count (from metadata)
+     - start_time (from earlier fromTime, if any)
+  8. If provider == 'USER_YOUTUBE':
+     - Return minimal info with _type 'url_transparent' and url set to movie['contentId'] so YouTube content is processed by the corresponding extractor.
+  9. Otherwise, proceed with format extraction:
+     - If LIVE_TV_APP, adjust title with _live_title(title).
+     - Build formats from metadata['videos'], each with url, ext 'mp4', and format_id from the 'name' field.
+     - If metadata contains hlsManifestUrl, extend formats with MP4 formats parsed from the HLS manifest via _extract_m3u8_formats.
+     - If metadataEmbedded (dash manifest), extend formats with MPD formats via _parse_mpd_formats.
+     - Derive quality for each format based on a quality mapping defined as: ('4', '0', '1', '2', '3', '5'), and assign a numeric 'quality' where possible by extracting a type indicator from the URL (type/ digits).
+     - If hlsMasterPlaylistUrl is present, extend formats with additional HLS formats (entry_protocol 'm3u8', m3u8_id 'hls').
+     - If rtmpUrl is present, add an RTMP format with ext 'flv'.
+  10. Paid content handling:
+     - If no formats were collected and metadata contains 'paymentInfo', raise ExtractorError indicating the video is paid content.
+  11. Sort formats with _sort_formats and populate the info dict with the key fields:
+     - id, title, thumbnail, duration, upload_date, uploader, uploader_id, like_count, age_limit, start_time, formats
+  12. Return the info dict.
+
+Important implementation details
+- Dependency utilization:
+  - Uses compatibility helpers: compat_etree_fromstring, compat_parse_qs, compat_urllib_parse_unquote, compat_urllib_parse_urlparse.
+  - Uses utility helpers: ExtractorError, unified_strdate, int_or_none, qualities, unescapeHTML, urlencode_postdata.
+- Metadata extraction:
+  - Metadata can be present directly in flashvars or fetched from a metadataUrl. If the latter, optional data payload includes st.location extracted from flashvars.
+  - The code gracefully handles cases where the title may be missing in the movie dict (e.g., embedded YouTube videos) and relies on the provider logic to determine how to proceed.
+- Special providers:
+  - USER_YOUTUBE: offloads to YouTube by returning a transparent URL pointing to the YouTube contentId.
+  - LIVE_TV_APP: adjusts the title via _live_title for live content naming.
+- Formats handling:
+  - Collects multiple format sources: direct mp4 URLs, HLS (m3u8) manifests, DASH (MPD) manifests, and RTMP if available.
+  - Uses a quality ranking for formats based on a predefined sequence to order formats by perceived quality.
+  - Robust handling for multiple manifest sources, with fatal=False to avoid failing on missing manifests.
+- Error handling:
+  - Explicitly checks for an “error” text block in the page before attempting extraction and raises ExtractorError with the message if found.
+  - If the video is paid (no formats found but paymentInfo present), raises a paid content error.
+
+Output
+- The extractor returns a dictionary (info) containing:
+  - id, title, thumbnail, duration, upload_date, uploader, uploader_id, like_count, age_limit, start_time
+  - formats: a list of available video formats with fields such as url, ext, format_id, and optional quality
+  - If provider is USER_YOUTUBE, a URL-transparent entry is used instead of direct formats, delegating processing to the YouTube extractor.
+
+Overall, this extractor handles Odnoklassniki video pages by parsing embedded JSON configuration, fetching metadata (either directly or via a metadata URL), and assembling a comprehensive set of video formats (MP4, HLS, DASH, RTMP) with appropriate metadata and special handling for YouTube embeds and paid content.

@@ -1,0 +1,55 @@
+Concise summary:
+
+This file implements a youtube-dl extractor for canalc2.tv video pages. It defines a Canalc2IE class that inherits from InfoExtractor and can parse both canalc2.tv video URLs and an archive URL pattern. The extractor gathers video formats (RTMP and HTTP), derives the title and duration from the page, and returns a normalized info dictionary.
+
+Key components and behavior:
+
+- Class: Canalc2IE(InfoExtractor)
+  - IE_NAME: 'canalc2.tv'
+  - _VALID_URL: Matches two URL patterns:
+    - http(s)://www.canalc2.tv/video/<id>
+    - http(s)://archives-canalc2.u-strasbg.fr/video.asp?...&idVideo=<id>
+  - _TESTS: Includes a concrete example (id 12163) with expected mp4 ext and duration, plus an archive URL for matching test.
+
+- _real_extract(self, url)
+  - Extracts video_id via _match_id(url).
+  - Downloads the page from http://www.canalc2.tv/video/<video_id>.
+  - Title extraction: parses the HTML with a regex that looks for a description block (class containing col_description) and an inner h3 tag content.
+  - Formats extraction:
+    - Scans the page for JavaScript-referenced video URLs using re.findall on file="URL" patterns.
+    - For each video_url:
+      - If it starts with rtmp://:
+        - Parses the URL into components with a regex to capture the base RTMP URL, the app, and the play_path (formatted as mp4:...).
+        - Appends a format dict with url, format_id 'rtmp', ext 'flv', app, play_path, and page_url.
+      - Otherwise (HTTP/HTTPS):
+        - Appends a format dict with url and format_id 'http'.
+    - If any formats were found, info = {'formats': formats}.
+    - If no formats found, falls back to HTML5 media entries via _parse_html5_media_entries(url, webpage, url)[0].
+  - Formats sorting: self._sort_formats(info['formats']).
+  - Metadata:
+    - id: video_id
+    - title: extracted title
+    - duration: parsed via parse_duration on a secondary regex that looks for id="video_duree" (duration value). The search is non-fatal (fatal=False), so absence yields None.
+  - Returns the info dict.
+
+Important implementation details:
+
+- Uses:
+  - _download_webpage to fetch the video page.
+  - _html_search_regex to extract the title from a specific HTML block.
+  - A targeted regex to locate duration from an element with id or name video_duree.
+  - _parse_html5_media_entries as a fallback when no direct video URLs are found on the page.
+  - parse_duration to convert a textual duration to seconds.
+  - _sort_formats to order the discovered formats by quality/preference.
+
+- RTMP format handling:
+  - Recognizes RTMP URLs and extracts the application part and play_path using a specific regex pattern, then constructs a detailed format dict including app and play_path for proper RTMP streaming.
+
+- Archive URL handling:
+  - The _VALID_URL pattern matches the archive URL, but the actual extraction logic resolves the video_id from that URL and fetches the corresponding canalc2.tv page for consistency. The test marks this as only_matching.
+
+- Robustness notes:
+  - If the page contains direct video file entries, those are used; otherwise a generic HTML5 media entries parser is used as a fallback.
+  - Duration parsing is optional (fatal=False), so missing duration does not crash extraction.
+
+In short, this extractor primarily scrapes video URLs from canalc2.tv pages, supports both RTMP and HTTP formats, extracts title and optional duration, and provides a structured info dictionary for downstream consumption.

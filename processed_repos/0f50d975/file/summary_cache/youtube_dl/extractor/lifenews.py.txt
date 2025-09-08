@@ -1,0 +1,80 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/lifenews.py
+
+Purpose
+- Implements two extractors for Life.ru content:
+  - LifeNewsIE handles video(s) embedded on Life.ru news pages (under /t/...), assembling either a single video or a playlist of multiple videos (including iframe-embedded videos).
+  - LifeEmbedIE handles embedded Life.ru players (embed.life.ru), extracting available formats from master M3U8 playlists or direct video URLs, with a robust fallback for older renditions.
+
+Key classes and main functionality
+- LifeNewsIE (InfoExtractor)
+  - _VALID_URL: Matches Life.ru news pages like http(s)://life.ru/t/.../<id> where id is digits.
+  - _real_extract:
+    - Downloads page, collects:
+      - video_urls: direct <video><source src="..."> URLs
+      - iframe_links: embedded Life.ru iframe URLs (embed or video paths)
+    - If neither source is found, raises ExtractorError.
+    - Extracts metadata:
+      - title from OpenGraph, with trailing " - Life.ru" stripped
+      - description from OpenGraph
+      - view_count via HTML regex
+      - timestamp via ISO8601 from <time datetime="...">
+    - Builds a common_info dict with description, view_count, timestamp.
+    - Defines helpers to create entry dicts:
+      - make_entry: base dict with id, url, title; id includes video index for multi-item cases (e.g., "12345-video2"), title appends " (Видео N)" for multiple items.
+      - make_video_entry: resolves relative URLs against the page URL.
+      - make_iframe_entry: uses a url_transparent entry type for iframe sources, converting to http(s) URL if needed.
+    - Logic for single vs. multiple media:
+      - If one video URL and no iframes: return a single video entry.
+      - If one iframe and no videos: return iframe entry.
+      - If both or multiple: build a list of entries for videos first, then iframes (numbered sequentially after videos); create a playlist dict from common_info and entries using playlist_result.
+- LifeEmbedIE (InfoExtractor)
+  - IE_NAME: "life:embed"
+  - _VALID_URL: Matches embed.life.ru paths for embedded or video players with a 32-hex-id.
+  - _real_extract:
+    - Downloads the embed page.
+    - Prepares formats list and helper extractors:
+      - extract_m3u8(manifest_url): adds M3U8-based formats via _extract_m3u8_formats (native HLS).
+      - extract_original(original_url): appends a direct URL format with a basic format_id.
+    - Attempts to read a JSON options object from the page: options = { ... }; then playlist = options.playlist or {}.
+      - If playlist exists:
+        - master: if a string and ends with .m3u8, extract_m3u8(master)
+        - original: if a string, extract_original(original)
+        - thumbnail: playlist.image
+    - Fallback for older renditions when no formats found:
+      - Looks for "file": "..." entries in page and processes each as either M3U8 or direct URL.
+    - Sorts formats, determines a thumbnail (prefers playlist image, else looks for "image" in page).
+    - Returns dict with id, title (set to the video_id), thumbnail, and formats.
+  - This extractor supports embedded Life.ru players that expose either:
+    - A master M3U8 playlist, or
+    - A direct original video URL, or
+    - Older rendition formats found in the page.
+
+Important implementation details
+- Metadata extraction:
+  - Title uses OpenGraph with trailing " - Life.ru" removed.
+  - Description sourced from OpenGraph as well.
+  - View counts and upload timestamp parsed via HTML regex and parse_iso8601 helpers.
+- URL handling:
+  - Video URLs are resolved against the page URL using compat_urlparse.urljoin.
+  - iframe URLs are converted to http(s) via _proto_relative_url for safe embedding.
+- Multi-video handling (LifeNewsIE):
+  - Builds a playlist when multiple video URLs and/or iframes are present.
+  - Generates stable IDs for each entry; single items keep the base id, multi-items get suffixed with -videoN.
+  - Entry titles adapt to indicate which video in the set (e.g., "Title (Видео 2)").
+  - Uses Url Transparent entries for iframes to trigger nested extraction when needed.
+- Embeds (LifeEmbedIE) specifics:
+  - Supports both master M3U8 playlists and original direct video URLs.
+  - Includes a fallback to older rendition formats found in the page if the JSON-based playlist is not present.
+  - Ensures formats are sorted and a thumbnail is provided if available.
+
+Tests (highlights)
+- LifeNewsIE tests cover:
+  - Single video embedded via video/source
+  - Single video embedded via iframe
+  - Two videos embedded via iframe
+  - Various only_matching URL cases
+- LifeEmbedIE tests cover:
+  - Direct embed URL with a 32-hex id and a thumbnail
+  - A case with 1080p in the manifest (only_matching)
+
+In short, the file provides two extractors for Life.ru content: LifeNewsIE extracts and optionally compiles multiple media items from Life.ru news pages, including both direct video sources and iframes; LifeEmbedIE handles embedded Life.ru players, parsing playlists or direct video URLs (with robust fallbacks) into a formats list suitable for downstream playback.

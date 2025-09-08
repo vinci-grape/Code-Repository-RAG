@@ -1,0 +1,61 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/dvtv.py
+
+What it does
+- Implements an InfoExtractor (DVTVIE) for DVTV videos from Aktualne.cz (video.aktualne.cz).
+- Handles both single video pages and pages that contain a playlist of multiple videos.
+- Produces either a single video info dictionary or a playlist with multiple video entries, each containing metadata and available formats.
+
+Key components
+- Class DVTVIE(InfoExtractor)
+  - IE_NAME, IE_DESC, _VALID_URL: identifies DVTV URLs. The URL must contain a 32-hex-digit id after a path segment that ends with “r~”.
+  - _TESTS: Several tests covering:
+    - Single video pages (with id, title, duration, upload_date, timestamp).
+    - Playlist pages (multiple items with their own ids, titles, timestamps, etc.).
+    - A page with a live-stream style item (skip_download in test).
+    - A non-matching URL example to ensure the extractor is not used (only_matching).
+
+Main workflow (_real_extract)
+- Extracts video_id from URL.
+- Downloads the page and reads the published timestamp from the article:published_time meta tag.
+- Looks for a playlist defined in the page via playlist.push({ ... }); patterns:
+  - If found, builds a playlist by parsing each item with _parse_video_metadata(item_json, video_id, timestamp).
+  - Returns a playlist_result with id, title (from twitter:title), and list of parsed items.
+- If no playlist is found, looks for a single video config in the page via BBXPlayer.setup(...); pattern:
+  - Cleans up the string (removing wrapper function calls) and parses it with _parse_video_metadata.
+  - Returns the parsed single video dictionary.
+- If neither is found, raises ExtractorError.
+
+Parsing metadata and formats (_parse_video_metadata)
+- Input: a JSON-like string (js) describing video data, plus video_id and page timestamp.
+- Uses _parse_json with js_to_json to convert to a Python dict, then:
+  - title = unescapeHTML(data['title'])
+  - If a liveStarter plugin is present at data['plugins']['liveStarter'], merges its fields into the main data dict.
+- Formats extraction:
+  - Iterates over data['tracks'].values(), then over each video in tracks.
+  - video_url = video.get('src'); skip if missing.
+  - video_type = video.get('type'); ext = determine_ext(video_url, mimetype2ext(video_type)).
+  - If type is HLS (or ext is m3u8): use _extract_m3u8_formats(video_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False).
+  - If type is DASH (or ext is mpd): use _extract_mpd_formats(video_url, video_id, mpd_id='dash', fatal=False).
+  - Otherwise (direct HTTP): build a format entry with:
+    - url: video_url
+    - format_id: a hyphenated string composed from ext and label (if available)
+    - height: extracted from label if it matches a pattern like "720p"
+- After collecting formats, sorts them with _sort_formats(formats).
+- Returns a dict with:
+  - id: data.get('mediaid') or video_id
+  - title
+  - description (data.get('description'))
+  - thumbnail (data.get('image'))
+  - duration (int_or_none(data.get('duration')))
+  - timestamp (int_or_none(timestamp) from the page)
+  - formats
+
+Important implementation details
+- Live content support: If the JSON data contains a plugins.liveStarter object, its fields are merged into the main data to ensure live-start formats are included.
+- Robust format handling: Supports HLS (m3u8), DASH (mpd), and direct HTTP video URLs. It derives a reasonable format_id from the URL extension and the label (e.g., height) if available.
+- Timestamps: Uses the page’s published_time as the primary timestamp for items. For playlist items, the individual item timestamps inside data are not explicitly used in the final top-level timestamp (the code uses the page timestamp). This matches how the tests expect the timestamp for items.
+- Error handling: If no video or playlist data is found, raises ExtractorError with a clear message.
+- Helper usage: Leverages existing helper methods (e.g., _parse_json, _extract_m3u8_formats, _extract_mpd_formats, determine_ext, int_or_none, parse_iso8601, etc.) for resilient parsing and format extraction.
+
+Overall
+- The extractor targets video pages on Aktualne.cz DVTV, supporting both single videos and playlists, with robust handling of multiple streaming formats (HLS, DASH, and direct HTTP). It also gracefully handles live content and provides metadata such as title, description, thumbnail, duration, and timestamps for each video entry.

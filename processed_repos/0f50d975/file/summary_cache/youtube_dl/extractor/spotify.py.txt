@@ -1,0 +1,53 @@
+- Purpose
+  - Spotify_BASE and two extractors implement youtube-dl support for Spotify content. They fetch an access token and query Spotify’s Pathfinder/GraphQL API to extract episode data and show playlists.
+
+- Key classes
+  - SpotifyBaseIE (InfoExtractor)
+    - Handles authentication and API calls; common helper to extract episode data.
+    - _ACCESS_TOKEN: cached access token.
+    - _OPERATION_HASHES: persisted-query hashes for GraphQL operations (Episode, MinimalShow, ShowEpisodes).
+    - _VALID_URL_TEMPL: base URL pattern for Spotify content.
+    - _real_initialize(self): fetches access token from https://open.spotify.com/get_access_token.
+    - _call_api(self, operation, video_id, variables): calls Pathfinder API at https://api-partner.spotify.com/pathfinder/v1/query with a persisted query and the access token; returns the 'data' field.
+    - _extract_episode(self, episode, series): builds a standard episode item with:
+      - id, title
+      - formats: from audioPreview (with potential ABR and ext parsed via regex) and from externally hosted audio items
+      - thumbnails from coverArt.sources
+      - description, duration (seconds from totalMilliseconds), release_date, series
+      - uses clean_podcast_url for hosted items; handles vcodec 'none' for audio previews
+      - safe access via try_get and numeric parsing helpers (int_or_none, float_or_none, strip_or_none, unified_strdate)
+  - SpotifyIE (Episode)
+    - IE_NAME: 'spotify'
+    - _VALID_URL: concrete pattern for Spotify episodes
+    - _TEST: includes expected ID, title, duration, release_date, and series
+    - _real_extract(self, url): extracts a single episode by:
+      - episode_id = matched ID
+      - episode data via _call_api('Episode', episode_id, {'uri': 'spotify:episode:' + episode_id})['episode']
+      - returns _extract_episode(episode, series_name) where series_name is episode['podcast']['name']
+  - SpotifyShowIE (Show)
+    - IE_NAME: 'spotify:show'
+    - _VALID_URL: concrete pattern for Spotify shows
+    - _TEST: includes show ID, title, and description; playlist_mincount
+    - _real_extract(self, url): extracts a show as a playlist by:
+      - show_id = matched ID
+      - fetch ShowEpisodes with variables: limit, offset, uri='spotify:show:' + show_id
+      - gather podcast (show) name and description
+      - iterate over podcast['episodes']['items'], extract each episode when present via _extract_episode
+      - return playlist_result(entries, show_id, podcast_name, podcast.get('description'))
+
+- Important implementation details
+  - Access token flow: token retrieved once from open.spotify.com/get_access_token and reused for API calls.
+  - GraphQL usage: _call_api uses operationName like queryEpisode or queryShowEpisodes and persistedQuery sha256Hash from _OPERATION_HASHES.
+  - Episode data extraction:
+    - audioPreview: converts to a single format with vcodec 'none'; if format is present, parses format_id, extension, and bitrate (abr) from a pattern like XXX_... (regex captures 3 alphanumeric chars for ext and a number for abr).
+    - Additional hosted audio items: only includes those with url and externallyHosted; URL cleaned with clean_podcast_url.
+    - Thumbnails: built from coverArt.sources with width/height if provided.
+    - Duration: totalMilliseconds converted to seconds; default handling via float_or_none.
+    - Release date: ISO string converted to a unified date format.
+    - Series: for episodes, the podcast name is used as the series/show title.
+  - Show extraction: compiles a list of episode entries from the show's episodes items and returns a playlist with the show’s id, title, and description.
+  - Data safety: try_get is widely used to gracefully handle missing fields; int_or_none, float_or_none, and strip_or_none normalize types and values.
+
+- Notes
+  - The _TEST blocks demonstrate expected fields for Episode and Show extractions.
+  - The code relies on specific Spotify GraphQL operations and persisted query hashes to fetch data.

@@ -1,0 +1,70 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/teachertube.py
+
+Overview
+- Implements two YouTube-DL extractors for Teachertube:
+  - TeacherTubeIE: extracts individual video/audio details from teachertube.com video pages.
+  - TeacherTubeUserIE: builds a playlist of videos for a user profile or collection page.
+- Focuses on identifying media URLs in the page, constructing formats with appropriate quality, and returning metadata (title, description, thumbnail).
+
+Key classes and main functionality
+- TeacherTubeIE (InfoExtractor)
+  - IE_NAME: 'teachertube'; IE_DESC: 'teachertube.com videos'
+  - _VALID_URL: matches various teacherTube video URLs (viewVideo.php?video_id=, music.php?music_id=, video/..., audio/ with numeric id)
+  - _real_extract(url):
+    - Extracts video_id with _match_id and downloads the page.
+    - Checks for error messages in HTML and raises ExtractorError if found.
+    - Extracts title from meta tags, stripping trailing ' - TeacherTube' suffix if present.
+    - Extracts description from meta tag if available.
+    - Sets up quality handling for mp3, flv, mp4 via qualities(['mp3','flv','mp4']).
+    - Collects media URLs from page using multiple patterns:
+      - data-contenturl="..."
+      - var filePath = "..."
+      - 'file': '...' in JSON-like structures
+    - Builds formats as a list of dicts with 'url' and 'quality', deduplicating with set(media_urls) to avoid duplicates, and using determine_ext(media_url) for quality ranking.
+    - Sorts formats with _sort_formats.
+    - Determines thumbnail via OpenGraph or meta tag.
+    - Returns a dict with id, title, description, thumbnail, and formats.
+  - Important notes:
+    - Handles multiple video players (flowplayer, jwplayer) implicitly by parsing all possible media URL patterns.
+    - Robust to missing fields using default handling (e.g., thumbnail fallback).
+
+- TeacherTubeUserIE (InfoExtractor)
+  - IE_NAME: 'teachertube:user:collection'; IE_DESC: 'teachertube.com user and collection videos'
+  - _VALID_URL: matches user profile or collection paths with a user id
+  - _MEDIA_RE: a compiled, verbose regex to capture video/audio URLs from a page, targeting sidebar thumbnail entries linking to /video/ or /audio/ pages
+  - _TEST: sample user URL with playlist_mincount hint
+  - _real_extract(url):
+    - Extracts user_id from URL using _VALID_URL.
+    - Downloads initial user page, collects video/audio URLs via _MEDIA_RE.
+    - Finds additional pages via AJAX endpoint /ajax-user/user-videos/{user_id}?page=N, collects pages’ URLs except the last (slicing [:-1]), then iterates:
+      - Downloads each page and extends the list of video URLs via _MEDIA_RE.
+    - Builds a list of entries using self.url_result(vurl, 'TeacherTube') for each video URL found.
+    - Returns a playlist_result with the entries and the user_id as the playlist id.
+  - Important notes:
+    - Aggregates multiple pages of user videos to form a complete playlist.
+    - Uses a regex-based approach to dynamically discover video links within a user’s page.
+
+Key implementation details
+- Media URL discovery:
+  - Considers multiple patterns to capture media URLs and media file paths across different player implementations.
+  - Uses set(media_urls) to deduplicate before constructing formats for the video extractor.
+- Quality handling:
+  - Uses qualities(['mp3','flv','mp4']) to rank formats by file type.
+  - determine_ext(media_url) helps assign an initial quality ranking per format.
+- Metadata extraction:
+  - Title: from meta tag, with cleanup of trailing ' - TeacherTube'.
+  - Description: from meta tag if present.
+  - Thumbnail: prefers OpenGraph thumbnail, falls back to meta thumbnail.
+- Formats and ordering:
+  - Formats are sorted with _sort_formats to choose best available stream order.
+- Error handling:
+  - Detects error messages in the page markup and raises ExtractorError with the site name included for clarity.
+
+Tests and expectations
+- _TEST entries demonstrate:
+  - A flowplayer-based video with mp4 format and a specific MD5 for verification.
+  - A jwplayer-based audio with mp3 format and its own MD5.
+  - An unavailable video marked as only_matching to indicate non-extractable/unreachable content.
+- TeacherTubeUserIE _TEST shows a typical user profile URL and a playlist_mincount expectation, validating that a non-trivial number of items is collected.
+
+In short, this file provides two extractors for Teachertube: one for individual media items (handling multiple player implementations and direct media URLs) and one for user/collection pages (building a complete video/audio playlist by scraping initial and subsequent AJAX pages).

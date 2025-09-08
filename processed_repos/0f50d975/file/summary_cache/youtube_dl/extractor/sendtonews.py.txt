@@ -1,0 +1,75 @@
+Summary of code: youtube-dl extractor for SendtoNews
+
+Purpose
+- Extracts video playlists embedded from SendtoNews players (embed/sendtonews.com) and returns a playlist of videos with metadata and formats.
+
+Key components
+- Class: SendtoNewsIE(InfoExtractor)
+  - _VALID_URL: Matches embed URLs like http(s)://embed.sendtonews.com/player2/embedplayer.php?SC=<id>
+  - _URL_TEMPLATE: Protocol-relative URL for the actual embed: //embed.sendtonews.com/player2/embedplayer.php?SC=%s
+  - _extract_url(cls, webpage): Classmethod to derive the real embed URL from a page by locating a script tag pointing to responsiveembed.php with a SC (site code) parameter, returning the final URL using _URL_TEMPLATE.
+  - _TEST: Includes an example URL, expected id, and a sample first item in the playlist with fields such as id, ext, title, description, duration, thumbnail, upload_date, timestamp. Also indicates the test should skip actual downloads for the whole playlist (skip_download) and only test the first item.
+
+Workflow in _real_extract(url)
+1. playlist_id = self._match_id(url)
+   - Extracts the SC id from the URL based on _VALID_URL.
+
+2. Build data URL
+   - data_url = update_url_query(url.replace('embedplayer.php', 'data_read.php'), {'cmd': 'loadInitial'})
+   - Downloads JSON data from data_url. This contains the playlist data under playlistData[0].
+
+3. Process each video entry in playlistData[0]
+   - info_dict = self._parse_jwplayer_data(
+       video['jwconfiguration'],
+       require_title=False,
+       m3u8_id='hls',
+       rtmp_params={'no_resume': True}
+     )
+   - For each format in info_dict['formats']:
+     - If format has tbr already, skip.
+     - Derive tbr by extracting a number followed by 'k' from the URL using a regex '/(\d+)k/'.
+     - If tbr is found, set:
+       - format_id = "<protocol>-<tbr>" where protocol is determined by determine_protocol(f)
+       - tbr = extracted value
+     - If no tbr found, skip this format.
+   - Sort formats with priority order: tbr, height, width, format_id via _sort_formats(info_dict['formats'], ('tbr', 'height', 'width', 'format_id')).
+
+4. Thumbnails
+   - Collect thumbnails from video:
+     - If video['thumbnailUrl'] exists, add a thumbnail with id 'normal'
+     - If video['smThumbnailUrl'] exists, add a thumbnail with id 'small'
+
+5. Metadata for each video
+   - title: video['S_headLine'].strip()
+   - description: unescapeHTML(video.get('S_fullStory'))
+   - duration: float_or_none(video.get('SM_length'))
+   - timestamp: parse_iso8601(video.get('S_sysDate'), delimiter=' ')
+   - Attach thumbnails built earlier
+   - These are added to info_dict
+
+6. Append to playlist entries
+   - Each processed info_dict is appended to entries list.
+
+7. Return playlist_result(entries, playlist_id)
+   - Returns a multi-video playlist object for the given SC id.
+
+Data model and assumptions
+- The data_read.json payload contains playlistData[0] as a list of videos.
+- Each video entry contains:
+  - jwconfiguration: JWPlayer configuration for formats
+  - S_headLine: title
+  - S_fullStory: description (HTML)
+  - SM_length: duration (seconds)
+  - S_sysDate: timestamp (date/time string)
+  - thumbnailUrl: main thumbnail
+  - smThumbnailUrl: small thumbnail (optional)
+
+Notable implementation details
+- JW Player parsing: Uses _parse_jwplayer_data to extract playable formats from JWPlayer config. The resulting formats may include various streaming protocols (e.g., m3u8, RTMP), with initial tbr not always present.
+- Bitrate extraction: If a format lacks tbr, the code attempts to infer it by parsing the URL for a pattern like /NNNk/ and uses that as tbr. Formats without a discernible tbr are skipped.
+- Format identification: Sets format_id as "<protocol>-<tbr>" (e.g., http-480) based on the protocol determined by determine_protocol(f). This helps disambiguate similar bitrates across protocols.
+- Ordering: Formats are sorted to favor higher quality, using tbr, height, width, and format_id.
+- URL handling: The extractor first tries to obtain a SC id directly from the embed URL, but it also supports extracting the correct embed URL from a page via _extract_url, which looks for a script tag loading responsiveembed with a SC parameter.
+- Robustness: Uses int_or_none, float_or_none, parse_iso8601, and unescapeHTML utilities to normalize types and decode HTML entities in metadata.
+
+Overall, the extractor fetches a data_read.json for the embed, converts JWPlayer configuration into a playlist of video entries with well-formed formats and rich metadata (title, description, duration, timestamp, thumbnails), and returns a structured playlist suitable for YouTube-dl.

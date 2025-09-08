@@ -1,0 +1,80 @@
+This file implements three ThisVid extractors for youtube-dl: ThisVidIE (single video or embedded video), ThisVidMemberIE (member/profile pages with lists of videos), and ThisVidPlaylistIE (playlist pages). The extractors work together to locate video URLs, gather metadata, and delegate actual video extraction to the Generic/other extractors as needed.
+
+Key components
+
+- ThisVidIE (InfoExtractor)
+  - URL patterns: _VALID_URL matches either /videos/<id> or /embed/<id>.
+  - Purpose: extract metadata for a single ThisVid video (or embed) and then return a url_transparent result to let the Generic extractor fetch the actual video.
+  - Main logic:
+    - Download page; extract title via a flexible <title> regex.
+    - If URL is an embed, try to find video_alt_url to redirect to the main page; if present and different, re-download that page.
+    - Detect private videos by looking for a “This video is a private video” marker in the video-holder section; raise login_required with an appropriate message if found.
+    - Extract uploader information with a regex that captures a numeric uploader_id and a slug; split and normalize to None if missing.
+    - Return a merged dict containing:
+      - _type: 'url_transparent'
+      - title, age_limit (18), uploader, uploader_id
+      - plus the original URL passed to a downstream Generic extractor (url_result(url, ie='Generic'))
+  - Notable details:
+    - Uses get_element_by_class and clean_html to parse the page safely.
+    - The output is a url_transparent entry, deferring actual video URL extraction to the Generic extractor.
+
+- ThisVidMemberIE (InfoExtractor)
+  - URL pattern: /members/<id>
+  - Purpose: treat a member page as a playlist-like collection of ThisVid video URLs, with support for pagination and both member-list and playlist-like pages.
+  - Key methods:
+    - _urls(self, html): finds all links on the page that match ThisVidIE’s URL structure and yields them.
+    - _real_extract(self, url):
+      - Determine playlist id from URL and download the page.
+      - Derive a plausible playlist title from OpenGraph title or <title>, trimming a possible trailing “| ThisVid.com” suffix.
+      - Nested generator entries(page_url, html=None) implements pagination:
+        - Downloads subsequent pages as needed (with notes when fetching).
+        - Yields video URLs found on each page via _urls(html).
+        - Pagination logic handles two cases:
+          - Member list pages with a “pagination-next” element; extracts next-page URL from the next link.
+          - Playlist pages without a next link: manually increments the numeric page in the path to build the next page URL; stops when there is no further page.
+      - Returns a playlist from matches with:
+        - playlist_id = pl_id
+        - playlist_title = title
+        - ie = 'ThisVid'
+  - Notable details:
+    - Uses a flexible approach to pagination to support both member lists and direct playlists.
+    - Aggregates metadata for the playlist via the parent logic and yields individual video URLs to be processed by ThisVidIE/Generic.
+
+- ThisVidPlaylistIE (ThisVidMemberIE subclass)
+  - URL pattern: /playlist/<id>/video/<video_id>
+  - Purpose: extract a playlist containing a sequence of videos, with an option to fetch only the featured video via --no-playlist.
+  - Key methods:
+    - _get_video_url(self, pl_url): converts a playlist URL to the corresponding video URL by substituting the path to /videos/<video_id>/.
+    - _urls(self, html): finds links on the playlist page that match the ThisVidPlaylistIE URL pattern and converts them to actual video URLs using _get_video_url.
+    - _real_extract(self, url):
+      - pl_id = playlist id from URL.
+      - If noplaylist is set, fetch only the featured video URL and return a ThisVid extractor result for that single video.
+      - Otherwise, delegate to the parent (ThisVidMemberIE) to extract a full playlist, then normalize the title if it appears in a duplicated “the title - the title” form:
+        - If title length is odd and the middle character is a dash, split into two halves and set the title to the first half if both halves match after stripping.
+  - Notable details:
+    - Provides a seamless way to access a single featured video from a playlist when --no-playlist is used.
+    - Post-processes the playlist title to fix a common duplication formatting issue.
+
+Implementation details and edge cases
+
+- Metadata extraction:
+  - Title extraction uses a resilient pattern for both direct pages and embeds.
+  - Uploader data is parsed from a specific HTML pattern (Added by: <a class="author" href="https://thisvid.com/members/...">) and split to obtain uploader_id and uploader; missing parts yield None.
+  - Private videos trigger login_required, with a message derived from the video-holder content.
+
+- Video URL handling:
+  - For embeds, a video_alt_url can point to the main video page; the code redirects if found.
+  - The final video URL delivery uses a url_transparent dict pointing to a Generic/other extractor to obtain the actual video file/stream.
+
+- Pagination logic:
+  - Member pages: supports both a typical “next” button and a non-standard pagination scenario by building the next page URL from the current URL’s path.
+  - Playlist pages: when no explicit next link is present, increments the numeric segment of the path to move to the next page.
+
+- Tests:
+  - The _TESTS cover both direct video and embed cases, including metadata like title, description (md5), thumbnail, uploader info, and age_limit.
+  - Playlist tests cover a playlist with multiple items and a single featured video via noplaylist.
+
+In short, this file provides a robust Three-in-One ThisVid extraction strategy:
+- ThisVidIE handles single videos/embeds and defers to a Generic extractor with added metadata.
+- ThisVidMemberIE crawls member pages to collect video entries and supports pagination for both member lists and playlists.
+- ThisVidPlaylistIE handles explicit playlist pages, supports the no-playlist behavior to fetch only the featured video, and cleans up titles when needed.

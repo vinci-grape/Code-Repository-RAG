@@ -1,0 +1,79 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/vzaar.py
+
+Purpose:
+- Implement a YouTube-DL extractor for videos hosted on vzaar.com. It reads video metadata from vzaar’s API and builds a list of available formats (including direct MP4/MP3 and HLS streams), then returns a standardized info dictionary.
+
+Key components:
+- Class VzaarIE(InfoExtractor)
+  - _VALID_URL: Regex to identify vzaar video pages. Matches URLs like http(s)://www.vzaar.com/videos/{id} or http(s)://view.vzaar.com/{id}.
+  - _TESTS: Several test cases covering:
+    - Direct HTTP/HLS formats (MP4, MP3)
+    - HLS with AES encryption (hlsAes)
+    - A test URL that should only be matched (to ensure proper URL detection)
+
+- _extract_urls(webpage) (static)
+  - Extracts iframe src URLs that point to view.vzaar.com/<id> from a webpage.
+  - Returns a list of matching URLs.
+
+- _real_extract(self, url)
+  - Core extraction workflow:
+    - video_id = self._match_id(url)
+    - video_data = self._download_json('http://view.vzaar.com/v2/%s/video' % video_id, video_id)
+      - Retrieves video metadata as JSON.
+    - title = video_data.get('videoTitle') or video_id
+    - Build formats list:
+      - sourceUrl handling:
+        - If sourceUrl exists, create a format dict f with:
+          - url: sourceUrl
+          - format_id: 'http'
+          - preference: 1
+        - If sourceUrl contains 'audio':
+          - vcodec: 'none'
+          - ext: 'mp3'
+        - Else (video):
+          - width, height from video_data
+          - ext: 'mp4'
+          - fps from video_data
+      - HLS/usp formats (if applicable):
+        - If video_data.get('uspEnabled') is true and video_guid is a string and usp is a dict:
+          - hls_aes = video_data.get('hlsAes')
+          - qs = '&'.join('%s=%s' % (k, v) for k, v in usp.items())
+          - url_templ = 'http://%s.vzaar.com/v5/usp%s/%s/%s.ism%s?' % ('aes' if hls_aes else '', video_guid, video_id, '')
+            (uses 'aes' suffix if AES is enabled)
+          - Build m3u8 formats via self._extract_m3u8_formats on:
+            - url_templ % ('fable', '/.m3u8') + qs
+            - video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False
+          - If hls_aes is true, set each format's _decryption_key_url to:
+            url_templ % ('goose', '') + qs
+          - Append HLS formats to formats
+    - self._sort_formats(formats)
+  - Return dict with:
+    - id: video_id
+    - title
+    - thumbnail: poster URL (proto-relative)
+    - duration: videoDuration as float
+    - timestamp: unified_timestamp(ts)
+    - formats: list of collected formats
+
+Important implementation details:
+- Data source: Uses JSON API at http://view.vzaar.com/v2/{video_id}/video to fetch metadata.
+- Direct vs audio formats:
+  - sourceUrl may point to a direct video (MP4) or an audio file (MP3). Audio formats set vcodec to none and ext to mp3.
+  - Video formats set width, height, ext mp4, and fps when available.
+- HLS/usp mechanism:
+  - When uspEnabled is true and required IDs exist, constructs an HLS URL pattern with optional AES encryption.
+  - Uses _extract_m3u8_formats to fetch m3u8 variants, supports both AES-protected and non-protected streams.
+  - If AES is enabled, sets a decryption key URL to enable DRM-like decryption for the HLS streams.
+- Metadata extraction:
+  - Title defaults to video_id if videoTitle is missing.
+  - thumbnail taken from poster.
+  - duration from videoDuration, timestamp from ts.
+- Robustness:
+  - Handles missing or non-string guid/usp gracefully by guarding with isinstance checks.
+  - fatal=False on m3u8 formats to avoid failing if HLS is unavailable.
+  - Uses helper functions int_or_none, float_or_none, unified_timestamp, url_or_none for safe parsing.
+
+Overall, the extractor supports:
+- Simple direct video/audio formats via sourceUrl.
+- HLS streams gated behind a usp mechanism with optional AES encryption.
+- Comprehensive metadata population (title, duration, timestamp, thumbnail) alongside a properly sorted list of available formats.

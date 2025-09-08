@@ -1,0 +1,17 @@
+- Purpose: A unit test for YouTube-DL’s IQIYI extractor login flow, specifically testing how the SDK interpreter handles login using mocked credentials.
+
+- Key components:
+  - IqiyiIEWithCredentials(IqiyiIE): A test subclass that overrides _get_login_info to return fixed credentials ('foo', 'bar').
+  - WarningLogger: Simple logger capturing warning messages in self.messages; debug and error methods are no-ops.
+  - TestIqiyiSDKInterpreter (unittest.TestCase):
+    - test_iqiyi_sdk_interpreter: Sets up a FakeYDL downloader with the WarningLogger, constructs IqiyiIEWithCredentials, calls _login(), and asserts that a warning message containing 'unable to log in:' was logged (specifically as the first message).
+
+- Important implementation details:
+  - sys.path adjustment at the top ensures the test can import project modules.
+  - _get_login_info is overridden to simulate credential retrieval during login.
+  - The test uses FakeYDL({'logger': logger}) to ensure the extractor uses the provided logger.
+  - The assertion checks the first logged message includes the substring 'unable to log in:', verifying the login failure path is correctly reported.
+  - The test docstring notes that if the sign is incorrect, the /validate HTTP call would raise an HTTP 556 error, which this test indirectly checks via logging.
+  - The file ends with the standard unittest.main() invocation when run as a script.
+
+- Overall: Verifies that the IQiyi extractor’s login flow, given mocked credentials, logs an appropriate warning on login failure.

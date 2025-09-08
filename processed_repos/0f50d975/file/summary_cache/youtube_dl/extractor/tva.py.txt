@@ -1,0 +1,64 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/tva.py
+
+Overview
+- The module defines two extractors:
+  - TVAIE: Extracts videos from TVA (tva.ca) pages by delegating to Brightcove.
+  - QubIE: Extracts metadata from Qub.ca pages, then delegates to TVA via a TVA video page.
+
+Main functionality
+- TVAIE
+  - URL pattern: matches TVA video detail pages like https://videos.tva.ca/details/_1234567890001
+  - _real_extract flow:
+    - Extracts the Brightcove video id from the page URL using _match_id.
+    - Builds a Brightcove player URL with videoId=<id>.
+    - Smuggles geo information to restrict to Canada (geo_countries: ['CA']).
+    - Returns a url_transparent entry with:
+      - id = video_id
+      - url = Brightcove player URL (with CA geo constraint)
+      - _type = 'url_transparent'
+      - ie_key = 'BrightcoveNew'
+  - Purpose: The TVA page is a wrapper that points to a Brightcove-hosted video; this extractor simply redirects to Brightcove for actual extraction, applying a Canada geo restriction.
+  - Tests:
+    - Validates metadata like title, upload_date, timestamp, etc., for a sample TVA URL.
+    - Includes a test that skips due to HTTP 404 (the resource may not be available publicly).
+  - Notable details:
+    - BRIGHTCOVE_URL_TEMPLATE is the Brightcove player URL used for constructing the final video link.
+    - Uses smuggle_url to attach geo_countries constraint.
+
+- QubIE
+  - URL pattern: matches Qub.ca URLs that reference TVA content (e.g., https://www.qub.ca/...-<id>)
+  - _real_extract flow:
+    - Extracts an entity_id from the URL.
+    - Fetches entity data from the Content Delivery Service API:
+      https://www.qub.ca/proxy/pfu/content-delivery-service/v1/entities?id=<entity_id>
+    - Reads:
+      - videoId from entity as the actual video id used downstream.
+      - name as the episode title (stripmed with strip_or_none).
+      - longDescription, durationMillis, episodeNumber (optional).
+    - Returns a url_transparent entry with:
+      - id = videoId
+      - title = episode name
+      - url = https://videos.tva.ca/details/_<videoId> (points to TVA page)
+      - description, duration (converted to seconds via float_or_none), episode, episode_number
+      - ie_key set to TVAIE.ie_key() (delegate extraction to TVA flow)
+  - Rationale: Qub.ca pages host TVA content; QubIE translates Qub’s metadata into a TVA-based URL and hands off further extraction to TVAIE (via the TVA extractor key). This chains the extraction through TVA to ultimately reach the Brightcove video.
+  - Notes:
+    - There is a commented-out BRIGHTCOVE_URL_TEMPLATE, indicating an alternative direct Brightcove path was considered, but TVA-based extraction is used here.
+    - The final video extraction is delegated to TVAIE (via the ie_key reference), which then redirects to Brightcove with appropriate geo constraints.
+
+Key implementation details
+- Helpers used:
+  - float_or_none and int_or_none to safely parse numeric values.
+  - strip_or_none to handle optional string fields.
+  - smuggle_url to attach metadata (geo constraints) to the constructed URL.
+- Extraction chaining:
+  - TVAIE returns a url_transparent pointing to a Brightcove player (via BrightcoveNew) with Canada geo restriction.
+  - QubIE builds a TVA detail URL and sets ie_key to TVAIE.ie_key(), enabling the framework to re-run extraction with TVAIE’s logic.
+- Geo restrictions:
+  - TVAIE applies geo_countries: ['CA'] to ensure Canadian availability before attempting Brightcove extraction.
+- Output type:
+  - Both extractors utilize _type: 'url_transparent' to defer actual media extraction to another extractor (BrightcoveNew or TVA flow).
+
+In short
+- TVAIE maps TVA detail pages to Brightcove videos, applying a Canada geo constraint.
+- QubIE gathers metadata from Qub.ca, then defers to TVAIE to perform the final extraction via the TVA/Brightcove path.

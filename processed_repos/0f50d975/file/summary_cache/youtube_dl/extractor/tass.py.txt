@@ -1,0 +1,45 @@
+concise summary of ./youtube-dl/youtube_dl/extractor/tass.py
+
+- Purpose
+  - A YouTube-DL extractor for Tass (Tass.ru / Itar-Tass) news videos. It fetches a page, locates a JavaScript-embedded list of video sources, and builds downloadable MP4 formats.
+
+- Key class
+  - TassIE (subclass of InfoExtractor)
+
+- URL matching
+  - _VALID_URL = r'https?://(?:tass\.ru|itar-tass\.com)/[^/]+/(?P<id>\d+)'
+  - Matches Tass article pages whose path ends with a numeric ID. Supports both tass.ru and itar-tass.com.
+
+- Tests
+  - _TESTS contains two entries:
+    - A real page (http://tass.ru/obschestvo/1586870) with expected id, title, description, thumbnail, and mp4 md5.
+    - A second URL (http://itar-tass.com/obschestvo/1600009) marked only_matching to verify URL pattern compatibility without full extraction.
+
+- Core extraction (_real_extract)
+  - Extracts video_id from URL using _match_id.
+  - Downloads the webpage with _download_webpage.
+  - Locates a JavaScript variable containing video sources via regex (?s)sources\s*:\s*(\[.+?\]), then converts JS to JSON using js_to_json and parses with json.loads.
+  - Builds format list from the sources:
+    - Iterates over each source dict; expects fields:
+      - file: video URL (must be http/https and end with .mp4)
+      - label: quality label (e.g., "sd", "hd")
+    - Skips invalid entries; for valid ones, adds a format dict:
+      - url: video_url
+      - format_id: label
+      - quality: derived from qualities(['sd','hd'])(label)
+  - Sorts formats with _sort_formats.
+  - Builds the final info dict:
+    - id: video_id
+    - title: from OpenGraph tag via _og_search_title(webpage)
+    - description: from OpenGraph via _og_search_description(webpage)
+    - thumbnail: from OpenGraph via _og_search_thumbnail(webpage)
+    - formats: list of prepared formats
+
+- Important implementation details
+  - Uses a robust extraction of embedded JavaScript data by converting non-JSON JS to JSON (js_to_json) before json.loads.
+  - Only mp4 formats are accepted (checks file URL endswith('.mp4')).
+  - The quality handling uses the predefined order ['sd', 'hd'] to assign a numeric quality via the quality function.
+  - Metadata (title/description/thumbnail) is scraped from OpenGraph tags on the page for resilience.
+
+- Output
+  - A standard YouTube-DL info dict containing id, title, description, thumbnail, and a sorted list of mp4 formats suitable for downloading or selecting a specific quality.

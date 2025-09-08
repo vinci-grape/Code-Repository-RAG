@@ -1,0 +1,68 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/bleacherreport.py
+
+Overall purpose
+- Implements two extractors for Bleacher Report content in youtube-dl:
+  - BleacherReportIE: extract video information from Bleacher Report articles.
+  - BleacherReportCMSIE: extract video information from Bleacher Report CMS video embeds using AMPIE.
+
+Key classes and main functionality
+- BleacherReportIE (InfoExtractor)
+  - URL pattern: matches Bleacher Report article URLs /articles/<id>.
+  - _real_extract flow:
+    - Extract article_id from URL.
+    - Fetch article data via API: http://api.bleacherreport.com/api/v1/articles/{id} and read the 'article' object.
+    - Build a thumbnails list from primaryPhoto if present.
+    - Assemble an info dict with:
+      - _type: 'url_transparent'
+      - id, title
+      - uploader and uploader_id (from author info when available)
+      - timestamp (parsed with parse_iso8601 from createdAt)
+      - thumbnails
+      - comment_count and view_count (converted to int where possible)
+    - Video handling:
+      - If a video entry exists, inspect video['type']:
+        - cms.bleacherreport.com or vid.bleacherreport.com: set info['url'] to http://bleacherreport.com/video_embed?id=<video_id>
+        - ooyala.com: set info['url'] to ooyala:<video_id>
+        - youtube.com: set info['url'] to the YouTube video id (video['id'])
+        - vine.co: set info['url'] to https://vine.co/v/<video_id>
+        - else: fallback to info['url'] = <video_type><video_id>
+      - Return the info dict (which will be processed by the appropriate downstream extractor indicated by _type/url)
+      - If no video present, raise ExtractorError('no video in the article', expected=True)
+  - Tests (_TESTS) include two samples:
+    - One using Ooyala with metadata (title, uploader, timestamps, etc.) and add_ie: ['Ooyala'].
+    - One using YouTube with metadata and add_ie: ['Youtube'].
+
+- BleacherReportCMSIE (AMPIE)
+  - Inherits from AMPIE (AMP-based video extraction)
+  - URL pattern: Bleacher Report CMS video embeds: /video_embed?id=<id> where id is either a 36-char UUID with hyphens or a 5-digit number.
+  - _real_extract flow:
+    - Extract video_id from URL.
+    - Use AMPIE helper _extract_feed_info with the feed URL: http://vid.bleacherreport.com/videos/<id>.akamai
+    - Set info['id'] to video_id and return the resulting info.
+  - Test includes expected warning: "Unable to download f4m manifest" (which is common when the manifest for the AMP-based stream is not retrievable).
+
+Important implementation details
+- Data sources:
+  - Bleacher Report article data is retrieved from the REST API: http://api.bleacherreport.com/api/v1/articles/{article_id}
+  - Thumbnails are built from article_data['primaryPhoto'] if present.
+  - Video linkage is determined from article_data['video']['type'] and article_data['video']['id'].
+- Metadata extraction:
+  - Timestamp parsed via parse_iso8601(article_data.get('createdAt')).
+  - Uploader name from article_data.get('author', {}).get('name'), uploader_id from article_data.get('authorId').
+  - Comment and view counts converted to integers with int_or_none for robustness.
+- Flexible video handling:
+  - The code maps multiple video hosting types to appropriate URLs:
+    - cms.bleacherreport.com / vid.bleacherreport.com → video_embed endpoint
+    - ooyala.com → ooyala:<video_id>
+    - youtube.com → <video_id> (to be resolved by YouTube extractor)
+    - vine.co → https://vine.co/v/<video_id>
+    - Other types prefixed as video_type + video_id
+- Yielding strategy:
+  - BleacherReportIE uses _type 'url_transparent' so youtube-dl defers to the chosen downstream extractor (Ooyala, YouTube, etc.) for actual media retrieval.
+  - BleacherReportCMSIE relies on AMPIE’s _extract_feed_info to obtain the media details from the Akamai feed and returns the aggregated info.
+- Error handling:
+  - If an article lacks a video, BleacherReportIE raises ExtractorError with expected=True, signaling an expected failure rather than a bug.
+- Tests:
+  - Included _TESTS demonstrate integration with Ooyala and YouTube extractors for Bleacher Report articles and verify metadata fields such as id, title, timestamp, uploader, and descriptions. The CMS test also notes an expected warning about f4m manifest retrieval.
+
+In short, the file provides two Bleacher Report extractors: one that resolves article metadata and derives the underlying video through various providers, and a CMS-specific extractor using AMP/AMPIE to fetch CMS-hosted video streams.

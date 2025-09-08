@@ -1,0 +1,130 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/prosiebensat1.py
+
+Overview
+- This module implements a YouTube-DL extractor for ProSiebenSat.1 Digital sites (e.g., prosieben.de, sat1.de, sixx.de, etc.).
+- It supports both single videos and playlists, handles DRM/geo restrictions, and extracts multiple streaming formats (dash, hls, f4m, rtmp, progressive http).
+
+Main classes
+- ProSiebenSat1BaseIE (InfoExtractor)
+  - Core logic to fetch video information and build a formats list.
+  - Handles two discovery paths:
+    - v4 API (protocols) when _ACCESS_ID is set.
+    - Legacy sources API when v4 protocols are not available or not applicable.
+  - Performs DRM/geo checks and normalizes formats.
+  - Returns duration and a list of formats (sorted).
+
+- ProSiebenSat1IE (inherits ProSiebenSat1BaseIE)
+  - Public extractor for the site family.
+  - Defines:
+    - IE_NAME, IE_DESC, and _VALID_URL regex for a broad set of domains (proSieben, Sat.1, Sixx, Kabel eins, ran.de, fem.com, Galileo, etc.).
+    - _TESTS for unit testing with various sample URLs and expected metadata.
+    - Constants used for API authentication and obfuscation:
+      - _TOKEN, _SALT, _CLIENT_NAME
+      - _ACCESS_ID, _ENCRYPTION_KEY, _IV
+    - Regex lists for extracting video/playlist metadata from HTML:
+      - _CLIPID_REGEXES, _TITLE_REGEXES, _DESCRIPTION_REGEXES, _UPLOAD_DATE_REGEXES
+      - _PAGE_TYPE_REGEXES, _PLAYLIST_ID_REGEXES, _PLAYLIST_CLIP_REGEXES
+
+Key functions and logic
+- _extract_video_info(self, url, clip_id)
+  - Retrieves video metadata JSON from http://vas.sim-technik.de/vas/live/v2/videos.
+  - If video is DRM protected, raises ExtractorError.
+  - Builds a formats list via two pathways:
+    1) v4 Protocols (when _ACCESS_ID is set):
+       - Fetches protocols from _V4_BASE_URL + 'protocols' using:
+         - access_id, client_token (SHA1 of raw_ct), video_id (clip_id)
+         - client_location = original URL
+       - If geo check fails, raises geo restriction.
+       - If a server_token is provided, fetches URLs via _V4_BASE_URL + 'urls' with:
+         - access_id, server_token, protocol list, and a client_token derived from raw_ct + server_token + protocols.
+       - For each protocol/variant with a clear URL:
+         - dash -> _extract_mpd_formats
+         - hls  -> _extract_m3u8_formats
+         - other -> add simple URL format entry
+    2) Legacy sources (when v4 protocols aren’t used or fail):
+       - Builds a client_id based on _SALT and clip_id/TOKEN/location.
+       - Downloads /videos/{clip_id}/sources to get server_id.
+       - For each source_id:
+         - Recompute client_id and fetch /videos/{clip_id}/sources/url for that source.
+         - If response status_code != 0 -> video unavailable.
+         - Parse sources, handle mime types:
+           - application/f4m+xml or f4m-like: _extract_f4m_formats
+           - application/x-mpegURL: _extract_m3u8_formats
+           - application/dash+xml: _extract_mpd_formats
+           - else: handle RTMP or progressive HTTP
+         - RTMP handling builds a FLV format with fields: url, app, play_path, player_url, page_url, tbr, ext, format_id
+         - Non-RTMP: adds standard http(s) format with bitrate (tbr) and format_id
+  - _sort_formats(formats) to order formats sensibly.
+  - Returns dict with duration (float) and the formats list.
+
+- _extract_clip(self, url, webpage)
+  - Extract clip_id via _CLIPID_REGEXES.
+  - Determine title via _TITLE_REGEXES or og:title fallback.
+  - Calls _extract_video_info(url, clip_id) to fetch formats and metadata.
+  - Extracts description via _DESCRIPTION_REGEXES or og:description fallback.
+  - Extracts thumbnail via og:image.
+  - Derives upload_date via og:published_time or _UPLOAD_DATE_REGEXES, normalized with unified_strdate.
+  - Pulls JSON-LD data if present and merges into the result (merge_dicts).
+  - Returns a dict with id, title, description, thumbnail, upload_date, plus video info (duration, formats, etc.).
+
+- _extract_playlist(self, url, webpage)
+  - Extracts playlist_id via _PLAYLIST_ID_REGEXES.
+  - Locates a JSON array assigned to contentResources and parses it.
+  - For each item (clip) in the playlist:
+    - Gets clip_id (item.id or item.upc); skips if missing.
+    - Calls _extract_video_info(url, clip_id) to obtain base video info.
+    - Enriches with per-item metadata: id, title, description, thumbnail, duration, series, uploader.
+  - Returns a playlist_result(entries, playlist_id).
+
+- _real_extract(self, url)
+  - Determines video_id from URL.
+  - Downloads the page and detects page_type via _PAGE_TYPE_REGEXES (default 'clip').
+  - Dispatches to _extract_clip or _extract_playlist accordingly.
+  - Raises ExtractorError for unsupported page types.
+
+Important implementation details
+- geo/DRM handling:
+  - If video is DRM protected: raise ExtractorError("This video is DRM protected.", expected=True).
+  - When geo check fails in v4 protocol fetch, raise geo restriction for AT/CH/DE.
+  - Some URLs/pages are geo-restricted; tests include geo-restriction cases.
+
+- Authentication/token mechanics:
+  - v4 protocol path uses:
+    - raw_ct = encryption_key + clip_id + IV + ACCESS_ID
+    - client_token = sha1(raw_ct).hexdigest()
+  - When fetching URLs with server_token, client_token = sha1(raw_ct + server_token + _SUPPORTED_PROTOCOLS).hexdigest()
+  - Legacy path uses:
+    - client_id = SALT[:2] + sha1(clip_id + SALT + TOKEN + client_location + SALT + CLIENT_NAME)
+  - client_id is used per-source to fetch URLs.
+
+- Protocol support and format extraction:
+  - Supports dash (MPD), hls (M3U8), f4m, and RTMP/RTMPE, plus progressive HTTP.
+  - For RTMP, reparses URL to extract app and play_path, and sets specific fields (player_url, page_url, ext set to flv, format_id with bitrate if present).
+  - For m3u8/dash, uses standard helper extractors: _extract_m3u8_formats and _extract_mpd_formats.
+  - Bitrate normalization: fix_bitrate converts from bps to kbps where applicable; if no bitrate, tbr is left None.
+
+- Data extraction via regexes:
+  - Numerous regex lists to pull clip_id, title, description, upload date, and page type from HTML when the JSON metadata isn’t available.
+  - _TESTS include real-world URLs to validate extraction across different domains and layouts.
+
+- Playlist handling:
+  - Playlist entries are built by extracting per-clip metadata via _extract_video_info and enriching with item-level fields like title, description, duration, etc.
+  - Returns a playlist_result with the collected entries and playlist_id.
+
+Notable constants
+- _TOKEN = 'prosieben', _SALT = '01!8d8F_)r9]4s[qeuXfP%', _CLIENT_NAME = 'kolibri-2.0.19-splec4'
+- _ACCESS_ID, _ENCRYPTION_KEY, _IV used for v4 protocol authentication and decryption/signing.
+
+Tests coverage
+- _TESTS cover multiple domain variations, including:
+  - Direct video pages (clip), playlists, and geo-restricted cases.
+  - Some entries marked skip due to being unavailable or geo-restricted.
+  - A test for a URL that previously needed fixes for f4m/malformed manifests.
+
+In summary
+- The file implements a robust ProSiebenSat.1 video extractor that:
+  - Retrieves video metadata and formats via a v4 API when available, with geo checks.
+  - Falls back to legacy sources API if needed.
+  - Handles DRM, geo restrictions, and multiple streaming formats (dash, hls, f4m, rtmp, progressive).
+  - Supports individual videos and playlists, extracting rich metadata and assembling playlist entries.
+  - Uses extensive regex-based HTML extraction as fallbacks and JSON-LD when present.

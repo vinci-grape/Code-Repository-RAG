@@ -1,0 +1,46 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/historicfilms.py
+
+Overview
+- This module implements an InfoExtractor for Historic Films site (historicfilms.com) to extract video information and construct direct video URLs for historic tapes.
+
+Key components
+- Class HistoricFilmsIE(InfoExtractor): Main extractor class.
+- _VALID_URL: Regular expression that matches Historic Films video pages. Supports URLs like http(s)://www.historicfilms.com/tapes/1234 or /play1234.
+- _TEST: Embedded test case describing an example URL, expected metadata, and a sample MD5 for the downloaded file.
+
+Main functionality (how extraction works)
+- _real_extract(self, url):
+  - video_id = self._match_id(url): Extracts the numeric id from the URL using _VALID_URL.
+  - webpage = self._download_webpage(url, video_id): Downloads the page HTML.
+  - tape_id = self._search_regex(..., webpage, 'tape id'): Attempts two patterns to find the tape identifier:
+    - class="tapeId" followed by content
+    - tapeId: "..." inside JavaScript
+  - title = self._og_search_title(webpage): Gets the title from Open Graph metadata.
+  - description = self._og_search_description(webpage): Gets the description from Open Graph metadata.
+  - thumbnail = self._html_search_meta('thumbnailUrl', webpage, 'thumbnails') or self._og_search_thumbnail(webpage): Looks for a thumbnail in HTML meta tags or falls back to OG thumbnail.
+  - duration = parse_duration(self._html_search_meta('duration', webpage, 'duration')): Reads a duration meta tag and parses it into seconds.
+  - video_url = 'http://www.historicfilms.com/video/%s_%s_web.mov' % (tape_id, video_id): Constructs the direct video URL using tape_id and video_id in the pattern tapeId_videoId_web.mov.
+  - Return dict with: id, url, title, description, thumbnail, duration.
+
+Important implementation details
+- URL matching: Supports both http and https, with optional www, and either /tapes/ or /play in the path.
+- Tape ID extraction: Uses two regex options to robustly locate the tape identifier within the page markup.
+- Metadata extraction:
+  - Title and description retrieved via Open Graph data (and fallbacks if needed).
+  - Thumbnail from thumbnailUrl meta tag or OG thumbnail.
+  - Duration parsed from a duration meta tag using parse_duration.
+- Video URL construction: Uses a specific naming convention http://www.historicfilms.com/video/{tape_id}_{video_id}_web.mov to form the direct video URL.
+- Output structure aligns with YouTube-DL's InfoDict format:
+  - id: video_id
+  - url: direct video URL
+  - title: extracted title
+  - description: extracted description
+  - thumbnail: extracted thumbnail URL
+  - duration: duration in seconds (if available)
+
+Example behavior (based on _TEST)
+- Given URL: http://www.historicfilms.com/tapes/4728
+- Extracted video_id: 4728
+- Extracted tape_id from page (regex-driven)
+- Direct video URL: http://www.historicfilms.com/video/{tape_id}_4728_web.mov
+- Returned fields include id='4728', ext='mov' (inferred from URL), title 'Historic Films: GP-7', a duration of 2096 seconds, along with description and thumbnail URLs matching the test expectations.

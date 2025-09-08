@@ -1,0 +1,52 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/acast.py
+
+Overview
+- Implements YouTube-DL extractors for ACast podcast platform:
+  - ACastIE: extracts a single episode from an ACast show.
+  - ACastChannelIE: extracts a full channel/show playlist (all episodes) from ACast.
+- Uses ACast feeder API (feeder.acast.com) to fetch show/episode data and then normalizes it into YouTube-DL’s standard info dicts.
+
+Main classes
+- ACastBaseIE (InfoExtractor)
+  - Shared helpers for both ACastIE and ACastChannelIE.
+  - _extract_episode(episode, show_info): builds a normalized episode info dict, including id, url, title, description, thumbnail, timestamp, duration, filesize, season/episode numbers, and merges show_info (creator, series).
+  - _extract_show_info(show): returns basic show metadata (creator, series) from a show object.
+  - _call_api(path, video_id, query=None): helper to fetch JSON data from the ACast API at https://feeder.acast.com/api/v1/shows/{path}.
+
+- ACastIE (ACastBaseIE)
+  - IE_NAME = 'acast'
+  - _VALID_URL: regex matching ACast episode URLs (supports acast.com/embed/www or play.acast.com/s paths, capturing channel and id).
+  - _real_extract(url): parses channel and id from URL, calls API for the specific episode using path "<channel>/episodes/<id>" with query {'showInfo': 'true'}, then returns the normalized episode info merged with show info.
+  - _TESTS: includes a sample ACast episode URL with expected fields (id, ext, title, description, timestamp, duration, creator, series, episode). Also includes some URLs marked only_matching to verify URL matching logic.
+
+- ACastChannelIE (ACastBaseIE)
+  - IE_NAME = 'acast:channel'
+  - _VALID_URL: regex matching channel/show pages (acast.com or play.acast.com/s/ with a channel slug/id).
+  - _TESTS: tests for a channel page with a likely large playlist (playlist_mincount: 200) and a mostly matching URL.
+  - suitable(cls, url): overridden to ensure this extractor is used only for URLs that are not handled by ACastIE.
+  - _real_extract(url):
+    - show_slug = matched id from URL.
+    - show = _call_api(show_slug, show_slug) to fetch the channel/show data.
+    - show_info = _extract_show_info(show)
+    - Iterates episodes in show.get('episodes') and builds entries with _extract_episode(episode, show_info)
+    - Returns a playlist_result containing all episodes, plus show id, title, and description.
+
+Key implementation details
+- API usage:
+  - Episode data endpoint: https://feeder.acast.com/api/v1/shows/{channel}/episodes/{episode_id} with optional query {'showInfo': 'true'} to include show data.
+  - Channel/show endpoint: https://feeder.acast.com/api/v1/shows/{channel} or similar path structure, as invoked by _call_api.
+- Data normalization:
+  - URL cleaning: clean_podcast_url for episode URLs.
+  - Description: prefers 'description' and falls back to 'summary'; cleans HTML with clean_html.
+  - Timestamps and numbers: parse_iso8601 for publishDate; int_or_none used for duration, contentLength (filesize), season, and episode numbers.
+  - Episode display_id uses episodeUrl if present.
+  - Episode dict includes both episode and episode_number fields; 'episode' stores the title for readability.
+  - Show/channel info included as: creator (author) and series (title).
+- Regex patterns:
+  - ACastIE matches individual episodes across multiple ACast URL formats (embed, www acast, play acast with /s/ path).
+  - ACastChannelIE matches channel/show pages (with channel slug) and avoids overlap with ACastIE via a suitable() override.
+- Testing:
+  - _TESTS arrays provide real-world URL examples, expected info dict fields, hashing for descriptions, and only_matching flags to ensure correct URL matching behavior.
+
+Purpose and usage
+- Enables extraction of ACast podcast episodes and channels for YouTube-DL, translating ACast API responses into standard YouTube-DL info dictionaries (id, title, description, timestamp, duration, etc.) suitable for download or playlist creation.

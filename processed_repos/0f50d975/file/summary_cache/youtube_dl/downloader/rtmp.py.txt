@@ -1,0 +1,79 @@
+Concise summary of ./youtube-dl/youtube_dl/downloader/rtmp.py
+
+What it does
+- Provides an RTMP download backend for youtube-dl using the external rtmpdump tool.
+- Integrates with youtube-dl’s FileDownloader framework to download RTMP streams, report progress, handle retries, and rename the final file.
+
+Key components
+- rtmpdump_version()
+  - Helper that detects the installed rtmpdump version by running rtmpdump --help and parsing the output.
+
+- RtmpFD(FileDownloader)
+  - Main downloader class that implements real_download(self, filename, info_dict).
+  - Uses rtmpdump to fetch the RTMP stream described by info_dict and writes to a temporary file, then renames on success.
+
+Main workflow in real_download
+- Prepare and validate
+  - Determine tmpfilename from filename and report the destination via report_destination.
+  - Check that rtmpdump is installed and runnable; if not, report an error and exit False.
+  - Assemble a base rtmpdump command with required options:
+    - URL (-r), output file (-o)
+    - Optional metadata: --swfVfy (player_url), --pageUrl (page_url), --app (app),
+      --playpath (play_path), --tcUrl (tc_url), --flashVer (flash_version)
+    - Optional flags: --stop for test, --live for live streams, --conn entries (list or string),
+      --protocol, --realtime
+  - Respect download controls:
+    - If not no_resume and continue_dl and not live: add --resume
+    - If not live and continue_dl: add --skip 1
+  - Normalize arguments with encodeArgument and log the command via _debug_cmd.
+
+- Inner progress listener (run_rtmpdump)
+  - Runs rtmpdump in a subprocess, capturing stderr and parsing live output to report progress.
+  - Tracks:
+    - downloaded_data_len (kB value from rtmpdump output)
+    - percent (download completion percentage when available)
+    - speed (using self.calc_speed)
+    - eta (using self.calc_eta)
+  - Reports progress via self._hook_progress with fields:
+    - status, downloaded_bytes, total_bytes_estimate (if calculable), tmpfilename, filename,
+      eta, elapsed, speed
+  - Handles two patterns:
+    - With percent: reports both progress and speed/ETA
+    - Without percent (live streams): reports only downloaded bytes
+  - Also emits verbose rtmpdump lines if verbose mode is enabled.
+
+- Execution and retry logic
+  - Executes run_rtmpdump(args) and interprets exit codes:
+    - RD_SUCCESS (0): success
+    - RD_FAILED (1): download failed
+    - RD_INCOMPLETE (2): incomplete
+    - RD_NO_CONNECT (3): could not connect
+  - If RD_NO_CONNECT: error and exit False.
+  - If RD_INCOMPLETE or RD_FAILED and not a test and not a live stream:
+    - Periodically retry with updated arguments (resume, possibly skip 1 on failure)
+    - Sleep 5 seconds between retries
+    - If file size stops growing across a retry and the exit code remains RD_FAILED, break
+    - If it stalls near end (no progress) for RD_INCOMPLETE but size > 1024 bytes, treat as acceptable (special case message) and proceed as success
+  - On success:
+    - Reports final size, renames tmpfilename to final filename, and reports finished progress
+    - Returns True
+  - On error:
+    - Prints error and returns False
+
+Important implementation details
+- File handling
+  - Uses a temporary file name (tmpfilename) during download; renames to final filename on success.
+- Argument handling and safety
+  - All command arguments are passed through encodeArgument to ensure safe shell usage.
+- Robustness and compatibility
+  - Uses compat_str for string compatibility across Python versions.
+  - Handles both list-based and string-based RTMP connection options (--conn).
+- Live vs non-live behavior
+  - Live streams skip resume-related logic and have special handling (no percent-based progress).
+  - Non-live streams support resume and partial retry logic.
+- Progress reporting
+  - Integrates with youtube-dl’s progress hooks to provide ETA, speed, and total size estimates when available.
+  - Outputs detailed rtmpdump messages in verbose mode.
+
+In short
+- This module adds an RTMP downloader backed by rtmpdump, parsing rtmpdump’s progress output to provide accurate progress, speed, and ETA, while supporting resume, connections, and live/non-live stream differences. It handles command construction, execution, retries, and finalization within the youtube-dl FileDownloader framework.

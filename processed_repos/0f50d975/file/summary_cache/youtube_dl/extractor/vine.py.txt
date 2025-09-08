@@ -1,0 +1,84 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/vine.py
+
+Overview
+- Implements two extractors for Vine content:
+  - VineIE: extracts individual Vine videos.
+  - VineUserIE: extracts a user’s Vine videos as a playlist.
+- Uses Vine’s archived JSON endpoints to fetch video data and builds downloadable formats, metadata, and counts.
+
+Main classes and responsibilities
+- VineIE (InfoExtractor)
+  - URL pattern: https?://(www.)?vine.co/(v|oembed)/<id>
+  - _real_extract:
+    - Extracts video_id from URL.
+    - Downloads JSON from https://archive.vine.co/posts/<video_id>.json.
+    - Finds available video URLs for different qualities via video{kind}{Url|URL} keys (where kind is low, (empty) standard, dash).
+    - Builds formats list for available URLs:
+      - If the dash format URL points to an MPD manifest, uses _extract_mpd_formats to parse it (mpd).
+      - Otherwise appends a format dict with url, format_id (low/standard/dash or 'standard' if empty), and quality score.
+    - Sorts formats with _sort_formats.
+    - Collects metadata:
+      - title from data['description'] or an alt_title (based on username).
+      - alt_title = 'Vine by <username>' if username present.
+      - thumbnail from data['thumbnailUrl'].
+      - timestamp from data['created'] via unified_timestamp.
+      - uploader/uploader_id from username and userIdStr.
+      - view_count/like_count/comment_count/repost_count from loops/likes/comments/reposts (sanitized via int_or_none).
+    - Returns a dictionary with id, title, alt_title, thumbnail, timestamp, uploader, uploader_id, view_count, like_count, comment_count, repost_count, and formats.
+  - _VALID_URL and _TESTS provide URL patterns and sample expectations (including md5 for the first test, and fields like timestamp, counts, etc.).
+
+- VineUserIE (InfoExtractor)
+  - IE_NAME: 'vine:user'
+  - URL pattern: https?://vine.co/(u/)?<user>
+  - _VINE_BASE_URL = 'https://vine.co/'
+  - _real_extract:
+    - Matches URL to extract user and optional 'u/' vanity flag.
+    - Builds profile API URL:
+      - https://vine.co/api/users/profiles/vanity/<user> if vanity URL,
+      - https://vine.co/api/users/profiles/<user> otherwise.
+    - Downloads profile_data and extracts data.data.
+    - Determines user_id via data.get('userId') or data['userIdStr'].
+    - Downloads profile JSON from https://archive.vine.co/profiles/<user_id>.json.
+    - Builds a list of entries by creating Vine video URLs for each post_id in profile['posts']:
+      - entry = self.url_result('https://vine.co/v/<post_id>', ie='Vine', video_id=post_id)
+    - Returns a playlist_result with:
+      - entries as the list above,
+      - title as the user (the input username),
+      - author/description details from profile (username and description).
+  - suitable() override:
+    - Ensures this extractor is considered only if VineIE is not suitable for the URL, avoiding conflicts.
+  - _TESTS provide examples including a playlist with mincount and a simple matching URL.
+
+Key implementation details
+- Data sources:
+  - Video data: https://archive.vine.co/posts/<video_id>.json
+  - User profile data: https://vine.co/api/users/profiles/... (vanity or non-vanity)
+  - User profiles: https://archive.vine.co/profiles/<user_id>.json
+- Video formats handling:
+  - Checks for videoUrl fields using a helper video_url(kind) that searches for video{Kind}{Url,URL} keys.
+  - Quality order is low, standard, dash (0, 1, 2).
+  - If the dash URL resolves to an MPD manifest (mpd), dash formats are extracted via _extract_mpd_formats, otherwise the URL is added as a standard format.
+- Metadata extraction:
+  - Title prioritizes data['description'], then an alt_title (Vine by <username>), else a default.
+  - Alt title constructed as 'Vine by <username>' when username exists.
+  - Timestamps converted with unified_timestamp(data.get('created')).
+  - Counts converted with int_or_none to gracefully handle missing/non-integer data.
+- User extractor specifics:
+  - Builds a playlist from a user’s posts by creating individual Vine video URLs and aggregating via playlist_result.
+  - Uses the user’s vanity or non-vanity path to fetch profile data, then uses the archive profile data to assemble the playlist metadata.
+
+Tests and behavior notes
+- VineIE _TESTS include:
+  - A full video test with expected md5 and metadata fields including counts, timestamps, and IDs.
+  - A second test with skip_download flag.
+  - Two tests with only_matching: for non-video Vine URLs (e.g., /v/MYxVapFvz2z, /v/bxVjBbZlPUH) and an oembed URL, ensuring the extractor recognizes but does not download.
+- VineUserIE _TESTS verify:
+  - Playlist extraction for a user (title/description expectations) and a URL that should be matched but not necessarily downloaded.
+- Robustness:
+  - Handles missing fields gracefully via get() and int_or_none.
+  - Falls back to 'standard' format_id when no explicit format_id is provided.
+  - Separate extractors with a suitable() override to avoid overlapping URL handling.
+
+In short
+- VineIE fetches and parses individual Vine video data from archive.vine.co, builds a multi-format list (including possible MPD/DASH handling), and exposes rich metadata.
+- VineUserIE fetches a user’s profile and compiles a playlist of that user’s Vine videos, mapping each post to a Vine video URL and returning a playlist with appropriate metadata.

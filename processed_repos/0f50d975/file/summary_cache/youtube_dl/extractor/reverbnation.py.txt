@@ -1,0 +1,38 @@
+- Purpose: Implement a YouTube-DL extractor for ReverbNation song pages.
+
+- Class and inheritance:
+  - ReverbNationIE(InfoExtractor): uses InfoExtractor base class.
+
+- URL matching:
+  - _VALID_URL regex targets ReverbNation song pages and captures the song ID from URLs like http(s)://www.reverbnation.com/.../song/{id}.
+
+- Tests:
+  - _TESTS contains a sample URL and expected metadata (id, ext mp3, title, uploader, uploader_id, thumbnail pattern).
+
+- Core extraction flow (_real_extract):
+  - Extracts song_id via _match_id(url).
+  - Downloads song metadata JSON from https://api.reverbnation.com/song/{song_id} using _download_json with a note for the user.
+  - Builds thumbnails:
+    - Considers two possible keys in the API response: 'thumbnail' and 'image'.
+    - Uses qualities(THUMBNAILS) to assign a preference order.
+    - For each available key, adds a thumbnail dict with 'url' and 'preference' to the thumbnails list.
+  - Returns a dict with:
+    - id: song_id
+    - title: api_res['name']
+    - url: api_res['url'] (direct MP3 URL)
+    - uploader: api_res.get('artist', {}).get('name')
+    - uploader_id: str_or_none(api_res.get('artist', {}).get('id'))
+    - thumbnails: list of constructed thumbnails
+    - ext: 'mp3'
+    - vcodec: 'none' (video codec disabled, i.e., audio-only)
+
+- Important implementation details:
+  - _download_json fetches and parses the API response synchronously within the extractor workflow.
+  - Uses str_or_none to safely convert nested artist ID to a string or None.
+  - Thumbnails are optional and only included if present in the API response.
+  - The extractor outputs audio-only content (ext 'mp3', vcodec 'none').
+
+- Summary of data exposure:
+  - Metadata: id, title, uploader, uploader_id
+  - Media: mp3 URL (url), extension (ext)
+  - Visuals: thumbnails with preference ordering

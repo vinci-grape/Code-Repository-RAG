@@ -1,0 +1,53 @@
+- Purpose: A YouTube-dl extractor for Walla (Israeli video service). It retrieves video metadata, available RTMP FLV formats, and subtitles from Walla’s XML feed.
+
+- Main class and inheritance:
+  - WallaIE(InfoExtractor)
+
+- URL pattern:
+  - _VALID_URL = r'https?://vod\.walla\.co\.il/[^/]+/(?P<id>\d+)/(?P<display_id>.+)'
+  - Extracts video_id (digits) and display_id (slug) from URLs like http://vod.walla.co.il/movie/2642630/one-direction-all-for-one
+
+- Test data:
+  - _TEST contains a sample URL, expected info_dict (id, display_id, ext, title, description as md5, thumbnail, duration), and skip_download for RTMP download.
+
+- Subtitles language mapping:
+  - _SUBTITLE_LANGS = {'עברית': 'heb'} to map Hebrew to standard 'heb' code
+
+- Data retrieval workflow (_real_extract):
+  - Fetches XML metadata from http://video2.walla.co.il/?w=null/null/%s/@@/video/flv_pl with video_id
+  - Parses the first item element: ./items/item
+
+- Metadata extraction:
+  - title: from ./title
+  - description: from ./synopsis
+  - thumbnail: from ./preview_pic
+  - duration: integer converted from ./duration (via int_or_none)
+
+- Subtitles extraction:
+  - Iterates item.findall('./subtitles/subtitle')
+  - Language: from ./title; mapped using _SUBTITLE_LANGS (fallback to original if not mapped)
+  - Each subtitle: build entry with ext 'srt' and url from ./src
+  - Result: subtitles dict keyed by language code with list of {ext, url}
+
+- Formats extraction:
+  - Iterates item.findall('./qualities/quality')
+  - For each quality:
+    - format_id: from ./title
+    - Build format dict:
+      - url: 'rtmp://wafla.walla.co.il/vod'
+      - play_path: value from ./src
+      - player_url: SWF player URL for Walla media
+      - page_url: original page URL
+      - ext: 'flv'
+      - format_id: quality title
+    - height extraction: if format_id starts with a numeric height followed by P/p (e.g., "720P"), set fmt['height'] accordingly
+  - After collecting, _sort_formats(formats)
+
+- Return structure:
+  - id, display_id, title, description, thumbnail, duration, formats, subtitles
+
+- Notable implementation details:
+  - Uses _download_xml to fetch Walla’s XML feed and xpath_text/int_or_none helpers to extract values robustly.
+  - RTMP-based formats with flv extension and explicit play_path pointing to the RTMP media path.
+  - Height parsing from format title to populate standardized format height when available.
+  - Includes a SWF-based video player URL in the format metadata.

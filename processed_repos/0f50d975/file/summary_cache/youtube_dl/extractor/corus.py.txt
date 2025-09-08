@@ -1,0 +1,56 @@
+Concise but comprehensive summary of the file
+
+File: ./youtube-dl/youtube_dl/extractor/corus.py
+
+Overview
+- This is a YouTube-DL extractor for Corus network sites (e.g., Global TV, HGTV Canada, Food Network Canada, YTV, Showcase, Disney Channel Canada, etc.).
+- It inherits from ThePlatformFeedIE, leveraging ThePlatform-based playlist retrieval and SMIL parsing to extract video formats, subtitles, and metadata.
+
+Main functionality
+- _VALID_URL: Complex regex that matches several Corus domains and their video pages. Supports both video.html and videos/... paths with a video id (either a UUID-like id or a numeric-like id with optional leading uppercase prefix).
+- _SITE_MAP: Maps some sites to internal path types (e.g., globaltv/etcanada/foodnetwork/etc. map to 'series' or specific migration paths for non-series sites like 'migration/food').
+- _real_extract(url): Core extraction routine
+  - Parses domain and video_id from the URL. Determines site and placement path via _SITE_MAP; non-series paths are prefixed with migration/.
+  - Fetches a playlist JSON from: https://globalcontent.corusappservices.com/templates/{path}/playlist/ with byId=video_id, Accept: application/json. Uses the first item [0] as the video descriptor.
+  - Builds a list of formats by iterating video['sources']:
+    - Each source provides a SMIL file URL (source['file']). If present, downloads the SMIL file via _download_webpage with geo headers.
+    - Parses potential JSON error payloads from the SMIL fetch; if error.exception == 'GeoLocationBlocked', raises a CA geo restriction. Otherwise raises ExtractorError with the error description.
+    - If SMIL is valid, extracts namespace and parses formats from SMIL using _parse_smil_formats.
+  - DRM handling: If no formats were found and video['drm'] is truthy, raises an ExtractorError indicating DRM protection (marked as expected=True).
+  - Subtitles: Builds subtitles from video['tracks']; assigns language as 'en' by default, 'fr' for site in ('disneylachaine', 'seriesplus'). Each track URL is added as a subtitle entry.
+  - Metadata extraction:
+    - title from video['title'].
+    - thumbnail from video['defaultThumbnailUrl'], video['thumbnail'], or video['image'] via dict_get.
+    - description from video.get('description').
+    - timestamp from video['availableDate'] (converted via int_or_none with 1000 as divisor/millis-to-seconds).
+    - duration from metadata['duration'] as a float via float_or_none.
+    - series from video['show'] or video.get('pl1$show') via dict_get.
+    - season_number and episode_number via a helper get_number:
+      - Looks for video['pl1$season'] or metadata['seasonNumber'], and similarly for episodes with 'episode' keys.
+  - Returns a dict with id, title, formats, thumbnail, description, timestamp, subtitles, duration, series, season_number, and episode_number.
+
+Key implementation details
+- ThePlatform integration:
+  - Uses ThePlatformFeedIE base class, and leverages _download_json to fetch playlist data and _download_webpage to fetch SMIL files.
+  - _parse_smil_formats is used to extract actual video formats from SMIL documents; _parse_smil_namespace is used to accommodate SMIL namespaces.
+- Geo-restriction and error handling:
+  - If a SMIL fetch returns a JSON error payload, it can signal GeoLocationBlocked, triggering a CA geo restriction.
+  - Other errors raise ExtractorError with the provided description.
+- DRM handling:
+  - If no formats were parsed but the video has drm flag, it raises a DRM-protected error (expected=True) to indicate restricted content.
+- Subtitles:
+  - Language choices depend on site: fr for disneylachaine and seriesplus; en otherwise.
+  - Subtitles are collected from video['tracks'] as a list of dicts with 'url' entries.
+- Metadata mapping:
+  - Uses dict_get for robust fallback on thumbnail and series fields.
+  - Uses int_or_none with an alternative value from metadata to determine timestamps.
+  - The get_number helper looks up season/episode numbers from either new style pl1$ fields or legacy metadata fields.
+
+Notable tests
+- _TESTS includes multiple test cases:
+  - Primary test with a HGTv Canada URL returning id, ext, title, description, upload_date, timestamp, and a warning about JSON parsing failure in SMIL processing.
+  - Several only_matching tests to ensure URL pattern coverage across various domains (foodnetwork, etcanada, history, showcase, bigbrothercanada, seriesplus, disneychannel).
+- These tests validate id extraction, title, description, and that the extractor can handle multiple domain patterns and paths.
+
+Summary of flow
+- Validate URL -> determine site/path -> fetch playlist byId -> iterate sources -> download/parse SMILs -> accumulate formats -> handle DRM -> sort formats -> build subtitles -> assemble metadata (title, description, timestamp, duration, series, season/episode) -> return structured video info. Includes geo-block and DRM considerations and supports multiple Corus sites via a shared code path.

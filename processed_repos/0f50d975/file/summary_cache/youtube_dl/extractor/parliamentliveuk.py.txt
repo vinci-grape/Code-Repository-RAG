@@ -1,0 +1,48 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/parliamentliveuk.py
+
+Purpose
+- Implement a YouTube-DL extractor for UK Parliament Live videos (parliamentlive.tv), delegating actual video decoding to the Kaltura extractor.
+
+Key components
+- ParliamentLiveUKIE class (subclass of InfoExtractor)
+  - IE_NAME: 'parliamentlive.tv'
+  - IE_DESC: 'UK parliament videos'
+  - _VALID_URL: Regular expression that matches Parliament Live Event URLs of the form:
+    https://parliamentlive.tv/Event/Index/{GUID}
+    where GUID is a standard 8-4-4-4-12 hex pattern
+  - _TESTS: Two tests
+    - Test 1: A real Parliament Live URL with a full info_dict including id, ext, title, uploader_id, timestamp, upload_date
+    - Test 2: A similar URL used with only_matching to validate URL matching behavior
+
+Core logic (_real_extract)
+- Extract video_id from the URL using _match_id(url).
+- Download the corresponding VodPlayer page:
+  - URL built as http://vodplayer.parliamentlive.tv/?mid={video_id}
+  - This page is fetched via _download_webpage(...)
+- Extract Kaltura widget configuration:
+  - Locate a JavaScript snippet containing kWidgetConfig using regex: (?s)kWidgetConfig\s*=\s*({.+});
+  - Parse the captured JSON into a Python dict via _parse_json(...)
+- Build a Kaltura URL:
+  - kaltura_url = 'kaltura:%s:%s' % (widget_config['wid'][1:], widget_config['entry_id'])
+  - The widget config provides 'wid' (widget ID) and 'entry_id' (Kaltura entry). The code uses [1:] on wid to drop a leading character.
+- Retrieve the video title:
+  - Query http://parliamentlive.tv/Event/GetShareVideo/{video_id} with _download_json(...)
+  - Extract event['title'] from the response to use as the video title.
+- Return information as a url_transparent entry:
+  - '_type': 'url_transparent' to delegate actual downloading to another extractor
+  - 'title': event_title
+  - 'description': ''
+  - 'url': kaltura_url (points to a Kaltura entry)
+  - 'ie_key': 'Kaltura' (invokes the Kaltura extractor)
+
+Implementation details
+- Uses YouTube-DL helper methods:
+  - _download_webpage for HTML content
+  - _search_regex to locate kWidgetConfig in the HTML
+  - _parse_json to convert the JSON string to a dict
+  - _download_json to fetch the JSON data from GetShareVideo
+- The overall strategy is to map Parliament Live videos to their corresponding Kaltura entries and then leverage the Kaltura extractor to handle actual video streaming and metadata.
+- The test metadata implies the Kaltura extractor will provide additional fields like id, ext, uploader_id, timestamp, and upload_date after the url_transparent dispatch.
+
+In short
+- The extractor converts a Parliament Live Event URL into a Kaltura-based URL by parsing the embedded widget configuration and a separate API call for the event title, then hands off to the Kaltura extractor while surfacing the event title as the video title.

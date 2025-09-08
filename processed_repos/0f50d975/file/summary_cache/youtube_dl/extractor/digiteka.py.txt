@@ -1,0 +1,56 @@
+Summary of code: digiteka extractor (youtube_dl/extractor/digiteka.py)
+
+- Purpose
+  - Implement an InfoExtractor for Digiteka/Ultimedia video embeds. It handles both direct Digiteka/Musique delivery URLs and embedded content that points to a Digiteka deliver resource, and can fall back to YouTube if the deliver API returns a YouTube ID.
+
+- Key class
+  - DigitekaIE(InfoExtractor)
+    - _VALID_URL: Regular expression that matches:
+      - Digiteka/Ultimedia URLs under deliver/generic or deliver/musique
+      - Optional article/src paths and id
+      - Also matches default/index/video with id, distinguishing embed_type (generic, musique) or site_type (generic, music)
+    - _TESTS: Three tests
+      - News video on ultimedia.com (expects mp4 and metadata like title, duration, timestamp, uploader_id, etc.)
+      - Music video on ultimedia.com (similar metadata)
+      - An embed URL from digiteka.net (only_matching test)
+    - _extract_url(webpage): Static helper
+      - Scans the HTML for an iframe or script tag with a src pointing to a ultimedia.com deliver URL (generic or musique, with /src or /article)
+      - Returns the extracted URL if found; otherwise None
+    - _real_extract(self, url): Core extraction logic
+      - Parses the URL with _VALID_URL to obtain:
+        - video_id: captured id
+        - video_type: either embed_type or site_type (normalized to musique if 'music')
+      - If video_type is 'music', convert to 'musique' (API expects this value)
+      - Fetch deliver_info via JSON from:
+        http://www.ultimedia.com/deliver/video?video=<video_id>&topic=<video_type>
+      - If deliver_info contains yt_id, return a YouTube result using self.url_result(yt_id, 'Youtube')
+      - Else, extract jwconf from deliver_info['jwconf']
+        - Build formats by iterating jwconf['playlist'][0]['sources']:
+          - Each source contributes a format dict with:
+            - 'url': source['file']
+            - 'format_id': source.get('label')
+        - Sort formats with self._sort_formats(formats)
+        - Collect metadata:
+          - title: deliver_info['title']
+          - thumbnail: jwconf.get('image')
+          - duration: int_or_none(deliver_info.get('duration'))
+          - timestamp: int_or_none(deliver_info.get('release_time'))
+          - uploader_id: deliver_info.get('owner_id')
+      - Return a dict with:
+        - 'id': video_id
+        - 'title', 'thumbnail', 'duration', 'timestamp', 'uploader_id'
+        - 'formats': list of extracted formats
+
+- Important implementation details
+  - URL matching handles both embed types (generic, musique) and site types (generic, music) and maps music -> musique for API compatibility.
+  - The extractor prefers YouTube if the deliver API returns a YouTube ID (yt_id).
+  - Formats are sourced from the first playlist item in jwconf and may include multiple sources (e.g., different bitrates). Each source’s file URL becomes a format entry, with an optional label as format_id.
+  - Uses int_or_none to safely parse integer fields (duration, release_time).
+  - The _extract_url helper aids in discovering embedded Digiteka content within a page by locating relevant iframes/scripts that point to ultimedia.com/deliver URLs.
+
+- Data flow overview
+  - URL -> extract id and type -> call deliver API -> obtain either YouTube ID or jwconf -> build and return formats + metadata (or delegate to YouTube extractor).
+
+- Usage notes
+  - The extractor supports both direct Digiteka delivery URLs and embedded pages that reference such URLs.
+  - If the deliver API returns a YouTube ID, the content will be handled by the YouTube extractor instead of Digiteka’s own formats.

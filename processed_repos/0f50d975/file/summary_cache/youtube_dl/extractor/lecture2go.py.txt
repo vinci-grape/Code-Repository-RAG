@@ -1,0 +1,42 @@
+- Purpose
+  - A youtube-dl extractor for Lecture2Go (University of Hamburg). It fetches a video page, discovers available streaming formats, and extracts metadata such as title, creator, duration, and view count.
+
+- Main class and URL pattern
+  - Class: Lecture2GoIE(InfoExtractor)
+  - _VALID_URL: matches URLs like https://lecture2go.uni-hamburg.de/veranstaltungen/-/v/<id>
+  - _TEST: includes a real example with expected id, title, creator, duration, and ext, plus a skip_download hint for m3u8 formats.
+
+- Core extraction flow (_real_extract)
+  - video_id: extracted from the URL using _match_id.
+  - webpage: downloaded page content via _download_webpage.
+  - title: extracted with HTML regex <em ... class="title">(.+)</em>.
+  - formats: built by scanning the page for streaming URLs defined in JavaScript variables:
+    - Looks for patterns like var playerUri1 = "<url>", var playerUri2 = "<url>", etc. Uses re.findall and deduplicates with set().
+    - For each discovered URL:
+      - ext = determine_ext(url) to detect format type (e.g., f4m, m3u8, or others).
+      - protocol = determine_protocol({'url': url}) to determine the access protocol (e.g., http, https, rtmp, etc.).
+      - If ext == 'f4m': fetch formats via _extract_f4m_formats(url, video_id, f4m_id='hds').
+      - If ext == 'm3u8': fetch formats via _extract_m3u8_formats(url, video_id, ext='mp4', m3u8_id='hls').
+      - Else: if protocol == 'rtmp', skip (marked as currently broken); otherwise, append a simple format dict {'format_id': protocol, 'url': url}.
+  - _sort_formats(formats): sorts the collected formats by quality/preference.
+
+- Metadata extraction (optional fields)
+  - creator: extracted from <div ... id="description">...</div> with a regex; fatal=False to allow absence.
+  - duration: parsed by locating a "Duration: ..." line, extracting the time string, and passing it to parse_duration; fatal=False if not present.
+  - view_count: extracted similarly from a "Views: ..." line and converted to int via int_or_none; fatal=False if not present.
+
+- Return value
+  - A dict with:
+    - id: video_id
+    - title: extracted title
+    - formats: list of format dictionaries
+    - creator: optional string
+    - duration: optional int (seconds)
+    - view_count: optional int
+
+- Implementation details and notes
+  - Uses _extract_f4m_formats and _extract_m3u8_formats to handle common streaming formats (HDS, HLS).
+  - When non-standard URLs are encountered, uses a minimal format entry with a format_id equal to the URL’s protocol (e.g., http, https).
+  - Deduplicates discovered URLs to avoid duplicate formats.
+  - Optional fields use fatal=False to avoid extraction failures if missing.
+  - The code explicitly skips RTMP formats due to being currently broken, as indicated by the comment.

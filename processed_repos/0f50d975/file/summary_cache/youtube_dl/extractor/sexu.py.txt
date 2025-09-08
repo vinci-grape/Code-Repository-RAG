@@ -1,0 +1,44 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/sexu.py
+
+- Purpose
+  - Implement a youtube-dl extractor for videos hosted on sexu.com.
+
+- Main class
+  - SexuIE(InfoExtractor)
+
+- URL pattern
+  - _VALID_URL matches URLs like http(s)://www.sexu.com/<digits>
+  - The numeric path segment is captured as the video ID.
+
+- Test data
+  - _TEST provides a sample URL, expected md5 for the video file, and an info_dict schema including id, ext (mp4), title, description, categories (NSFW), thumbnail, and age_limit (18).
+
+- Core extraction flow (_real_extract)
+  1. Extract video_id from URL using _match_id.
+  2. Download the HTML page with _download_webpage.
+  3. Locate the JWPlayer configuration object by searching for a script pattern like .setup({ ... });
+     - Uses _search_regex to grab the JSON-like object, then _parse_json to convert to a Python dict (jwvideo).
+  4. Access sources = jwvideo['sources'], which is a list of video source entries.
+  5. Build formats list from sources:
+     - For each source with a non-empty 'file':
+       - url: source['file'] with backslashes removed (to clean escaping)
+       - format_id: value of source['label'] (e.g., quality label)
+       - height: parsed from the label with regex ^(\d+)[pP], if possible
+     - Uses _sort_formats to order formats by quality/size.
+  6. Title extraction from the page title using a regex that matches the pattern "<title>... - Sexu.Com</title>".
+  7. Description from the page's meta description via _html_search_meta.
+  8. Thumbnail from jwvideo.get('image').
+  9. Categories parsed from the page metaKeywords (keywords):
+     - If present, split by comma into a list; otherwise None.
+  10. Return metadata dictionary:
+      - id, title, description, thumbnail, categories, formats, age_limit (18).
+
+- Important implementation details
+  - Relies on parsing an inline JWPlayer config object embedded in the page.
+  - Formats are derived from the sources array; only entries with a 'file' field are used.
+  - Height is optional; if the label doesn’t contain a numeric height, height is left as None.
+  - Title and description are scraped from HTML/meta tags; NSFW content is indicated via categories (sample shows NSFW).
+  - The code handles escaped characters in URLs (backslashes) when constructing format entries.
+
+- Summary of behavior
+  - Given a sexu.com video page, it extracts the video ID, locates the streaming sources from the embedded JWPlayer config, compiles a list of downloadable formats with quality information, and fetches associated metadata (title, description, thumbnail, categories, and age_limit) to return a complete video info dict suitable for downloading via youtube-dl.

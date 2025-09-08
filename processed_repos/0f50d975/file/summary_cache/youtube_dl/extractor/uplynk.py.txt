@@ -1,0 +1,61 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/uplynk.py
+
+- Purpose
+  - Implement YouTube-DL extractors for Uplynk video hosting: a standard player URL extractor (UplynkIE) and a preplay URL extractor (UplynkPreplayIE).
+
+- Key classes
+  - UplynkIE (InfoExtractor)
+    - IE_NAME: 'uplynk'
+    - _VALID_URL: Complex regex to match Uplynk content URLs that end with .m3u8 or .json and may include an optional PBS session parameter. Supports two URL shapes:
+      - ext/[32-hex]/<external_id>.m3u8/.json
+      - [32-hex].m3u8/.json
+    - _TEST: Example test case for an m3u8 URL with expected metadata (id, ext, title, uploader_id), and skip_download for m3u8 download.
+
+  - UplynkPreplayIE (UplynkIE subclass)
+    - IE_NAME: 'uplynk:preplay'
+    - _VALID_URL: Matches preplay JSON endpoints of the form …/preplay2/<path> or …/preplay2/<32-hex>.json
+    - _TEST: None
+    - Inherits behavior from UplynkIE for the actual content extraction after resolving preplay info.
+
+- Core functionality
+  - _extract_uplynk_info(self, uplynk_content_url)
+    - Parses the URL using the class-level _VALID_URL to extract:
+      - path, external_id, video_id, session_id
+    - display_id = video_id if present else external_id
+    - Fetches available formats via _extract_m3u8_formats from:
+      - http://content.uplynk.com/{path}.m3u8
+      - Video resource type: 'mp4'
+      - m3u8_native extraction method
+    - If a session_id (PBS) is present, appends extra_param_to_segment_url = 'pbs=' + session_id to every format to ensure proper segment access.
+    - Sorts formats with _sort_formats.
+    - Downloads asset metadata from:
+      - http://content.uplynk.com/player/assetinfo/{path}.json
+    - If asset['error'] == 1, raises an ExtractorError with the provided message.
+    - Returns a dictionary with:
+      - id: asset['asset']
+      - title: asset['desc']
+      - thumbnail: asset.get('default_poster_url')
+      - duration: float_or_none(asset.get('duration'))
+      - uploader_id: asset.get('owner')
+      - formats: collected formats
+
+  - _real_extract(self, url)
+    - For UplynkIE: delegates to _extract_uplynk_info(url)
+
+  - UplynkPreplayIE._real_extract(self, url)
+    - Extracts path, external_id, video_id from the preplay URL
+    - display_id = video_id or external_id
+    - Downloads preplay JSON from the preplay URL
+    - Builds content URL: http://content.uplynk.com/{path}.m3u8
+    - If preplay JSON contains sid, appends '?pbs=' + sid to the content URL
+    - Delegates to _extract_uplynk_info(content_url) to perform the actual extraction
+
+- Implementation details and nuances
+  - Regex-based URL parsing to support two URL shapes and to extract optional PBS session IDs.
+  - Uses _extract_m3u8_formats to gather MP4 formats from the HLS manifest (.m3u8) and marks them as 'm3u8_native'.
+  - PBS session handling: when present, adds pbs parameter to segment URLs to maintain session continuity.
+  - Asset metadata is retrieved via a separate JSON endpoint; this data populates id, title, thumbnail, duration, and uploader_id in the final info dict.
+  - Error handling: if the asset JSON indicates an error, raises ExtractorError with the server-provided message.
+  - float_or_none utility is used to safely parse duration values.
+
+Overall, the file provides a complete extractor for Uplynk content, handling both direct content URLs and preplay endpoints, assembling video formats from m3u8 manifests, and enriching metadata from assetinfo JSON.

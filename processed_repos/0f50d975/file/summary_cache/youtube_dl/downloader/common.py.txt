@@ -1,0 +1,80 @@
+Summary of ./youtube-dl/youtube_dl/downloader/common.py
+
+Purpose
+- Provides a base class FileDownloader used by youtube-dl to handle the common logic for downloading files (writing to disk, progress reporting, timing, throttling, and file handling). Subclasses are expected to implement the actual download in real_download.
+
+Main functionality
+- Centralizes utilities and behaviors shared by all downloader implementations, including:
+  - Progress reporting (in-line progress, console title updates, and optional newline-based progress).
+  - Time/speed/ETA calculations and formatting.
+  - Buffer/block sizing helpers and rate limiting.
+  - Safe file naming and renaming (temporary .part files, .ytdl metadata file, and restore logic).
+  - Time setting of downloaded files via Last-Modified header.
+  - Resuming and skipping logic (nooverwrite/continued download checks).
+  - Hooks for external progress callbacks.
+
+Key classes and methods
+
+1) FileDownloader class
+- __init__(ydl, params)
+  - Stores the YoutubeDl object (ydl) and options (params).
+  - Initializes a progress hook list and registers the built-in report_progress as a default hook.
+
+- Static helpers
+  - format_seconds(seconds): returns human-friendly time string (HH:MM:SS or MM:SS), capped to --:--:-- if hours exceed 99.
+  - calc_percent(byte_counter, data_len): returns percentage or None.
+  - format_percent(percent): returns a fixed-width percent string or '---.-%'.
+  - calc_eta(start_or_rate, now_or_remaining, *args): computes ETA in two modes:
+    - If given rate and remaining, ETA = remaining / rate.
+    - If given start/now/current/total, compute rate and ETA from (total - current) / rate.
+  - format_eta(eta): pretty prints ETA using format_seconds.
+  - calc_speed(start, now, bytes): computes speed (bytes per second) or None if invalid.
+  - format_speed(speed): formats speed as "X/s" or '---b/s' when unknown.
+  - format_retries(retries): formats retries (inf or numeric).
+  - filesize_or_none(unencoded_filename): returns file size if the path exists.
+  - best_block_size(elapsed_time, bytes): dynamic chunk size based on observed rate, clamped to [1, 4MB].
+  - parse_bytes(bytestr): parses strings like "10k", "2.5M" into integer bytes using 1024-based multipliers.
+
+- IO and messaging helpers
+  - to_screen / to_stderr / to_console_title / trouble / report_warning / report_error: wrappers delegating to self.ydl.
+  - report_destination(filename): print the destination path.
+  - _report_progress_status(msg, is_last_line=False): prints a progress line to stdout/stderr, handling Windows NT line length quirks and ANSI escapes on terminals; also updates console title.
+  - report_progress(s): core progress reporter.
+    - On 'finished': prints final status (with total bytes and elapsed) unless noprogress is set.
+    - When downloading: computes and formats ETA, percent, and speed based on available fields (total_bytes, total_bytes_estimate, downloaded_bytes, speed, elapsed).
+    - Builds a progress template depending on available information, then prints via _report_progress_status.
+  - report_resuming_byte(resume_len): logs resuming at a specific byte.
+  - report_retry(err, count, retries): logs HTTP 5xx retry attempts.
+  - report_file_already_downloaded(file_name): notifies that a file has already been downloaded.
+  - report_unable_to_resume(): logs that resuming is not possible.
+
+- File handling utilities
+  - temp_name(filename): returns a temporary filename for partial downloads. Honors 'nopart', '-' and existing non-regular files to bypass .part handling.
+  - undo_temp_name(filename): strips .part suffix if present.
+  - ytdl_filename(filename): returns filename with .ytdl suffix (for metadata).
+  - try_rename(old_filename, new_filename): safe rename with error reporting (encodes filenames for safety).
+  - try_utime(filename, last_modified_hdr): attempts to set file modification time from Last-Modified header; safely handles missing/invalid header or failures.
+
+- Download orchestration
+  - download(filename, info_dict)
+    - Handles pre-download checks for existing files when overwriting is disabled or continued downloads are enabled (reports and returns True if file already present).
+    - Optional sleep between chunks controlled by 'sleep_interval' and 'max_sleep_interval' to throttle startup/spikes; prints a message and sleeps accordingly.
+    - Delegates to self.real_download(filename, info_dict) for the actual download work (to be implemented by subclasses).
+  - real_download(filename, info_dict): abstract method to be implemented by subclass.
+  - _hook_progress(status) / add_progress_hook(ph): allow external code to subscribe to progress events.
+  - _debug_cmd(args, exe=None): for verbose mode, prints a debuggable representation of a command line invocation.
+
+- Utility/debug helpers
+  - _debug_cmd prints a sanitized command representation when verbose is enabled (uses decodeArgument and shell_quote for readability).
+  - The docstring block at the top defines many subtle behaviors and the meaning of the various options.
+
+Important implementation details
+- Options-driven behavior: Many features (progress display, rate limiting, pausing between blocks, resuming behavior, and naming) are controlled via self.params (dictionary passed on construction).
+- Progress reporting: Carefully designed to support both inline progress updates and newline-based progress, with compatibility tweaks for Windows and TTY capabilities.
+- ETA/Speed logic: Several branches account for partial information (total vs estimated size, known vs unknown speed) to display meaningful progress lines.
+- File naming and safety: Part-files (.part) are used for downloads unless nopart is set or certain edge cases occur; there are helpers to revert to the final name, and a .ytdl metadata file is produced.
+- Time setting: try_utime uses Last-Modified (or equivalent) to set the local file’s mtime after download, with protection against invalid header values.
+- Security considerations: There is a note in the download method docstring about cookie handling and avoiding leakage of cookies in headers; the code itself delegates cookie-management to subclasses but emphasizes safe header usage in public methods.
+- Extensibility: Subclasses must implement real_download; this module provides a rich set of utilities and standardized progress reporting, making it easier to add new downloaders with consistent UX.
+
+In short, this file defines the foundational, feature-rich FileDownloader with progress reporting, ETA/speed calculations, file handling (temporary parts, renaming, and mtimes), and a pluggable real_download method for concrete downloader implementations.

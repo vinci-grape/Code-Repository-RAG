@@ -1,0 +1,62 @@
+Summary:
+- This file implements two IMDb-related extractors for youtube-dl: ImdbIE for individual IMDb trailers and ImdbListIE for IMDb lists containing trailers.
+- ImdbIE extracts detailed video information and download formats for a trailer, while ImdbListIE builds a playlist from a list page by collecting links to individual trailer pages.
+
+Key components and functionality:
+- ImdbIE (single trailer extractor)
+  - URL pattern: matches IMDb trailer/video URLs that contain -vi<digits> (e.g., vi2524815897).
+  - Data retrieval:
+    - Calls https://www.imdb.com/ve/data/VIDEO_PLAYBACK_DATA with a base64-encoded key containing type, subType, and id (vi<id>).
+    - Iterates videoLegacyEncodings from the response to build available formats.
+      - For each encoding with a valid URL:
+        - Determines extension via mimeType (mimetype2ext) or falls back to determine_ext(video_url).
+        - If the ext is m3u8, uses _extract_m3u8_formats to pull HLS formats (mp4 container, native protocol, non-fatal on errors).
+        - Otherwise, adds a format dict with format_id, url, ext, and a quality score derived from the encoding’s definition.
+    - Sorts formats with _sort_formats.
+  - Metadata extraction:
+    - Downloads the trailer’s webpage and extracts a JSON blob embedded by a JS call: video metadata.
+    - Extracts VIDEO_INFO from that blob and normalizes it via try_get.
+    - Title is obtained from og:title/twitter:title meta tags, or the page title, or from the embedded info.
+    - Other fields:
+      - alt_title from videoSubTitle
+      - description from videoDescription
+      - thumbnail from videoSlate.source
+      - duration from videoRuntime via parse_duration
+  - Returns a dictionary with id, title, alt_title, formats, description, thumbnail, and duration.
+
+- ImdbListIE (list extractor)
+  - URL pattern: matches IMDb lists (ls followed by 9 digits) but not videoplayer URLs.
+  - Data retrieval:
+    - Downloads the list page and scans for links to videoplayer pages that belong to the same list: href="/list/ls<id>/videoplayer/vi...".
+    - Builds entries as a list of URLs to be processed by the Imdb extractor (each entry uses the Imdb extractor).
+  - Metadata extraction:
+    - Extracts list title from a header element with a header class.
+    - Extracts list description from a list-description section.
+  - Returns a playlist_result with:
+    - entries (links to individual trailers processed by ImdbIE),
+    - id (list_id),
+    - title,
+    - description.
+
+Implementation details and noteworthy aspects:
+- Uses two helper methods from the base class/utils:
+  - _download_json, _download_webpage for network calls.
+  - _parse_json, _search_regex, _html_search_meta, _html_search_regex for parsing.
+  - url_result to generate sub-items, and playlist_result to return a playlist.
+  - try_get to safely access nested JSON structures.
+  - qualities for consistent format ranking and determining the numeric quality.
+  - url_or_none to sanitize URLs.
+- Robust handling of formats:
+  - Supports both direct video URLs and HLS (m3u8) streams.
+  - If mimeType is missing or unrecognized, falls back to extension inference.
+  - Applies a quality ranking based on the encoding’s definition label (e.g., SD, 480p, 720p, 1080p).
+  - Formats are collected and then sorted with _sort_formats.
+- Metadata sourcing:
+  - Uses open graph and Twitter meta tags when available, otherwise falls back to the page title.
+  - Extracts a JSON blob embedded in a JS function call on the page to populate video metadata fields like videoTitle, videoDescription, videoRuntime, videoSubTitle, and videoSlate for thumbnail.
+- Edge cases:
+  - The list extractor filters videoplayer links to ensure only trailers within the same list are included.
+  - Some trailers may only be accessible through the legacy playback data, which is handled by the VIDEO_PLAYBACK_DATA endpoint.
+
+Overall:
+- The module provides a complete IMDb trailer extraction workflow: it fetches and decodes legacy playback data to enumerate formats, gathers rich metadata from IMDb’s video pages, and supports building a playlist from IMDb lists by aggregating trailer links.

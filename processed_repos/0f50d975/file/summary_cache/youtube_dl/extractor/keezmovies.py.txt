@@ -1,0 +1,52 @@
+Summary of KeezMovies extractor (youtube-dl/youtube_dl/extractor/keezmovies.py)
+
+What it does
+- Implements KeezMoviesIE, an InfoExtractor for KeezMovies video pages.
+- Extracts video metadata (id, display_id, title, thumbnail, duration, age_limit) and a list of direct video formats from the page.
+- Supports encrypted format URLs and decrypts them when required.
+- Handles age-gated pages by supplying a cookie, and gracefully falls back to a Generic extractor if no formats are found.
+
+Key components
+- KeezMoviesIE class (subclass of InfoExtractor)
+  - _VALID_URL: Regex pattern to match KeezMovies video URLs, capturing optional display_id slug and numeric id.
+  - _TESTS: Examples to validate basic behavior (with slug and id, and a simple id-only URL).
+
+- _extract_info(self, url, fatal=True)
+  - Core extraction routine that builds the formats list and info dict.
+  - Steps:
+    - Parse video_id from URL; compute display_id (slug if present, else id).
+    - Download the webpage with age_verified=1 cookie (bypasses age gate).
+    - Prepare containers: formats = [], format_urls = set().
+    - Define inner helper extract_format(format_url, height=None)
+      - Normalizes, deduplicates, derives format height (from URL pattern or provided), and tbr (bitrate) from URL.
+      - If the video is encrypted, decrypts the format URL using aes_decrypt_text(video_url, title, 32) before adding.
+      - Appends a format dict: {'url': ..., 'format_id': 'Xdyp' or None, 'height': H, 'tbr': TBR}.
+    - Try to read a JSON-like flashvars block from the page:
+      - Extracts video_title (title), image_url (thumbnail), video_duration (duration), encrypted flag.
+      - For keys matching quality_<n>p, adds formats with the corresponding height.
+      - If flashvars contains video_url, possibly without encryption, adds that format too.
+    - Also looks for flashvars.video_url via JS and adds that format (unquoting the URL).
+    - If no formats found and the page indicates the video is no longer available, raises ExtractorError.
+    - Sorts formats with _sort_formats; respects fatal flag on errors.
+    - If title wasn’t found in flashvars, tries to extract from an <h1> element.
+    - Returns a tuple (webpage, info) where info contains id, display_id, title, thumbnail, duration, age_limit=18, and formats.
+
+  - Important details:
+    - URL decryption: When flashvars indicate encrypted URLs, format URLs are decrypted with aes_decrypt_text(video_url, title, 32) before use.
+    - Bitrate and resolution parsing: tbr is extracted from format URLs with a pattern like _1234k_, and height from _720p_ or from provided height argument.
+    - Multiple sources: Formats can come from flashvars’ quality_<n>p entries and from a separate video_url value.
+    - Fallbacks: If no title from flashvars, a regex extracts it from the page header.
+    - Error handling: If video is unavailable, a clear ExtractorError is raised; if formats are missing, falls back to Generic in _real_extract.
+
+- _real_extract(self, url)
+  - Calls _extract_info(url, fatal=False).
+  - If there are no formats, returns a Generic result for the URL.
+  - Otherwise, extracts view_count from the page (regex capturing numbers with dots/commas) and adds it to the info dict, returning the info.
+
+Notable implementation details
+- Uses a local cookie to bypass KeezMovies’ age gate.
+- Robust format extraction via a dedicated extract_format function to avoid duplicates and normalize format data.
+- Supports encrypted video URLs, using a specific AES decryption helper and the video title as part of the decryption key/seed.
+- Reads formats from both embedded flashvars JSON and a direct flashvars.video_url JavaScript variable.
+- Handles both display_id slug URLs and direct id URLs, ensuring correct id/display_id assignment.
+- Returns a structured info dict compatible with youtube-dl’s standard format (id, display_id, title, thumbnail, duration, age_limit, formats) and a top-level webpage when needed for additional data (like view counts).

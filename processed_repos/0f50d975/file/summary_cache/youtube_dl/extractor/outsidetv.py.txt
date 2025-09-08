@@ -1,0 +1,24 @@
+- Purpose: A lightweight YouTube-DL extractor for OutsideTV that delegates video extraction to JWPlatform using the video’s JWPlatform ID embedded in the OutsideTV URL.
+
+- Class: OutsideTVIE(InfoExtractor)
+  - Inheritance: Extends InfoExtractor.
+
+- URL matching (_VALID_URL):
+  - Regex matches http/https with optional www on outsidetv.com.
+  - Path can have multiple segments ending with /play/[8-char id]/digits/digits/[8-char id].
+  - Captures the final 8-character ID as group named id (used as the JWPlatform ID).
+
+- Tests (_TESTS):
+  - Test 1: Real OutsideTV URL expected to resolve to JWPlatform ID Hdg0jukV with:
+    - ext: mp4
+    - Title, description (provided as an md5 placeholder), upload_date, and timestamp.
+  - Test 2: A similar URL under a different path (category/home) marked only_matching to ensure the URL pattern matches even if extraction specifics aren’t tested.
+
+- Extraction logic (_real_extract):
+  - Retrieves jw_media_id using _match_id(url).
+  - Returns a URL result pointing to the JWPlatform extractor: 'jwplatform:' + jw_media_id with extractor name 'JWPlatform' and display ID jw_media_id.
+  - This effectively delegates all actual video data extraction to the JWPlatform backend, using the OutsideTV URL only to obtain the JWPlatform ID.
+
+- Key implementation detail:
+  - The extractor does not parse metadata itself; it relies on JWPlatform for fetching title, description, dates, and media information.
+  - This is implemented by constructing a cross-extractor URL result rather than producing its own infodict.

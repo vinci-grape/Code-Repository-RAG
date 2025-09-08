@@ -1,0 +1,98 @@
+Concise summary of youtube-dl extractor file: youtube_dl/extractor/kaltura.py
+
+Purpose
+- Implement the Kaltura extractor (KalturaIE) for YouTube-dl to download videos hosted on Kaltura-powered players.
+- Retrieve video metadata, all available formats, and subtitles through Kaltura's API and embed/page parsing.
+
+Key components
+- Class KalturaIE(InfoExtractor)
+  - _VALID_URL: Regex matching two modes:
+    - kaltura:<partner_id>:<entry_id>
+    - Kaltura web URLs (embed players, iframes, etc.) with path/query-based extraction of partner_id and entry_id.
+  - _SERVICE_URL / _SERVICE_BASE: API endpoint for Kaltura v3 (http://cdnapi.kaltura.com/api_v3/index.php).
+  - _CAPTION_TYPES: Mapping of Kaltura caption type codes to file extensions (1:srt, 2:ttml, 3:vtt).
+  - _TESTS: Various test cases to validate URL formats, extraction, and skip conditions.
+  - _extract_url / _extract_urls: Static helpers to extract Kaltura media URLs from web pages by scanning for:
+    - kWidget embed snippets
+    - CDN API embed markers
+    - iframe/meta tags with entry_id and partner_id
+    - If a service URL is found (embedIframeJs), the URL can be “smuggled” with service_url metadata for requests.
+
+Key methods and their roles
+- _extract_urls(webpage)
+  - Finds embed/info blocks in the page and extracts partner_id and entry_id.
+  - Builds a Kaltura-like URL string: kaltura:<partner_id>:<entry_id>.
+  - Detects a service_url (embedIframeJs) and uses smuggling to attach it to the URL.
+
+- _extract_url(webpage)
+  - Convenience wrapper returning the first URL from _extract_urls(webpage).
+
+- _kaltura_api_call(video_id, actions, service_url=None, ...)
+  - Performs a Kaltura API call (multirequest) to fetch data.
+  - Supports chaining multiple actions into a single request.
+  - Handles API exceptions by raising ExtractorError with the API's message.
+
+- _get_video_info(video_id, partner_id, service_url=None)
+  - Builds a sequence of API actions to fetch:
+    - baseentry: basic video info (name, description, timestamp, etc.)
+    - flavorAsset: available video flavors/assets
+    - caption_captionasset: available captions
+  - Calls _kaltura_api_call and returns the parsed data.
+
+- _real_extract(url)
+  - Core extraction logic:
+    - Unsmuggle any extra data (service_url, etc.) from the URL.
+    - Parse URL with _VALID_URL to obtain partner_id and entry_id or to derive them from path/query parameters.
+    - If partner_id and entry_id are present (direct kaltura: mode):
+      - Call _get_video_info to fetch info, flavor assets, and captions.
+    - Else, parse path/query parameters to determine:
+      - wid/p/partner_id or entry_id for API lookup
+      - If entry_id is provided, fetch video info directly
+      - If a special embed reference (flashvars[referenceId]) is present, load the reference page to extract entry data via kalturaIframePackageData, and then fallback to the standard data fetch if possible.
+    - ks (session key) and service_url may be provided via smuggled data or page parameters (flashvars[ks]).
+    - Build sign_url(...) to optionally append ks and a referrer (base64-encoded from source_url) to asset URLs.
+    - Normalize data_url (adjust /flvclipper/ URLs to /serveFlavor).
+    - Build formats list from flavor_assets:
+      - Skip assets with non-ready status (status != 2)
+      - Skip original-format entries that are not available
+      - Normalize missing fileExt (qt -> mov, else mp4)
+      - Construct video URL as data_url/flavorId/{id} with sign_url
+      - Build format dicts with fields: format_id, ext, tbr, fps, filesize_approx, container, vcodec, height, width, url
+      - Handle original-quality assets with an extra validity check via _is_valid_url
+      - Derive vcodec as 'none' when videoCodecId is absent and frameRate is 0 (audio-only situations)
+    - If data_url indicates playManifest, also extract HLS (m3u8) formats and append.
+    - Sort formats (_sort_formats).
+    - Build subtitles from captions:
+      - Only include captions with status == 2
+      - Build URLs to caption assets and map to language codes with appropriate extensions via _CAPTION_TYPES or default to ttml.
+    - Return a dict with:
+      - id: entry_id
+      - title: info['name']
+      - formats: collected formats
+      - subtitles: collected subtitles
+      - description: cleaned info['description']
+      - thumbnail: info['thumbnailUrl']
+      - duration: info['duration']
+      - timestamp: info['createdAt']
+      - uploader_id: info['userId'] (filtered against 'None')
+      - view_count: plays (as int)
+
+Important implementation details
+- URL handling:
+  - Accepts both internal kaltura: URLs and public Kaltura page/embed URLs.
+  - Uses smuggling to attach a service_url when it detects an extractable embedIframeJs source.
+- API interaction:
+  - multi-request design: first a null call to initiate, then session start for widget, then baseentry, flavorAsset, and caption assets.
+  - Proper error handling for API exceptions returned as KalturaAPIException.
+- Formats extraction:
+  - Carefully handles unavailable or non-ready assets, DRM-protected formats, and broken/default fileExt values.
+  - Uses sign_url to optionally attach ks and referrer to asset URLs, ensuring access permissions and referrer-based restrictions are respected.
+  - Supports both direct flavor URLs and manifest-based (HLS) streams.
+- Subtitles extraction:
+  - Builds subtitles only from ready caption assets, mapping to supported file extensions using _CAPTION_TYPES, with fallbacks to ttml if exact type is not provided.
+- Edge cases:
+  - Includes fallbacks for missing path/query data and handles embedded reference data via kalturaIframePackageData.
+  - Special handling for audio-only formats and for non-availability of original formats.
+
+In short
+- This extractor detects Kaltura video entries from embedded code or direct URLs, fetches video metadata, available flavors (formats), and captions via Kaltura's API, and outputs a structured media entry with formats and subtitles suitable for download or streaming. It includes careful handling of authentication tokens (ks), referrers, and various edge cases around data availability and embed structures.

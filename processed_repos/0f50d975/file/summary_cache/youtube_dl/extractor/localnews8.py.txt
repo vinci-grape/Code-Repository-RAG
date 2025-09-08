@@ -1,0 +1,38 @@
+concise summary
+
+- Purpose: A youtube-dl extractor for Local News 8 videos. It identifies the video on the page and delegates actual extraction to the Kaltura backend.
+
+- Class and inheritance:
+  - LocalNews8IE(InfoExtractor)
+
+- Key URL pattern:
+  - _VALID_URL matches URLs like:
+    http(s)://www.localnews8.com/.../<display_id>/<id>
+  - Captures:
+    - display_id: slug used for display and tests
+    - id: numeric video ID
+
+- _TEST:
+  - Example URL with expected metadata (title, description, duration, timestamp, etc.) and MD5 of the video.
+
+- Core extraction logic (_real_extract):
+  - Parse URL to obtain video_id and display_id via regex matches.
+  - Download the webpage content.
+  - Extract partner_id using _search_regex with pattern:
+    partnerId\s*[:=]\s*(["\'])(?P<id>\d+)\1
+  - Extract kaltura_id using _search_regex with pattern:
+    videoIdString\s*[:=]\s*(["\'])kaltura:(?P<id>[0-9a-z_]+)\1
+  - Return a URL-transparent result pointing to Kaltura:
+    - url: 'kaltura:<partner_id>:<kaltura_id>'
+    - ie_key: 'Kaltura'
+    - id: video_id
+    - display_id: display_id
+
+- Implementation details:
+  - Uses _download_webpage to fetch page content.
+  - Uses _search_regex to robustly pull the partner and Kaltura IDs from the page.
+  - The actual media extraction is handled by the Kaltura extractor via a transparent URL.
+
+- Notable notes:
+  - Slight naming in the error label 'videl id' is a minor typo in the code comments, not functional.
+  - The design follows youtube-dl’s common approach of resolving to a known backend (Kaltura) when the site embeds videos through that platform.

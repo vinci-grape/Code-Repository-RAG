@@ -1,0 +1,63 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/la7.py
+
+What it does
+- Implements a YouTube-DL extractor for LA7 network videos (la7.it and tg.la7.it).
+- Extracts a Kaltura video id from the LA7 page and delegates actual video extraction to the Kaltura extractor by returning a url_transparent link.
+
+Key classes, functions, and attributes
+- LA7IE (InfoExtractor)
+  - IE_NAME: 'la7.it'
+  - _VALID_URL: Complex regex (free-spacing mode) that matches:
+    - la7.it/{some-slug}/(rivedila7|video)/{id}
+    - tg.la7.it/repliche-tgla7?id={id}
+    Captures the LA7 page id as the group "id".
+  - _TESTS: Includes examples
+    - A LA7 page with expected mp4 video metadata (title, description, thumbnail, uploader_id, timestamp, upload_date).
+    - A TG LA7 replay page (id-based) with basic mp4 info.
+    - A page that should only be checked for URL matching (only_matching=True).
+
+Core functionality
+- _real_extract(self, url):
+  1. Determine page id: video_id = self._match_id(url).
+  2. Download the webpage: webpage = self._download_webpage(url, video_id).
+  3. Locate the player data on the page:
+     - Tries two patterns to find a JSON-like object:
+       - videoParams = { ... };
+       - videoLa7({ ... });
+     - Uses _search_regex with both patterns, then parses with _parse_json, applying transform_source=js_to_json to convert JS-style data to Python/JSON.
+     - The extracted data is stored in player_data.
+  4. Build a Kaltura URL and wrap it:
+     - video_id for Kaltura: player_data['vid'].
+     - Final URL: 'kaltura:103:<vid>'.
+     - Uses smuggle_url to override the Kaltura service_url to 'http://nkdam.iltrovatore.it'.
+     - The returned URL is a url_transparent dict, so the Kaltura extractor will fetch the actual video.
+  5. Return metadata for the final video:
+     - _type: 'url_transparent'
+     - url: the smuggled Kaltura URL
+     - id: video_id (LA7 page id; final id often comes from Kaltura)
+     - title: player_data['title']
+     - description: pulled via self._og_search_description(webpage, default=None)
+     - thumbnail: player_data.get('poster')
+     - ie_key: 'Kaltura' (delegates to Kaltura extractor)
+
+Important implementation details
+- Data extraction patterns:
+  - The code supports two possible inline data containers on LA7 pages:
+    - videoParams = { ... };
+    - videoLa7({ ... });
+  - Both patterns yield a JSON-like dictionary that is converted with js_to_json before parsing.
+- Data used from player_data:
+  - vid: Kaltura video ID used to build the final Kaltura URL.
+  - title: used for the final video title.
+  - poster: used as thumbnail if present.
+- URL construction and service override:
+  - Uses smuggle_url to pass a custom Kaltura service_url: http://nkdam.iltrovatore.it. This ensures the request is routed through a specific Kaltura instance.
+  - Final nested extractor is Kaltura (ie_key = 'Kaltura').
+- Description handling:
+  - Uses OG metadata extraction _og_search_description with default=None to populate the description if available on the page.
+- Robustness:
+  - If certain fields are missing (e.g., poster), the code gracefully handles missing keys.
+  - The approach is designed to work for both la7.it and tg.la7.it pages that expose the same underlying Kaltura video.
+
+Overall
+- The extractor fetches a page, extracts a JSON-like block containing video metadata, maps that to a Kaltura video ID, and returns a transparent link to Kaltura with enriched metadata (title, description, thumbnail). This leverages the Kaltura extractor for the actual video download/streaming.

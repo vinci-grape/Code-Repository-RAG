@@ -1,0 +1,67 @@
+Here is a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/nowness.py.
+
+What it does
+- Implements YouTube-DL extractors for Nowness videos, playlists, and series.
+- Retrieves Nowness content via their API, resolves each post to a concrete video URL, and delegates to the appropriate embedded video IE (Brightcove, Vimeo, YouTube).
+- Supports multiple video sources within a Nowness post (Brightcove legacy/new, Vimeo, YouTube). CinemaTique is noted but not supported.
+
+Main classes and structure
+- NownessBaseIE (InfoExtractor)
+  - _extract_url_result(post): Core logic to turn a Nowness post into a real video URL.
+    - Looks for post['type'] == 'video', iterates post['media'] entries, and examines media['source'].
+    - Brightcove sources ('brightcove'):
+      - Downloads the player JavaScript from http://www.nowness.com/iframe?id=<video_id>.
+      - Tries BrightcoveLegacyIE and BrightcoveNewIE to extract the final video URL.
+      - Returns the URL with the appropriate Brightcove IE key if found; otherwise raises ExtractorError.
+    - Vimeo sources ('vimeo'): returns a Vimeo URL using the Vimeo IE.
+    - YouTube sources ('youtube'): returns a YouTube URL using the YouTube IE.
+    - Cinematique ('cinematique'): currently not supported (commented out).
+  - _api_request(url, request_path): Helper to call Nowness API.
+    - Derives display_id from the URL.
+    - Builds a sanitized HTTP request to http://api.nowness.com/api/<request_path % display_id>.
+    - Sets X-Nowness-Language header to zh-cn if the URL contains cn.nowness.com, else en-us.
+    - Returns (display_id, JSON data) via _download_json.
+
+- NownessIE (single post extractor)
+  - IE_NAME = 'nowness'
+  - _VALID_URL matches Nowness story pages, including story and various category/series routes.
+  - _real_extract(url):
+    - Fetches post data via _api_request(url, 'post/getBySlug/%s').
+    - Delegates to _extract_url_result(post) to resolve to a final video URL.
+
+- NownessPlaylistIE (playlist extractor)
+  - IE_NAME = 'nowness:playlist'
+  - _VALID_URL matches /playlist/<id>
+  - _real_extract(url):
+    - Fetches playlist data via _api_request(url, 'post?PlaylistId=%s').
+    - Builds entries = [_extract_url_result(item) for item in playlist['items']].
+    - Returns a playlist with the collected entries.
+
+- NownessSeriesIE (series extractor)
+  - IE_NAME = 'nowness:series'
+  - _VALID_URL matches /series/<id>
+  - _real_extract(url):
+    - Fetches series data via _api_request(url, 'series/getBySlug/%s').
+    - Builds entries from series['posts'] using _extract_url_result(post).
+    - Attempts to extract series-level metadata (title, description) from translations if available.
+    - Returns a playlist with entries and optional series metadata (id, title, description).
+
+Key implementation details
+- Language handling: API requests set X-Nowness-Language to zh-cn for cn.nowness.com, otherwise en-us.
+- Brightcove resolution:
+  - For Brightcove, the extractor fetches the iframe player JavaScript and uses two paths:
+    - BrightcoveLegacyIE._extract_brightcove_url
+    - BrightcoveNewIE._extract_url
+  - The code tries both to support different Brightcove embedding formats; returns the final video URL with the corresponding IE key.
+  - If neither path yields a URL, it raises ExtractorError ('Could not find player definition').
+- Source handling: supports Brightcove (legacy/new), Vimeo, YouTube. Cinematique is acknowledged but not implemented.
+- Reuse of common utilities:
+  - Uses InfoExtractor base class methods like _download_json, _download_webpage, and url_result.
+  - Uses sanitized_Request to craft API requests.
+  - Uses compat_str for string IDs when needed.
+
+Tests (highlights)
+- NownessIE tests include multiple sample URLs (story in English and Chinese, a Vimeo-based example) with expected IDs, titles, descriptions, thumbnails, timestamps, uploader info, and an indication to also run the associated Brightcove or Vimeo extractors where applicable.
+
+In short
+- This file provides a cohesive set of extractors to fetch Nowness video content by slug, playlist, or series, resolves embedded video sources (Brightcove, Vimeo, YouTube), and returns standardized video entries suitable for youtube-dl, with proper handling of language-specific API endpoints and metadata.

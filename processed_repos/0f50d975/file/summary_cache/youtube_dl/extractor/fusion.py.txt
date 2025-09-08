@@ -1,0 +1,71 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/fusion.py
+
+Purpose
+- Implement FusionIE, a Youtube-DL extractor for Fusion (fusion.net/fusion.tv) video pages.
+- Retrieve video metadata and available formats via Fusion’s JSON API, and expose them in Youtube-DL’s standard format.
+
+Key components
+- FusionIE class (subclass of InfoExtractor)
+  - _VALID_URL: Regular expression to match Fusion video/show URLs and extract the numeric video id.
+  - _TESTS: Sample test cases ensuring correct extraction, including a validated mp4 format, and two non-matching URLs to show behavior.
+  - _real_extract(self, url): Core extraction logic.
+
+Main functionality
+- Video ID extraction
+  - Uses self._match_id(url) to pull the numeric id from the URL.
+  - Fetches video metadata from Fusion API: https://platform.fusion.net/wp-json/fusiondotnet/v1/video/{video_id}
+
+- Metadata extraction
+  - Builds a basic info dict:
+    - id: video_id
+    - title: video['title']
+    - description: video.get('excerpt')
+    - timestamp: parse_iso8601(video.get('published'))
+    - series: video.get('show')
+
+- Formats extraction
+  - Iterates over the nested structure video['src'] to enumerate available formats:
+    - src is a dict; for each f_id and f in src:
+      - Iterate over q_id and q in f:
+        - q_url = q.get('url'); skip if missing
+        - ext: determine_ext(q_url, mimetype2ext(q.get('type')))
+        - Special handling:
+          - If ext == 'smil': extend formats with _extract_smil_formats(q_url, video_id, fatal=False)
+          - Else if f_id == 'm3u8-variant' or (ext == 'm3u8' and q_id == 'Variant'):
+            - Extend with _extract_m3u8_formats(q_url, video_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False)
+          - Else: add a direct format dict:
+            - format_id: combination of f_id and q_id
+            - url: q_url
+            - width/height: int_or_none from q
+            - tbr: parsed bitrate from q_url using regex r'_(\d+)\.m(?:p4|3u8)'
+            - ext: 'mp4' if ext == 'm3u8' else ext
+            - protocol: 'm3u8_native' if ext == 'm3u8' else 'https'
+- Fallback when no formats found
+  - If formats list is empty after processing:
+    - Build a special info dict to delegate to Anvato extractor:
+      - _type: 'url'
+      - url: 'anvato:uni:' + video['video_ids']['anvato']
+      - ie_key: 'Anvato'
+  - This enables handling of Anvato-hosted videos if Fusion provides an Anvato stream.
+
+Post-processing
+- If any formats were discovered:
+  - self._sort_formats(formats)
+  - info['formats'] = formats
+- Returns the info dictionary (either with formats or Anvato fallback)
+
+Implementation details worth noting
+- Uses helper utilities:
+  - determine_ext and mimetype2ext to infer the correct file extension and format type.
+  - int_or_none to safely convert numeric fields.
+  - parse_iso8601 to convert published timestamp to Unix epoch.
+- Handles multiple format sources:
+  - SMIL, HLS (m3u8), and direct HTTP(s) URLs
+  - Distinguishes HLS via m3u8-related logic and uses appropriate extractors (_extract_m3u8_formats, _extract_smil_formats).
+- Bitrate extraction strategy:
+  - Attempts to infer tbr (kbits/sec) from the URL with a regex looking for _\<digits>.(mp4|m3u8).
+- Robustness:
+  - If no formats are identified, gracefully falls back to Anvato extractor, enabling continued playback of Fusion-hosted content that relies on Anvato.
+
+Overall
+- FusionIE retrieves metadata and a comprehensive set of video formats from Fusion’s API, supporting SMIL, HLS, and direct URLs, and provides a clean, sorted formats list to Youtube-DL. If Fusion’s content is served via Anvato, it delegates extraction to the Anvato extractor.

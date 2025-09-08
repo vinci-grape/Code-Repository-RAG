@@ -1,0 +1,71 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/streamsb.py
+
+Overview
+- This file implements a YouTube-DL extractor for the StreamSB (viewsb.com) video hosting site.
+- It navigates from the main page to an embedded iframe, derives a dynamic app version, constructs a hex-encoded request, fetches the video manifest, and extracts playable formats.
+
+Key components
+- Helper functions
+  - to_ascii_hex(str1): returns the ASCII hex encoding of a UTF-8 string.
+  - generate_random_string(length): returns a random alphanumeric string of the given length.
+- StreamsbIE class (inherits from InfoExtractor)
+  - _DOMAINS: ('viewsb.com',)
+  - _VALID_URL: regex matching https://viewsb.com/<id> (and similar) with a named domain/id group.
+  - _TEST: provides a sample URL, expected md5, and info_dict including id, ext, and title for testing.
+  - _real_extract(url): core extraction logic (see “How it works” below).
+
+How it works (high level, step-by-step)
+1) Parse URL to extract domain and video_id using the _VALID_URL pattern.
+2) Download the main page and locate an iframe src attribute via regex. The iframe path is something like /... .html.
+3) Build the iframe URL using the domain and the extracted path (https://domain + iframe_rel_url).
+4) Download the iframe page and try to determine the app version by locating a script tag that references app.min.<digits>.js. If not found, default app_version to '50'.
+5) Derive video_code from the iframe URL’s basename (strip the extension).
+6) Build a request string with a specific structure:
+   - req = "<random1>||<video_code>||<random2>||streamsb"
+   - The length of the random parts is 12 characters.
+   - The final request is hex-encoded via to_ascii_hex(req).
+7) Construct the fetch URL:
+   - ereq = https://{domain}/sources{app_version}/{hex(req)}
+   - The app_version is inserted as part of the path, and the payload is hex-encoded.
+8) Fetch the video data from ereq with special headers:
+   - Referer: the iframe URL
+   - watchsb: sbstream
+9) Parse the returned JSON to obtain:
+   - title = player_data['stream_data']['title']
+   - file = player_data['stream_data']['file'] (URL to the video manifest, typically an M3U8).
+10) Extract available formats from the M3U8 manifest using _extract_m3u8_formats:
+    - ext='mp4'
+    - entry_protocol='m3u8_native'
+    - m3u8_id='hls'
+    - fatal=False (do not fail extraction if formats are missing)
+11) Return a dict with:
+    - id: video_id
+    - formats: extracted formats
+    - title: extracted title
+
+Important implementation details
+- The extractor relies on dynamic app/versioning information:
+  - It attempts to detect app_version from the iframe’s page by scanning for app.min.<digits>.js; if not found, it uses '50' as a fallback.
+- The request to obtain the video manifest is intentionally obfuscated:
+  - A concatenated string consisting of random strings, the video_code, and the literal 'streamsb' is created, separated by "||".
+  - This string is then hex-encoded and appended to the URL as a path segment: /sources{app_version}/{hex(req)}.
+- The fetch uses a specific Referer header (the iframe URL) and a custom watchsb header (sbstream), which are likely required by the site to authorize access.
+- Video formats are discovered via M3U8 parsing, with the resulting formats labeled as m3u8_native and identified as 'hls'.
+- The code is defensive in some places (fatal=False for version detection and for formats extraction), allowing the extractor to proceed even if some pieces are missing or changed.
+
+What this file defines and how it’s used
+- It defines the StreamsbIE extractor class, which youtube-dl can instantiate to parse StreamSB video URLs of the form https://viewsb.com/<id>.
+- The extractor returns a standard YouTube-DL video info dict containing id, title, and a list of formats derived from the M3U8 manifest.
+
+Notes on the test data
+- _TEST provides a concrete example:
+  - URL: https://viewsb.com/dxfvlu4qanjx
+  - Expected md5 for the downloaded video: 488d111a63415369bf90ea83adc8a325
+  - info_dict: id = 'dxfvlu4qanjx', ext = 'mp4', title = 'Sintel'
+
+Potential limitations
+- The extraction depends on the iframe structure and the presence of the app.min.*.js file; changes to the site’s HTML or script naming could break app_version detection.
+- The hex-encoded payload and required headers imply anti-scraping/anti-bot protections; if the site alters these requirements, the extractor may fail or require adjustments.
+- If the JSON payload changes shape, title or file URL extraction may fail, though the code uses fatal=False for robustness.
+
+Overall, this extractor navigates the StreamSB embedding flow, constructs a dynamic, hex-encoded request to fetch a video manifest, and then parses the manifest to produce a playable set of formats for the video.

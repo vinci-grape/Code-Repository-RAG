@@ -1,0 +1,97 @@
+Summary of code at ./youtube-dl/youtube_dl/extractor/imgur.py
+
+Purpose
+- Implement Imgur extractors for youtube-dl: single media items, image/video formats, and albums/galleries on Imgur.
+- Fetch metadata via Imgur API and parse page-embedded sources to build a comprehensive list of formats and metadata.
+
+Main classes
+- ImgurBaseIE (InfoExtractor)
+  - _CLIENT_ID: hard-coded Imgur API client ID (546c25a59c58ad7), used for API calls.
+  - _imgur_result(item_id): helper to build a URL result for an Imgur item.
+  - _call_api(endpoint, video_id, **kwargs): fetches JSON from Imgur API at post/v1/{endpoint}/{video_id}?client_id=...&include=media,account
+  - get_description(s): static helper that strips a standard Imgur promotional line and returns the text (or None).
+
+- ImgurIE (ImgurBaseIE)
+  - _VALID_URL: matches Imgur media URLs (including i.imgur.com) and internal "imgur:" style IDs.
+  - _TESTS: several tests covering typical Imgur video/gifv cases and edge cases (titles, timestamps, etc.).
+  - _extract_twitter_formats(html, tw_id='twitter', **kwargs): parses Twitter card/embedded video formats from page meta:
+    - Reads twitter:player:stream URL and content_type, width, height from HTML.
+    - Returns a list with a single format dict containing url, ext, width, height, and format_id.
+  - _real_extract(url):
+    - Extracts media_id from URL.
+    - Calls API endpoint 'media' for the id; fetches webpage fallback as a GIF URL if API data is missing.
+    - Validates that the media is a video or animated image (type == 'video' or metadata.is_animated).
+    - Builds media_fmt from data['media'][0]:
+      - url, ext, width, height, filesize, acodec (derived from metadata.has_sound; 'none' if no audio).
+      - If type is 'image', set acodec to 'none' and give the format a very low preference (to deprioritize static images).
+    - Extracts Twitter formats via _extract_twitter_formats and avoids duplicates with the primary media_url.
+    - Extracts additional formats from the page's video elements (<source> tags) and GIF-derived formats from embedded GIF JSON (videoItem) if present.
+      - Formats from <source> include format_id (from MIME type), url (made protocol-relative), ext, and may be augmented with a size-derived og metadata (width/height) if available.
+      - GIF formats are given a lower preference and marked as gif/video-only attributes (ext='gif', acodec='none', vcodec='gif', container='gif', etc.).
+    - If no sources found, raises ExtractorError indicating no sources (possible plain image).
+    - Deduplicates formats against primary media_url and Twitter formats to avoid duplicates.
+    - Sorts formats using _sort_formats.
+    - Constructs final info dict by merging data from API (uploader, counts, timestamps, etc.) and page/OG-derived fields (title, description, duration, timestamps).
+      - Uses merge_dicts to merge base data and page-derived fields, with custom transformers (txt_or_none, parse_iso8601, int_or_none, etc.).
+      - Title defaults from OG title if page title not present.
+      - Description uses get_description on OG/HTML.
+    - Returns dict with id, formats, title, description, thumbnail, and uploader/other metadata when present.
+
+- ImgurGalleryBaseIE (ImgurBaseIE)
+  - _GALLERY = True
+  - _real_extract(url):
+    - Extracts gallery_id; calls API endpoint 'albums' for the ID.
+    - Info dict includes title/description from API data.
+    - If data indicates an album (data['is_album']):
+      - Yields media IDs for items where type is 'video' or metadata.is_animated (yield_media_ids()).
+      - If gallery has exactly one video (album with one video), applies album metadata to that video and returns a single url_transparent result for the video_id.
+      - Otherwise, returns a playlist of all media items via _imgur_result for each yielded media_id, annotated with the gallery's info.
+    - If not an album, treats as a single resource and returns a url_transparent result with the collected info.
+
+- ImgurGalleryIE (ImgurGalleryBaseIE)
+  - IE_NAME = 'imgur:gallery'
+  - _VALID_URL matches imgur.com/(gallery|t|topic|r)/... style gallery URLs
+  - _TESTS: several gallery scenarios including multi-item galleries and single-video cases
+
+- ImgurAlbumIE (ImgurGalleryBaseIE)
+  - IE_NAME = 'imgur:album'
+  - _VALID_URL for imgur.com/a/<id> paths
+  - _GALLERY = False
+  - _TESTS: tests for album behavior including static-image-only galleries and animated/video-enabled albums
+
+Key implementation details
+- API usage
+  - All API calls use the same client_id and include=media,account to fetch media and account details.
+  - _call_api constructs URLs like https://api.imgur.com/post/v1/{endpoint}/{id}?client_id=...&include=media,account
+
+- Data extraction utilities
+  - traverse_obj: safely traverses nested structures to pull values.
+  - _og_search_title/_og_search_description: pull title/description from OpenGraph if page provides it.
+  - _html_search_meta, _search_regex: parse HTML meta tags or regexes on the page for additional sources.
+  - self._proto_relative_url, mimetype2ext, determine_ext: handle relative URLs and extensions from MIME types.
+
+- Formats handling
+  - Primary format (media_fmt) derived from API data: supports video and audio codes, with acodec determined from metadata.has_sound, and ext inferred from data or URL.
+  - Twitter formats: parsed from Twitter card metadata; deduplicated against primary media URL.
+  - Video elements (HTML): supports multiple <source> tags to gather alternative formats, including size metadata from og tags if available.
+  - GIFs: supports GIF sources via embedded JSON (videoItem), with dedicated properties to mark as GIF (ext='gif', acodec='none', container='gif', etc.), and lower preference.
+  - Fallback: ensures at least one non-duplicate format exists; otherwise raises an error for no sources.
+  - Final format list is sorted with _sort_formats.
+
+- Metadata extraction
+  - Uploader info: account_id, account username, avatar_url are merged into final dict when available.
+  - Counts: upvotes, downvotes, comments mapped to like_count, dislike_count, comment_count.
+  - Timestamps: created_at, updated_at parsed via parse_iso8601 to standard timestamp fields; support for release_timestamp.
+  - Title/Description: pulled from API data or page OG data; description passes through Imgur-specific filtering via get_description to drop non-descriptive boilerplate.
+  - Thumbnail: pulled from page meta tag thumbnailUrl if present.
+
+- Output shape
+  - For single media: id, formats, title, description, thumbnail, and optional uploader-related fields.
+  - For galleries/playlists: id, title/description, and a playlist of items (each with id and URL via _imgur_result).
+  - Uses url_transparent when a gallery item should be treated as a single, resolved video within a parent gallery (i.e., apply album metadata to a single video).
+
+Overall
+- The file implements a robust set of Imgur extractors:
+  - ImgurIE for single media (video/gifv/animated images) with multiple source formats from API+page.
+  - ImgurGalleryIE and ImgurAlbumIE for gallery-like content (albums, galleries, and /a/ pages), handling special cases like single-video albums and generating playlists or transparent results accordingly.
+- Key strengths include deduplication of formats, integration of multiple source types (API data, HTML5 sources, Twitter metadata, GIFs), and careful handling of image vs video semantics and metadata.

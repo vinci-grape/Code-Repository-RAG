@@ -1,0 +1,70 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/firsttv.py
+
+What it does
+- Implements an InfoExtractor for the Russian First Channel (1tv.ru) to extract video playlists and their formats from pages on 1tv.ru.
+- Reads a page, finds a data-playlist-url attribute, downloads a playlist JSON, and builds a unified list of formats (including HTTP MP4 and HLS master.m3u8 formats) for each video in the playlist.
+- Also collects metadata (title, description, thumbnail, duration, upload date) and returns a playlist result containing entries for each video.
+
+Key components
+- Class FirstTVIE(InfoExtractor)
+  - IE_NAME: '1tv'
+  - IE_DESC: 'Первый канал'
+  - _VALID_URL: Regex matching 1tv.ru video/playlist pages and capturing an id segment
+  - _TESTS: Several tests covering single-format video, multi-format video, a playlist, and an “only_matching” case
+
+Main extraction flow (_real_extract)
+- Determine display_id from URL using _match_id(url).
+- Download the page HTML (webpage).
+- Locate playlist URL in the page via an HTML attribute:
+  - Looks for data-playlist-url with a quoted URL and resolves it to an absolute URL (playlist_url).
+- Parse the playlist URL query to obtain itemIds:
+  - item_ids = videos_ids[] or news_ids[] if present.
+- Download the playlist JSON from playlist_url (items = _download_json(...)).
+- If item_ids found, filter items to those with uid in item_ids; otherwise take the first item only.
+- For each item:
+  - title = item['title']
+  - Build a list of formats from item['mbr'] (each entry has a 'src' URL and 'name').
+  - For each format entry:
+    - src: URL to the video segment (URL must be valid)
+    - tbr: target bitrate parsed from the URL (regex: _(\d{3,})\.mp4)
+    - path (used to discover m3u8) is extracted from the src URL with a regex capturing a base path (//domain/…_.mp4)
+    - format dict includes: url, format_id (f['name']), tbr, source_preference (ranked by QUALITY list), and a general 'preference' set to -1 (fallback)
+  - If there is exactly one http format and no path, derive path from that URL.
+  - If a path is identified:
+    - If only one http format, m3u8_path = ',' (collects the single stream)
+    - If multiple formats, construct m3u8_path using tbrs (sorted) as '_,<tbrs>,.mp4'
+    - Build a master M3U8 URL from balancer-vod.1tv.ru using the discovered path and m3u8_path, e.g.:
+      http://balancer-vod.1tv.ru/<path><m3u8_path>.urlset/master.m3u8
+    - Extend formats with the results of _extract_m3u8_formats for that master URL (mp4, m3u8_native, fatal=False)
+  - Sort formats with _sort_formats(formats)
+  - thumbnail: item.get('poster') or fallback to og thumbnail from the page
+  - duration: int_or_none(item['duration'] or extracted via video:duration meta)
+  - upload_date: unified_strdate from ya:ovs:upload_date meta
+  - Append a video entry with id, thumbnail, title, upload_date, duration, and the computed formats
+- After processing items, determine the playlist title:
+  - Try regex-based extraction from the page content (two options)
+  - Fallback to Open Graph title via _og_search_title
+- Determine playlist description:
+  - Try a specific HTML regex for description
+  - Fallback to meta description via _html_search_meta
+- Return the playlist result: self.playlist_result(entries, display_id, title, description)
+
+Important implementation details
+- Playlist discovery: The extractor reads a data-playlist-url attribute on the 1tv.ru page to fetch a JSON playlist, then filters items by video ids passed in the URL (videos_ids[] or news_ids[] in the query string).
+- Format construction: Each item’s mbr field provides candidate media formats with src URLs. The code attempts to derive a common master M3U8 URL from these sources to fetch additional HLS formats. It uses:
+  - tbr extraction from the URL (e.g., _1234.mp4)
+  - path extraction from the src URL to locate the base path for the master M3U8
+  - If multiple http formats exist, it builds a master M3U8 path including all tbr values; if only one, it uses a simpler path
+  - Balancer URL: master.m3u8 on balancer-vod.1tv.ru
+  - Uses fatal=False when extracting HLS formats to avoid failing if the master is missing
+- Quality handling: QUALITIES = ('ld', 'sd', 'hd') and uses the qualities() helper to assign a preference for source_preference based on the format name.
+- Metadata extraction: Uses a combination of HTML parsing and OpenGraph to populate title, description, and thumbnail. Handles potential variations in page structure through multiple regex attempts and fallbacks.
+- Output: A playlist result with a list of entries, each containing id, title, duration, upload_date, thumbnail, and a formats list.
+
+Summary of behavior demonstrated by tests
+- Single format extraction with mp4 URL and expected metadata (id, title, thumbnail, upload_date, duration).
+- Multiple formats extraction with at least 3 formats and a range of bitrates; download is skipped in tests.
+- Playlist extraction example with 13 items, demonstrating handling of a collection of videos rather than a single entry.
+- A test case with only_matching to ensure the extractor can run without directly matching a full extraction scenario.
+
+Overall, this extractor focuses on consistently assembling a full set of video formats (including modern HLS via a master.m3u8) from 1tv.ru playlist data, while also preserving rich metadata and handling various page structures.

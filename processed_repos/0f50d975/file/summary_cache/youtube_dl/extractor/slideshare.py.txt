@@ -1,0 +1,48 @@
+Summary of ./youtube-dl/youtube_dl/extractor/slideshare.py
+
+Purpose
+- Implement SlideshareIE, a YouTube-DL extractor that retrieves direct video information from Slideshare presentation pages and returns a video entry.
+
+Key components
+- Class SlideshareIE(InfoExtractor)
+  - _VALID_URL: Regexp matching Slideshare URLs of the form slideshare.net/<user>/<title>...
+  - _TEST: Sample test case with expected id, title, ext, and description.
+
+Core logic in _real_extract(url)
+1) URL parsing and page fetch
+- Extracts a “title” portion from the URL via the _VALID_URL regex.
+- Downloads the webpage using _download_webpage(url, page_title).
+
+2) Embedded slideshare_object extraction
+- Locates a JSON object embedded in the page with the regex:
+  \$\.extend\(.*?slideshare_object,\s*(\{.*?\})\);
+- Parses the matched JSON string into a Python dict named info.
+
+3) Type check
+- Verifies that info['slideshow']['type'] == 'video'. If not, raises ExtractorError (with expected=True), indicating only video extraction is supported for Slideshare.
+
+4) Video URL construction
+- Reads:
+  - doc = info['doc']
+  - bucket = info['jsplayer']['video_bucket']
+  - ext = info['jsplayer']['video_extension']
+- Builds the final video URL as: urljoin(bucket, doc + '-SD.' + ext)
+
+5) Description extraction
+- Tries to get a description from the element with id 'slideshow-description-paragraph' using get_element_by_id.
+- If not found, falls back to a regex search for a paragraph with itemprop="description" in the HTML.
+
+6) Return value
+- Returns a video entry dict with:
+  - '_type': 'video'
+  - 'id': info['slideshow']['id']
+  - 'title': info['slideshow']['title']
+  - 'ext': ext
+  - 'url': video_url
+  - 'thumbnail': info['slideshow']['pin_image_url']
+  - 'description': description.strip() if a description is found, else None
+
+Implementation notes
+- Uses compat_urlparse.urljoin to correctly join bucket URL and the video path.
+- Leverages existing helpers from Youtube-DL: _download_webpage, _search_regex, _html_search_regex, and get_element_by_id.
+- The approach relies on a Slideshare-specific embedded JSON object (slideshare_object) to obtain metadata and video details.

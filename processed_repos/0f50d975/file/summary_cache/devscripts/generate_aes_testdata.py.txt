@@ -1,0 +1,41 @@
+Concise summary of ./youtube-dl/devscripts/generate_aes_testdata.py
+
+Purpose
+- Generate test AES data by encrypting a fixed secret with both OpenSSL and the youtube-dl AES utilities. Produces test vectors for CBC and CTR modes to verify AES implementations.
+
+Main components
+- secret_msg: the fixed plaintext bytes b'Secret message goes here' used as input to all encryptions.
+- hex_str(int_list): helper that converts a list of integers (0-255) to a hex string via intlist_to_bytes and hex encoding. Used to pass keys/IVs to OpenSSL.
+- openssl_encode(algo, key, iv): helper that runs OpenSSL (openssl enc) to encrypt secret_msg with:
+  - algorithm: algo (e.g., aes-128-cbc, aes-128-ctr, aes-256-ctr)
+  - key: provided 16/32-byte key converted to hex via -K
+  - iv: provided IV converted to hex via -iv
+  It pipes secret_msg to OpenSSL and returns the ciphertext bytes.
+- aes_encrypt, key_expansion: imported from youtube_dl.aes. Used to derive new keys for CTR tests.
+- iv and key: both set to a 16-byte value [0x20, 0x15] followed by 14 zeros.
+
+Execution flow and what it does
+1) AES-128-CBC test
+   - Uses openssl_encode with aes-128-cbc, the base 16-byte key, and the IV.
+   - Prints label "aes_cbc_decrypt" and the ciphertext (repr).
+
+2) AES-128-CTR test (16-byte key)
+   - password := key
+   - new_key := aes_encrypt(password, key_expansion(password)) — derives a 16-byte key by encrypting the password with its expanded keys.
+   - Encrypts secret_msg with AES-128-CTR using new_key and the same IV via openssl_encode.
+   - Prints label "aes_decrypt_text 16" and the ciphertext (repr).
+
+3) AES-256-CTR test (32-byte key)
+   - password := key + 16 zeros (32-byte password)
+   - new_key := aes_encrypt(password, key_expansion(password)) * (32 // 16) — derives a 16-byte block and repeats it to form a 32-byte key.
+   - Encrypts secret_msg with AES-256-CTR using new_key and the same IV via openssl_encode.
+   - Prints label "aes_decrypt_text 32" and the ciphertext (repr).
+
+Implementation details
+- Imports and path setup: modifies sys.path to import youtube-dl modules from the repository root.
+- hex encoding: uses hex_str to format keys/IVs for OpenSSL (-K and -iv options).
+- Cross-library use: combines python-side AES key scheduling (key_expansion) and encryption (aes_encrypt) with OpenSSL’s actual encryption to generate test data.
+- Output: three ciphertexts printed to stdout with clear labels, using repr to show byte strings.
+
+Intended use
+- Generate deterministic test vectors to compare implementations (Python/youtube-dl AES vs OpenSSL) and to serve as test data for unit tests.

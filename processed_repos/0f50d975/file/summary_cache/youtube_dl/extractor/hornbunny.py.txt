@@ -1,0 +1,31 @@
+- Purpose
+  - A youtube-dl extractor for HornBunny video pages. It parses the video page, extracts media formats, and collects metadata such as title, duration, view count, and age limit.
+
+- Key class
+  - HornBunnyIE(InfoExtractor): Main extractor class inheriting from youtube-dl’s InfoExtractor.
+
+- Core components
+  - _VALID_URL
+    - Regex to match HornBunny video URLs: http(s)://www.hornbunny.com/videos/<title-with-dashes>-<id>.html
+  - _TEST
+    - A sample test case with a real URL, expected MD5, and expected info_dict fields (id, ext, title, duration, age_limit, view_count, thumbnail).
+  - _real_extract(self, url)
+    - Primary extraction workflow:
+      - video_id = self._match_id(url): extracts the numeric id from the URL.
+      - webpage = self._download_webpage(url, video_id): fetches page HTML.
+      - title = self._og_search_title(webpage): gets title from OpenGraph metadata.
+      - info_dict = self._parse_html5_media_entries(url, webpage, video_id)[0]: obtains media entry (formats, thumbnails) for the video; uses the first entry.
+      - duration: parsed via a regex locating a Runtime block (<strong>Runtime:</strong> …) and then converted to seconds with parse_duration. The search is non-fatal (fatal=False) so it will not error if not found.
+      - view_count: parsed via a regex locating a Views block (<strong>Views:</strong> …) and converted to int with int_or_none. Also non-fatal.
+      - info_dict.update({...}): fills in id, title, duration, view_count, and age_limit (set to 18).
+      - return info_dict: returns the final metadata dictionary for youtube-dl to produce the result.
+
+- Important implementation details
+  - Uses _parse_html5_media_entries to collect media formats from the page, then selects the first entry as the base info_dict.
+  - Graceful handling for missing duration/view_count via fatal=False and int_or_none.
+  - Title is obtained from OpenGraph metadata, providing a robust title even if not present in the page body.
+  - Age limit is hard-coded to 18, reflecting the site’s content rating.
+  - _TEST includes thumbnail pattern and expected MP4 extension, indicating the expected media format.
+
+- Summary of behavior
+  - Given a HornBunny video URL, the extractor downloads the page, builds the media information from the HTML5 media entries, enriches it with title, duration, view count, and age limit, and returns a comprehensive info dictionary compatible with youtube-dl’s output.

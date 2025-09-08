@@ -1,0 +1,55 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/reuters.py
+
+- Purpose
+  - Implement ReutersIE, an information extractor for Reuters video pages. It discovers available video formats and metadata from Reuters’ yovideo player and Mas server endpoints.
+
+- Key class
+  - ReutersIE(InfoExtractor)
+    - _VALID_URL: Regex that matches Reuters video URLs containing a videoId query parameter. Ensures the extractor only handles appropriate pages.
+    - _TEST: Sample test case with an expected id, extension (mp4), and title.
+
+- Core functionality (_real_extract)
+  - Extract video_id from the URL using _match_id.
+  - Download the Reuters iframe page for the video: http://www.reuters.com/assets/iframe/yovideo?videoId={video_id}.
+  - Locate embedded JSON data in the page via a JavaScript call pattern: Reuters.yovideo.drawPlayer({ ... });
+  - Convert the found JavaScript object to JSON using js_to_json to obtain video_data.
+  - Helper function get_json_value(key, fatal=False):
+    - Pulls string values from video_data with a regex looking for "key": "value".
+  - Title extraction:
+    - title = unescapeHTML(get_json_value('title', fatal=True)).
+  - Obtain mmid and fid from the flv field:
+    - Extract using regex ',/(\d+)\?f=(\d+)' on get_json_value('flv', fatal=True).
+  - Fetch MAS data for formats:
+    - mas_data = self._download_json('http://mas-e.cds1.yospace.com/mas/{mmid}/{fid}?trans=json', video_id, transform_source=js_to_json)
+    - mas_data is expected to be a list of format entries with fields such as url, method, container, etc.
+  - Build formats list:
+    - For each entry f in mas_data:
+      - url must exist; skip otherwise.
+      - method determines how to fetch the format:
+        - If method == 'hls':
+          - Use _extract_m3u8_formats on the HLS URL to generate formats (mp4 with m3u8_native, id 'hls', fatal=False).
+        - Else:
+          - container = f.get('container')
+          - ext = '3gp' if method == 'mobile' else container
+          - Append a format dict with:
+            - format_id: ext
+            - url: f_url
+            - ext: ext
+            - container: container (unless method == 'mobile', in which case set to None)
+  - Sort formats with _sort_formats(formats).
+  - Return a result dictionary containing:
+    - id: video_id
+    - title: extracted title
+    - thumbnail: value from get_json_value('thumb')
+    - duration: int_or_none(get_json_value('seconds'))
+    - formats: list of collected formats
+
+- Important implementation details
+  - The extractor relies on parsing embedded JavaScript data from Reuters’ yovideo player to obtain a JSON-like structure, then converts it with js_to_json.
+  - The flv field provides mmid and fid used to query the Mas service for actual format URLs.
+  - Supports multiple formats, including HLS (handled via _extract_m3u8_formats) and direct URLs with appropriate extension logic (including a special case for mobile method yielding 3gp).
+  - Uses int_or_none for safe duration parsing and unescapeHTML for a clean title.
+  - Fatal flags are used in get_json_value to allow graceful exit if essential fields are missing.
+
+- Overall flow
+  - Gather video_id → fetch player data → parse title, thumbnail, duration → derive mmid/fid → fetch MAS format data → build and return a consolidated formats list along with basic metadata.

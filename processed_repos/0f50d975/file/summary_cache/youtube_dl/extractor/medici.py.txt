@@ -1,0 +1,62 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/medici.py
+
+Purpose
+- Implement a YouTube-DL extractor (MediciIE) for Medici.tv videos. It retrieves video metadata and available streaming formats from Medici’s API and returns a standard info dictionary.
+
+Key components
+- Class: MediciIE(InfoExtractor)
+- URL pattern: _VALID_URL matches Medici TV pages using a hashbang route, e.g. http(s)://www.medici.tv/#!/<id>
+- Test data: _TEST provides a sample URL, expected md5, and an info_dict with id, ext, title, description, thumbnail, and upload_date.
+
+Main workflow (_real_extract)
+1. Extract video_id
+   - Uses _match_id(url) against the _VALID_URL to get the initial id from the URL.
+
+2. Set CSRF cookie
+   - Calls _download_webpage(url, video_id) to ensure a csrftoken cookie is set by loading the page.
+
+3. Prepare and perform API request to fetch video data
+   - Target URL: http://www.medici.tv/
+   - POST data (form-encoded): json=true, page=/<video_id>, timezone_offset=-420
+   - Headers: 
+     - X-CSRFToken from the csrftoken cookie
+     - X-Requested-With: XMLHTTPRequest
+     - Referer: http://www.medici.tv/
+     - Content-Type: application/x-www-form-urlencoded
+   - Request body is encoded via urlencode_postdata.
+   - Response is JSON and stored in data.
+
+4. Parse video information from JSON
+   - video object: data['video']['videos']['video1']
+   - title: video.get('nom') or data['title']
+   - video_id: video.get('id') or the original video_id
+
+5. Build streaming formats
+   - URL: video['url_akamai']
+   - Update query parameters via update_url_query to add:
+     - hdcore=3.1.0
+     - plugin=aasp=3.1.0.43.124
+   - Use _extract_f4m_formats on the updated URL to parse HDS formats
+   - f4m_id set to 'hds'
+   - Final formats list stored in formats
+
+6. Extract additional metadata
+   - description: data.get('meta_description')
+   - thumbnail: video.get('url_thumbnail') or data.get('main_image')
+   - upload_date: unified_strdate(data['video'].get('date'))
+
+7. Return info dictionary
+   - id: video_id
+   - title
+   - description
+   - thumbnail
+   - upload_date
+   - formats
+
+Important implementation details
+- CSRF handling: extracts csrftoken from cookies (via _get_cookies(url)['csrftoken'].value) and includes it in request headers.
+- API interaction: uses a JSON endpoint behind a POST with specific fields (json, page, timezone_offset) to obtain video metadata.
+- Format extraction: leverages HDS (F4M) formats via _extract_f4m_formats after updating the manifest URL with specific hdcore and plugin query parameters.
+- Data robustness: chooses title from video['nom'] if available, otherwise falls back to data['title']; thumbnail prefers video['url_thumbnail'] but falls back to data['main_image']; upload_date parsed via unified_strdate for consistency.
+
+Overall, MediciIE is a relatively small extractor focused on obtaining a CSRF-authenticated API response from Medici.tv, parsing the video metadata, and producing a list of HDS streaming formats along with standard metadata for the video.

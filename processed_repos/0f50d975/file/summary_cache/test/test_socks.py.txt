@@ -1,0 +1,56 @@
+Summary of code in ./youtube-dl/test/test_socks.py
+
+Purpose
+- Provide unit tests to verify proxy (HTTP/HTTPS) and SOCKS proxy support within youtube-dl, using both direct proxy settings and per-request proxy headers.
+
+Main components
+- TestMultipleSocks (unittest.TestCase)
+  - Verifies HTTP/HTTPS proxy behavior and per-request proxy header behavior.
+- TestSocks (unittest.TestCase)
+  - Verifies SOCKS4/4a/5 proxy support via a local srelay SOCKS proxy server (optional/skippable).
+
+Key functions and implementation details
+- _check_params(attrs)
+  - Retrieves test configuration via get_params() and ensures required attributes exist (e.g., primary_proxy, primary_server_ip, secondary_proxy, secondary_server_ip). If missing, prints a message and skips the test by returning None.
+
+- test_proxy_http / test_proxy_https (TestMultipleSocks)
+  - Create a FakeYDL with a proxy URL from params (primary_proxy).
+  - Fetch http://yt-dl.org/ip or https://yt-dl.org/ip via ydl.urlopen and compare the response (decoded) to the expected server IP (primary_server_ip).
+
+- test_secondary_proxy_http / test_secondary_proxy_https (TestMultipleSocks)
+  - Use FakeYDL without pre-set proxy.
+  - Build a urllib Request to http(s)://yt-dl.org/ip using compat_urllib_request.
+  - Add header 'Ytdl-request-proxy' with the value of secondary_proxy.
+  - Call ydl.urlopen(req) and verify the response IP equals secondary_server_ip.
+  - Demonstrates per-request proxy override via header.
+
+- TestSocks
+  - _SKIP_SOCKS_TEST = True by default, so SOCKS tests are skipped unless explicitly enabled.
+  - setUp()/tearDown()
+    - If not skipped, selects a random port (20000–30000) and starts a srelay SOCKS proxy server listening on 127.0.0.1:port.
+    - On teardown, terminates the server process and collects output.
+  - _get_ip(protocol)
+    - If tests are skipped, returns '127.0.0.1'.
+    - Otherwise, configures FakeYDL with a SOCKS proxy URL like socks4://127.0.0.1:port (or socks4a, socks5 depending on protocol).
+    - Requests http://yt-dl.org/ip and returns the decoded IP string.
+  - test_socks4 / test_socks4a / test_socks5
+    - Each test calls _get_ip with the respective protocol and asserts the result is an instance of compat_str (i.e., a string IP).
+    - Validates that the proxy path can be used to reach yt-dl.org/ip via different SOCKS protocol variants.
+
+Key details and environment considerations
+- Imports and helpers:
+  - Uses test.helper.FakeYDL and get_params for test doubles and configuration.
+  - Uses youtube_dl.compat.compat_str and compat_urllib_request for cross-version compatibility.
+  - Modifies sys.path to load test helpers from the repository.
+- Proxy testing approach:
+  - Primary proxies are tested by direct usage of ydl.urlopen with a proxy setting.
+  - Secondary proxies are tested by injecting a per-request header (Ytdl-request-proxy) to override the proxy used for that single request.
+- SOCKS proxy testing:
+  - Relies on the external srelay binary (SOCKS proxy server). Tests create a local proxy and verify that requests to yt-dl.org/ip can be resolved through the SOCKS proxy.
+  - The tests are guarded by a flag (_SKIP_SOCKS_TEST). They must be enabled (set to False) to run; otherwise they return a placeholder successful state.
+- Running tests:
+  - When invoked as a script, it runs unittest.main().
+  - For SOCKS tests, ensure the srelay binary is available in PATH and accessible.
+
+Overall
+- The file implements automated checks for both HTTP/HTTPS proxies and SOCKS proxies to ensure youtube-dl can route requests through various proxy types, including per-request proxy overrides. It uses a combination of a test helper proxy object (FakeYDL), standard urllib request handling, and an external SOCKS proxy server for end-to-end verification.

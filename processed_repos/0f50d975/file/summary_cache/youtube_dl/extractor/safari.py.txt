@@ -1,0 +1,86 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/safari.py
+
+Overview
+- Implements extractors for Safari/Safaribooksonline/O’Reilly Safari content, including login handling, video extraction via Kaltura, API-based part extraction, and course playlist aggregation.
+- Uses a common login flow to share credentials with multiple extractors and supports authenticated access to restricted content.
+
+Main classes
+1. SafariBaseIE (InfoExtractor)
+- Shared login and session management for Safari/O’Reilly content.
+- Constants:
+  - _LOGIN_URL, _NETRC_MACHINE: for credentials lookup and login flow.
+  - _API_BASE, _API_FORMAT: API base URL and JSON format for API calls.
+  - LOGGED_IN: flag indicating authenticated state.
+- _real_initialize: triggers login on initialization via _login().
+- _login: performs login using credentials from _get_login_info (netrc or config).
+  - Downloads login page to check if already logged in; if so, sets LOGGED_IN.
+  - If not logged in, builds next_uri from the login redirect and posts login data to the O’Reilly login endpoint.
+  - Applies first-set cookies for cookies g ro ot_sessionid, orm-jwt, orm-rt (two identical cookie instances may be returned).
+  - Completes login by visiting redirect_uri or next_uri; on success, sets LOGGED_IN; otherwise raises ExtractorError.
+
+2. SafariIE (Video extractor)
+- IE_NAME: safai
+- _VALID_URL: complex regex supporting:
+  - safaribooksonline.com library view URLs
+  - learning.oreilly.com library view URLs
+  - videos/ paths that reference a video
+- _PARTNER_ID and _UICONF_ID: default Kaltura partner and UI configs (1926081 and 29375172).
+- _real_extract(url):
+  - If the URL contains a reference_id (capture group), uses that as video_id and assigns partner/ui IDs accordingly.
+  - Otherwise, constructs video_id from course_id and part, downloads the page, re-evaluates the URL, and tries to locate:
+    - reference_id from data-reference-id attribute or from page HTML via regex.
+    - partner_id and ui_id from data-* attributes with defaults if absent.
+  - Builds a Kaltura embed URL with:
+    - wid: _partner_id
+    - uiconf_id: ui_id
+    - flashvars[referenceId]: reference_id
+    - If logged in, fetches a kaltura_session via API: /api/v1/player/kaltura_session/?reference_id=...
+      and, if present, includes flashvars[ks] with the session.
+  - Returns a Kaltura video URL using update_url_query to append query parameters, wrapped as a Kaltura (MWEmbedFrame) player result.
+
+3. SafariApiIE (API-based part extractor)
+- IE_NAME: safari:api
+- _VALID_URL matches API endpoints:
+  - https://www.safaribooksonline.com/api/v1/book/{course_id}/chapter/{part}.html
+- _real_extract(url):
+  - Downloads the part JSON from the API endpoint.
+  - Returns a URL result pointing to part['web_url'] using SafariIE as the extractor (SafariIE.ie_key()).
+
+4. SafariCourseIE (Course playlist extractor)
+- IE_NAME: safari:course
+- _VALID_URL matches Safari/Safaribooksonline course pages and related domains (including techbus subdomain).
+- _real_extract(url):
+  - Extracts course_id from URL.
+  - Downloads course JSON from /api/v1/book/{course_id}/?override_format=json.
+  - If no chapters key present, raises ExtractorError (no chapters found for course).
+  - Creates a list of entries by wrapping each chapter URL with SafariApiIE, building a playlist of videos/chapters.
+  - Uses course_json['title'] as playlist title.
+  - Returns a playlist_result with the list of entries, course_id as id, and course title.
+
+Auxiliary behavior and implementation details
+- _real_initialize in SafariBaseIE ensures an attempt to log in before extraction begins.
+- Login flow details:
+  - Handles two-step login: initial login page check, then posting credentials to O’Reilly login endpoint with redirect_uri (next_uri or API-based next).
+  - Uses JSON payload: { email, password, redirect_uri } and appropriate headers.
+  - After login, applies first Set-Cookie headers for cookies: groot_sessionid, orm-jwt, orm-rt to ensure cookie is actually set.
+  - Completes by visiting the redirect_uri or next_uri and re-checking login status.
+- Kaltura integration for video URLs:
+  - Primary video URL is a Kaltura HTML5 embed URL: https://cdnapisec.kaltura.com/html5/html5lib/v2.37.1/mwEmbedFrame.php with query params.
+  - Required query parameters: wid, uiconf_id, flashvars[referenceId].
+  - Optional ks parameter (flashvars[ks]) when a Kaltura session is obtained for authenticated access.
+- API integration and URL resolution:
+  - Uses _API_BASE (https://learning.oreilly.com/api/v1) for both parts and books.
+  - SafariApiIE serves as a bridge to resolve a chapter/part URL for SafariIE video extraction.
+  - SafariCourseIE aggregates chapters into a playlist by leveraging SafariApiIE for each chapter entry.
+- Regex and parsing details:
+  - Uses multiple _VALID_URL patterns to adapt to safaribooksonline and oreilly domains, both library views and video paths.
+  - When extracting non-reference_id URLs, falls back to extracting data-reference-id, data-partner-id, and data-ui-id attributes from the HTML page; defaults are used if attributes are missing.
+- Error handling:
+  - If login cannot be completed, raises ExtractorError('Unable to log in').
+  - If a course JSON lacks chapters, raises ExtractorError('No chapters found for course %s').
+
+Summary of flow
+- SafariBaseIE handles login and session state.
+- SafariIE extracts a video either directly via reference_id or by resolving a Kaltura widget on a course/part page, optionally including a KS token when logged in.
+- SafariApiIE fetches a part’s web_url via API and delegates to SafariIE for actual extraction.
+- SafariCourseIE fetches a course’s chapters via API, converts each to a SafariApiIE entry, and returns a playlist containing all chapters with the course title as the playlist title.

@@ -1,0 +1,65 @@
+Summary of ./youtube-dl/youtube_dl/extractor/miomio.py
+
+Purpose
+- Implement MioMioIE, an extractor for videos on miomio.tv.
+- Supports both the legacy Flash-based mioplayer and the newer HTML5 (h5) player.
+- Returns either a single video or a multi-video playlist depending on the page content.
+
+Key class and methods
+- MioMioIE (InfoExtractor)
+  - _VALID_URL: Match pattern for miomio.tv watch pages (cc<id>).
+  - _TESTS: Examples demonstrating single-video, multi-video playlists, and an HTML5 (h5) video with expected outputs.
+  - _real_extract(url):
+    - Retrieves video_id from URL.
+    - Downloads the page using Chinese locale to avoid garbled content.
+    - Extracts the page title from meta description.
+    - Locates the mioplayer path via src attribute (/mioplayer...).
+    - If path contains _h5 (HTML5 player):
+      - Builds full player URL, downloads the player page with Referer header.
+      - Parses HTML5 media entries via _parse_html5_media_entries.
+      - Sets http_headers with Referer to the player URL.
+    - Else (legacy Flash-based player):
+      - Builds appropriate Referer header to the mioplayer path.
+      - Calls _extract_mioplayer(webpage, video_id, title, http_headers) to parse the XML config and build entries.
+    - If a single entry is found, normalizes it by setting id and title to video_id and title and returns it directly.
+    - If multiple entries are found, returns a multi_video container with id, entries, title, and http_headers.
+  - _download_chinese_webpage(*args, **kwargs):
+    - Ensures Accept-Language is Chinese (to avoid garbage from English locales).
+    - Proxies to _download_webpage with the added headers.
+  - _extract_mioplayer(webpage, video_id, title, http_headers):
+    - Extracts xml_config from the page using a regex on flashvars (type=sina|video).
+    - Requests a config XML via mioplayerconfigfiles/xml.php?id=<video_id>&r=<random>.
+    - Builds a request to sina.php with the extracted xml_config to obtain the actual video configuration XML.
+    - Validates that timelength is present; otherwise raises "Unable to load videos!".
+    - Iterates over durl elements in the XML:
+      - Extracts the segment URL, order, and length.
+      - Creates entries with id (base video_id, appended by -<order> if present) and title (base title, appended with " part <order>"), duration, and http_headers.
+      - Skips segments without a URL.
+    - Returns a list of segment entries.
+  - Important implementation details:
+    - The HTML5 path is handled by parsing the HTML5 player page and delegating to _parse_html5_media_entries.
+    - The legacy path gathers multiple segments by parsing the XML-backed configuration (durl nodes).
+    - Each entry includes http_headers, primarily for Referer handling to the player/mioplayer page.
+    - The code uses utilities like _search_regex, _download_xml, _download_webpage, and xpath_text for XML/HTML parsing, and int_or_none for numeric fields.
+
+Notable implementation details and caveats
+- Chinese locale: _download_chinese_webpage sets Accept-Language to zh-TW to avoid garbled responses from English localization.
+- Two modes of operation:
+  - HTML5 mode: uses _parse_html5_media_entries on the HTML5 player page, with http_headers containing Referer to the HTML5 player URL.
+  - Flash/legacy mode: builds entries from an XML-based configuration fetched via sina.php, using durl nodes (segment_url, order, length).
+- Entry construction:
+  - For multi-segment videos, segment IDs/titles are suffixed with order (if present) and durations are parsed from the length field (ms -> seconds).
+  - For single-segment results, a post-processing step normalizes the entry to use the original video_id and title.
+- Potential issue/bug:
+  - In _extract_mioplayer, the code builds the xml.php URL using id, but the local variable seems to be video_id. This looks like a bug (should likely be video_id instead of id), which would raise a NameError at runtime. If this is real code, it would need to be corrected to use video_id.
+
+How it fits together
+- The extractor starts from a miomio watch page, detects whether a modern HTML5 player or a legacy Flash-based player is used, and delegates to the appropriate parsing routine.
+- It handles both single-video pages and playlists with multiple video entries.
+- It returns standard YouTube-DL entry dictionaries or a multi_video container depending on the number of video entries found.
+
+In short, MioMioIE scrapes miomio.tv pages by:
+- Detecting the player type (HTML5 vs Flash).
+- Fetching and parsing either the HTML5 manifest or the Flash-based XML config.
+- Building a list of video entries with IDs, titles, URLs, durations, and HTTP headers.
+- Returning a single video or a multi-video playlist accordingly.

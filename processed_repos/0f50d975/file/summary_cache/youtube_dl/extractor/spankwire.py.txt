@@ -1,0 +1,76 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/spankwire.py
+
+- Purpose
+  - Implements SpankwireIE, a video extractor for the Spankwire website. It fetches video metadata, formats (MP4 and HLS), thumbnails, uploader info, and other related data, producing a structured info dictionary compatible with youtube-dl.
+
+- Key class and URL matching
+  - Class: SpankwireIE(InfoExtractor)
+  - _VALID_URL: Regex matching Spankwire video pages and embed pages. Handles:
+    - Video pages like .../video<id>/
+    - Embed pages like EmbedPlayer.aspx/?...ArticleId=<id>
+  - _extract_urls(webpage): Static method to find embed URLs within a page (iframe sources) pointing to the Spankwire EmbedPlayer with an ArticleId.
+
+- Main extraction flow (_real_extract)
+  - video_id extraction: Uses _match_id(url) based on _VALID_URL.
+  - Fetch video metadata: Downloads JSON from https://www.spankwire.com/api/video/{video_id}.json
+    - Expects fields such as title, description, duration, view counts, user info, categories, tags, and formats.
+  - Basic metadata:
+    - title = video['title']
+    - description = video.get('description')
+    - duration = int_or_none(video.get('duration'))
+    - view_count = str_to_int(video.get('viewed'))
+    - uploader and uploader_id derived from video data (uploader not always present; uploader_id via video['userId'])
+    - timestamp = int_or_none(video.get('time_approved_on'))
+    - average_rating = float_or_none(video.get('rating'))
+    - categories and tags extracted from video['categories'] and video['tags'] (if present)
+  - Formats extraction:
+    - video.get('videos') is expected to be a dict mapping format_id to a URL.
+    - For each (format_id, format_url):
+      - video_url = url_or_none(format_url); skip if missing.
+      - height: attempt to parse from the format_id (e.g., containing "720p") via regex.
+      - Alternative height/tbr parsing: look for patterns like "/<height>p_<tbr>k" in the URL to derive height and tbr (bitrate).
+      - tbr: video bitrate if available from the URL pattern; otherwise None.
+      - Build format dict with:
+        - url: video_url
+        - format_id: "<height>p" if height available, else the original format_id
+        - height: numeric height or None
+        - tbr: numeric bitrate or None
+    - HLS (m3u8) formats:
+      - m3u8_url = video.get('HLS')
+      - If present, extend formats with _extract_m3u8_formats(m3u8_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False)
+    - Sort formats using _sort_formats(formats, ('height', 'tbr', 'width', 'format_id'))
+  - Thumbnails:
+    - Build from poster and poster2x (poster and poster2x) fields, with preferences 0 and 1 respectively.
+  - Additional metadata from the video web page:
+    - Attempt to fetch page https://www.spankwire.com/_/video{video_id}/ to enrich data (fatal=False means it won’t fail extraction if this page is unavailable).
+    - If page HTML is retrieved:
+      - JSON-LD data via _search_json_ld; merge into info dict.
+      - Extract a thumbnail from JSON-LD data if available (thumbnail); else fallback to Open Graph thumbnail via _og_search_thumbnail.
+      - Extract uploader name from HTML with a regex looking for an element containing class "uploaded__by".
+      - If view_count was not found earlier, try to parse data-views attribute from the page.
+    - Thumbnails from this page are appended with a high preference (10) to prefer this source.
+  - Result assembly:
+    - Uses merge_dicts to combine core video fields with any additional info from JSON-LD, giving priority to explicit fields from info.
+    - Final fields returned include:
+      - id, title, description, duration, thumbnails, uploader, uploader_id, timestamp, average_rating, view_count, comment_count, age_limit (set to 18), categories, tags, formats
+    - The structure is designed to be compatible with youtube-dl’s standard InfoExtractor output.
+
+- Important implementation details
+  - Robust URL handling:
+    - Uses url_or_none to skip missing/malformed URLs.
+    - Handles both direct video URLs (API-provided formats) and HLS streams.
+  - Format parsing logic:
+    - Height extraction from format_id when possible (e.g., 720p).
+    - Secondary height/tbr parsing from the URL pattern if present (e.g., /720p_1500k).
+    - tbr (target bitrate) derived when available, otherwise left None.
+  - Data enrichment:
+    - Combines API-provided metadata with additional data found on the video page (JSON-LD, Open Graph, and HTML-inferred uploader).
+    - Prefers high-quality thumbnail sources (JSON-LD OpenGraph and page thumbnails with higher preference values).
+  - Graceful degradation:
+    - Many page fetches use fatal=False, so the extractor can still return data if optional pages/info are unavailable.
+  - Tests illustrate:
+    - Typical video URL and expected fields (id, ext, title, description, duration, uploader, uploader_id, timestamp, etc.).
+    - A second test case showing a removed video (skip behavior).
+    - An embed URL that should be matched by URL matching logic but not necessarily fully extracted (only_matching).
+
+Overall, this extractor fetches Spankwire video metadata via a JSON API, builds a comprehensive list of formats (including MP4 and HLS), gathers thumbnails and uploader info, and merges supplemental data from the video’s HTML page to produce a complete information dictionary suitable for youtube-dl.

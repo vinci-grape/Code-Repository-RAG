@@ -1,0 +1,41 @@
+- Purpose
+  - Centralize and expose YouTube-DL extractor (IE) classes. Provide utilities to list, instantiate, and select extractors based on site URLs and age suitability.
+
+- Lazy vs. eager loading
+  - Tries to import from .lazy_extractors to enable lazy loading (_LAZY_LOADER = True). If successful, it uses the lazy loader’s exported symbols (_ALL_CLASSES and all extractors via wildcard import).
+  - If lazy loading isn’t available (ImportError), falls back to eagerly importing .extractors and builds the class list by scanning globals for names ending with "IE" (excluding GenericIE) and then appending GenericIE. This results in _ALL_CLASSES containing all extractor classes.
+
+- Key variables
+  - _LAZY_LOADER: Flag indicating whether lazy loading is active.
+  - _ALL_CLASSES: List of extractor classes (either from lazy_extractors or constructed from globals in non-lazy mode).
+
+- Main API functions
+  - gen_extractor_classes()
+    - Returns the list of supported extractor classes in order. The order matters because the first extractor that matches a URL handles it.
+  - gen_extractors()
+    - Returns a list of instances, one per supported extractor class (i.e., [klass() for klass in gen_extractor_classes()]).
+    - The order matters for URL matching priority.
+  - list_extractors(age_limit)
+    - Filters the extractors to those for which is_suitable(age_limit) is true.
+    - Returns them sorted by the extractor’s IE_NAME (case-insensitive).
+  - get_info_extractor(ie_name)
+    - Returns the info extractor class corresponding to the given ie_name by looking up ie_name + 'IE' in the module’s globals().
+    - Assumes the naming convention where info extractors are named like "<Name>IE".
+
+- Important implementation details
+  - Class collection logic (non-lazy):
+    - _ALL_CLASSES is built by selecting globals().items() where the name ends with 'IE' and is not 'GenericIE', then appending GenericIE.
+  - Class naming convention:
+    - Info extractors are named with a suffix "IE" (e.g., SomeSiteIE). Generic extractor is GenericIE.
+  - Documentation notes (embedded in code):
+    - The order of extractors is important; the first matching extractor handles the URL.
+  - Behavior when lazy loading:
+    - If lazy_extractors is available, the module imports from it and relies on its _ALL_CLASSES, enabling deferred initialization of extractor modules.
+  - Potential usage patterns:
+    - To get all extractor classes: gen_extractor_classes()
+    - To get ready-to-use extractors: gen_extractors()
+    - To filter by age suitability: list_extractors(age_limit)
+    - To obtain the corresponding InfoExtractor class by name: get_info_extractor('SomeSite')
+
+- Overall purpose
+  - This module provides a centralized, flexible interface for discovering, instantiating, and selecting the appropriate extractors for given URLs and constraints, with support for lazy loading to optimize startup time.

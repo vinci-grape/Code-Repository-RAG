@@ -1,0 +1,36 @@
+- Overview
+  - A YouTube-DL extractor for MinistryGrid videos. It parses a MinistryGrid page, discovers embedded video portlets via Liferay, and delegates to the actual video iframe when found.
+
+- Key class
+  - MinistryGridIE(InfoExtractor)
+    - _VALID_URL: Regex matching MinistryGrid video pages and capturing an id.
+    - _TEST: Sample URL with expected metadata (md5, info_dict, params, add_ie).
+
+- Main functionality (_real_extract)
+  - Derives video_id from the URL using _match_id.
+  - Downloads the page HTML.
+  - Extracts a JSON array from the page containing Liferay portlets via the regex Liferay\.Portlet\.list=(\[.+?\]).
+  - Parses that JSON with _parse_json to get portlets.
+  - Extracts plid (portlet layout id) via regex getPlid:function(){return"(\d+)"}.
+  - Iterates over each portlet:
+    - Builds a portlet render URL:
+      http://www.ministrygrid.com/c/portal/render_portlet?p_l_id=<plid>&p_p_id=<portlet>
+    - Downloads the portlet HTML (non-fatal so it can try others).
+    - Searches for an iframe inside the portlet code and captures its src URL.
+    - If an iframe URL is found, returns a video URL result via:
+      url_result(smuggle_url(video_iframe_url, {'force_videoid': video_id}), video_id)
+      This delegates actual downloading to the iframe’s extractor, but forces the original video_id to be used.
+  - If no video iframe is found in any portlet, raises ExtractorError('Could not find video iframe in any portlets').
+
+- Important implementation details
+  - Uses:
+    - _download_webpage to fetch pages
+    - _search_regex to extract the portlet JSON and the iframe URL
+    - _parse_json to convert the portlet list string to Python objects
+    - _url_result to return the next URL to download
+    - smuggle_url to attach extra parameters (force_videoid) to the iframe URL
+  - The code gracefully continues through portlets (fatal=False) until an iframe is found; otherwise raises an error.
+  - The _TEST section indicates the expected video metadata (id, ext, title, thumbnail pattern, upload_date, description, uploader_id, timestamp) and marks the download as skipped for testing, with add_ie indicating downstream extraction via TDSLifeway.
+
+- Summary of behavior
+  - The extractor does not parse the video itself; it discovers an iframe within MinistryGrid’s portlets and hands control to the appropriate extractor by returning the iframe URL (with a forced video_id). If no suitable iframe is found, it reports an extraction error.

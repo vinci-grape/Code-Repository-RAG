@@ -1,0 +1,37 @@
+Summary:
+- Purpose: A YouTube-DL extractor for Kommunetv that pulls video information from the Oslo Kommunetv archive using a video id embedded in the URL, and returns playable formats.
+
+- Key class:
+  - KommunetvIE(InfoExtractor): Inherits from the common extractor base.
+
+- URL handling:
+  - _VALID_URL = r'https://(\w+).kommunetv.no/archive/(?P<id>\w+)'
+  - Extracts video_id from the URL via _match_id(url).
+
+- Data retrieval:
+  - Sends a GET request to https://oslo.kommunetv.no/api/streams?streamType=1&id=<video_id> with Accept: application/json.
+  - Parses the JSON response:
+    - title = data['stream']['title']
+    - file = data['playlist'][0]['playlist'][0]['file']
+
+- URL normalization:
+  - Uses update_url(file, query=None, fragment=None) to sanitize the URL (remove query/fragment).
+
+- Formats extraction:
+  - Uses _extract_m3u8_formats on the sanitized URL with:
+    - ext='mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False
+  - Calls _sort_formats(formats) to order them.
+
+- Return value:
+  - A dict with:
+    - id: video_id
+    - formats: list of extracted formats
+    - title: video title from the API
+
+- Tests:
+  - _TEST uses URL https://oslo.kommunetv.no/archive/921
+  - Expected id '921', title 'Bystyremøte', extension 'mp4', and an md5 for the downloaded file.
+
+- Implementation details:
+  - The code expects a nested JSON structure (playlist -> playlist -> file) to obtain the HLS URL.
+  - The extractor relies on HLS (m3u8) formats, with a non-fatal approach if format extraction fails (fatal=False).

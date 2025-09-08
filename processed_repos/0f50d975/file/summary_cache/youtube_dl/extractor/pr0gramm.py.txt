@@ -1,0 +1,44 @@
+- Purpose
+  - Provides two extractors for pr0gramm videos in youtube-dl: a static-page extractor (Pr0grammStaticIE) and a redirector/exposer (Pr0grammIE) that points to the static extractor.
+
+- Pr0grammStaticIE (InfoExtractor)
+  - URL pattern: _VALID_URL = https?://pr0gramm.com/static/<id>
+  - Test case: _TEST with id, mp4 extension, and expected title/uploader/upload_date.
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Downloads the static page HTML.
+    - Retrieves media entries via _parse_html5_media_entries and selects the first entry as media_info.
+    - Sorts formats with _sort_formats(media_info.get('formats') or []) to ensure best quality ordering.
+    - Extracts uploader by regex searching for a "by <uploader>" pattern in the page.
+    - Attempts to derive upload_date from the image URL path //img.pr0gramm.com/YYYY/MM/DD/...; if found, builds upload_timestr as YYYYMMDD.
+    - Returns a merged dictionary combining:
+      - id
+      - title formatted as "pr0gramm-<id> by <uploader>" (only appends uploader if present)
+      - uploader
+      - upload_date
+      - and all fields from media_info via merge_dicts
+  - Key notes:
+    - Handles missing formats gracefully by using an empty list for sorting.
+    - Uses merge_dicts to combine static metadata with media formats.
+
+- Pr0grammIE (InfoExtractor)
+  - URL pattern: _VALID_URL matches many non-static pr0gramm pages (e.g., /new/, /top/, /user/.../uploads/<id>), excluding /static URLs.
+  - _TEST: example with id and expected info_dict (id, ext mp4, title, uploader, upload_date).
+  - _real_extract(url):
+    - Extracts video_id from URL.
+    - Returns a url_result pointing to https://pr0gramm.com/static/<video_id>, with:
+      - video_id set
+      - ie set to Pr0grammStaticIE.ie_key() to delegate extraction to Pr0grammStaticIE
+  - Misc:
+    - Contains a stray _generic_title() that returns "oof" (unused in current logic).
+  - Rationale: The main page uses JS to render content and cannot be parsed reliably by youtube-dl, so this extractor redirects to the static, JS-free page which contains the actual video element and metadata.
+
+- Implementation details and behavior
+  - Both extractors rely on standard utilities:
+    - _download_webpage for fetching HTML
+    - _parse_html5_media_entries to locate video sources
+    - _html_search_regex to extract uploader
+    - _sort_formats to order video formats
+    - merge_dicts to combine base metadata with media-specific info
+  - The static extractor explicitly parses an upload date from the image URL path to get a YYYYMMDD timestamp if possible.
+  - The design uses a two-step approach: the public page (Pr0grammIE) redirects to a static, easily parseable page (Pr0grammStaticIE) for actual video data.

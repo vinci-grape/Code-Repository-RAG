@@ -1,0 +1,72 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/telegraaf.py
+
+What it is
+- A YouTube-DL extractor class (TelegraafIE) for videos on the Dutch news site Telegraaf.
+- Retrieves video metadata and all available video formats (adaptive streams and progressive HTTP sources).
+
+Main components
+- Class: TelegraafIE(InfoExtractor)
+- URL validation: _VALID_URL = r'https?://(?:www\.)?telegraaf\.nl/video/(?P<id>\d+)'
+- Test data: _TEST contains a sample Telegraaf video URL and the expected parsed information (id, ext, title, description hash, thumbnail, duration, timestamp, upload_date). Uses skip_download to only test manifest parsing.
+
+Key methods and workflow
+1. _real_extract(self, url)
+   - Derives article_id from the URL using _match_id(url).
+   - Fetches a GraphQL payload to obtain the videoId:
+     - Request to https://app.telegraaf.nl/graphql
+     - Includes a specific User-Agent header: 'De Telegraaf/6.8.11 (Android 11; en_US)'
+     - GraphQL query: article(uid: article_id) { videos { videoId } }
+     - Extracts video_id from the response: ['data']['article']['videos'][0]['videoId']
+   - Loads the video item data from a playlist JSON:
+     - Request to https://content.tmgvideo.nl/playlist/item=<video_id>/playlist.json
+     - Takes the first item: ['items'][0]
+     - title = item['title']
+   - Formats extraction:
+     - Initialize formats = [].
+     - Get locations = item.get('locations') or {}.
+     - Adaptive formats (locations['adaptive']):
+       - For each location with a 'src' (manifest URL):
+         - ext = determine_ext(manifest_url)
+         - If ext == 'm3u8': use _extract_m3u8_formats with video_id, ext='mp4', m3u8_id='hls', fatal=False
+         - If ext == 'mpd': use _extract_mpd_formats with video_id, mpd_id='dash', fatal=False
+         - Otherwise log a warning about unknown adaptive format.
+     - Progressive formats (locations['progressive']):
+       - For each location, extract the first source URL: try_get(location, lambda x: x['sources'][0]['src'])
+       - If src exists, build a format dict with:
+         - 'url': src
+         - 'width': int_or_none(location.get('width'))
+         - 'height': int_or_none(location.get('height'))
+         - 'format_id': 'http' plus optional '-<label>' if label is present
+     - Sort formats via self._sort_formats(formats)
+   - Return dictionary with video info:
+     - 'id': video_id
+     - 'title': title
+     - 'description': item.get('description')
+     - 'formats': formats
+     - 'duration': int_or_none(item.get('duration'))
+     - 'thumbnail': item.get('poster')
+     - 'timestamp': parse_iso8601(item.get('datecreated'), ' ')
+
+Important implementation details
+- GraphQL approach: Uses a GraphQL query to resolve the article to a videoId, then uses that ID to fetch the playlist JSON. This two-step process is necessary to locate the video resources.
+- Adaptive vs. progressive formats:
+  - Adaptive: Handles HLS (m3u8) and MPEG-DASH (mpd) manifests found under locations['adaptive'].
+  - Progressive: Handles direct HTTP video sources under locations['progressive'] with optional width/height and label to form a format_id (e.g., 'http' or 'http-ld' if label is present).
+- Ext detection: determine_ext(manifest_url) to decide whether to parse as HLS or DASH.
+- Safe fallbacks:
+  - fatal=False when extracting adaptive formats to avoid aborting on non-fatal errors.
+  - Unknown adaptive formats trigger a warning rather than failing extraction.
+- Data extraction helpers:
+  - int_or_none for numeric fields (duration, width, height)
+  - parse_iso8601 with a space delimiter for the datecreated field
+  - try_get for safe extraction of nested dictionary values
+- Metadata mapping: Title is item['title'], description is item.get('description'), and thumbnail is item.get('poster').
+- Headers: Uses a specific User-Agent when requesting the GraphQL endpoint to mimic Telegraaf’s app behavior and possibly avoid blocking.
+
+Return value format
+- A standard YouTube-DL info dict containing:
+  - id, title, description, duration, thumbnail, timestamp
+  - formats: a list of dictionaries with keys like url, width, height, format_id, etc.
+
+Summary
+This extractor targets Telegraaf video pages, resolves the internal video resource by querying a GraphQL endpoint to obtain a videoId, then fetches a playlist JSON to gather all available video formats. It supports both adaptive streams (HLS and DASH) and progressive direct MP4-style sources, constructs a comprehensive list of formats, and returns a structured info dictionary suitable for youtube-dl.

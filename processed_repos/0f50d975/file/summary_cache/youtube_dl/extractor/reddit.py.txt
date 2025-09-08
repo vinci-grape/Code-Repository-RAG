@@ -1,0 +1,49 @@
+- Purpose: A YouTube-dl extractor module for Reddit videos, implementing two extractors for different Reddit video sources.
+
+- Key classes:
+  1) RedditIE
+     - _VALID_URL: Matches direct Reddit video URLs from v.redd.it (https://v.redd.it/<id>).
+     - _TEST: Includes a sample for zV89llsvexdz with expected mp4 output and best video format.
+     - _real_extract(url):
+       - Extracts video_id from the URL.
+       - Builds formats by combining:
+         - HLS formats from https://v.redd.it/<id>/HLSPlaylist.m3u8 (using _extract_m3u8_formats, with entry_protocol='m3u8_native', m3u8_id='hls', fatal=False).
+         - DASH formats from https://v.redd.it/<id>/DASHPlaylist.mpd (using _extract_mpd_formats, mpd_id='dash', fatal=False).
+       - Sorts the formats and returns a dict with id, title (same as id), and the list of formats.
+     - Main functionality: Enables extraction of video formats for Reddit-hosted videos served via HLS/DASH playlists.
+
+  2) RedditRIE
+     - _VALID_URL: Matches Reddit post URLs under /r/.../comments/<id>.
+     - _TESTS: A set of tests including a full extraction (id, title, thumbnails, timestamp, uploader, duration, counts, etc.) and several only_matching cases for non-media or different Reddit URLs.
+     - _real_extract(url):
+       - Normalizes to the post URL and extracts the Reddit post id.
+       - Fetches JSON data from url + '/.json' and drills into the first post data.
+       - video_url = data['url'] (the actual media URL).
+       - Recursion guard: If the media URL points back to the same Reddit post, raise ExtractorError('No media found', expected=True) to avoid infinite loops.
+       - age_limit:
+         - 18 if over_18 is True
+         - 0 if over_18 is False
+         - None otherwise
+       - Thumbnails: builds a list from data['preview']['images'] including the source and any resolutions, using helper add_thumbnail(src) to collect non-empty URLs with width/height.
+       - Returns a url_transparent entry with:
+         - url: video_url
+         - title: data['title']
+         - thumbnails: collected list
+         - timestamp: created_utc (float)
+         - uploader: author
+         - duration: tries to extract from data['media']['reddit_video']['duration'] or data['secure_media']['reddit_video']['duration']
+         - like_count: ups
+         - dislike_count: downs
+         - comment_count: num_comments
+         - age_limit: as computed
+     - Main functionality: Retrieves the actual media URL from Reddit post JSON, gathers metadata and thumbnails, and provides a transparent URL wrapper for the underlying media.
+
+- Important implementation details:
+  - Robust JSON handling via try_get and fallback logic for nested fields.
+  - Thumbnails are extracted from post preview images with support for source and multiple resolutions, ensuring proper URL unescaping.
+  - Duration extraction supports multiple possible JSON paths for Reddit video duration.
+  - Height/width, timestamps, and counts are normalized using int_or_none/float_or_none for resilience.
+  - Volume of logic is separated between two sources: v.redd.it direct-hosted videos (RedditIE) and Reddit post media (RedditRIE).
+  - The code avoids recursive extraction when a post links to its own media URL.
+
+- Overall: This file provides two extractors to cover Reddit-hosted videos (v.redd.it) and Reddit post media, enabling YouTube-dl to fetch formats and metadata from both sources with appropriate error handling and compatibility utilities.

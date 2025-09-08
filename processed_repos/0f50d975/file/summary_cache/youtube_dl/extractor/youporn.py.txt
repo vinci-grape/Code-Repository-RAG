@@ -1,0 +1,132 @@
+Here is a concise but comprehensive summary of the YouPorn extractor module.
+
+Purpose
+- Implement multiple extractors for the YouPorn site in youtube-dl, covering both individual videos and various list-like pages (categories, channels, collections, tags, pornstars, browse). The code focuses on robust extraction of metadata and video formats, along with pagination and navigation quirks of the site.
+
+Main components (classes)
+- YouPornIE (InfoExtractor)
+  - Purpose: Extract a single video’s metadata and available formats.
+  - URL patterns:
+    - youporn:<id>
+    - https://www.youporn.com/watch/<id> (and embed variants)
+  - Key functionality:
+    - Obtain video_id and display_id from URL.
+    - Fetch the watch page with age_verified cookie to bypass age gating.
+    - Locate the watch-container to ensure the video is available; else raise ExtractorError with a readable message.
+    - Parse playervars JSON to obtain format definitions (mediaDefinitions).
+    - Build formats in two streams:
+      - HLS (master m3u8): extract using _extract_m3u8_formats with m3u8_native, preferring actual master m3u8 URLs over duplicates.
+      - MP4: process videoUrl entries; enrich each format with height (p/pp), bitrate (tbr) from the URL when possible, and format_id like "720p-1500k".
+    - Collect metadata: title, description, thumbnail, duration, uploader, upload_date, age_limit, view_count, comment_count, categories, tags.
+    - Use JSON-LD data when available and merge with scraped data; remove promotional description if present.
+    - Return a dict with all gathered fields and the final formats list.
+  - Helpers:
+    - _extract_urls: scans embed URLs inside the page.
+    - _real_extract: core extraction logic for a single video.
+    - get_format_data, get_fmt: helpers to fetch and normalize format definitions.
+    - Robust metadata extraction with fallbacks (HTML, OpenGraph, meta tags, JSON-LD).
+
+- YouPornListBase (InfoExtractor)
+  - Purpose: Shared logic for YouPorn list-style pages (categories, channels, collections, tags, pornstar, general browse).
+  - Pagination and page loading:
+    - _get_next_url: finds the next page URL from the HTML.
+    - _entries: core method that yields video URLs from a page (via a VIDEO_URL_RE that targets data-video-id attributes and anchor hrefs within a sectioned layout).
+    - yield_pages: generator that downloads pages one by one, handling explicit page_num if provided and iterating through next links.
+    - retry_page: handles a limited retry mechanism with a delay per page (used by some subclasses).
+  - Title construction:
+    - _get_title_from_slug: converts slug-like IDs into human-readable titles.
+  - _real_extract:
+    - Parses URL to identify playlist id, type, and sort; builds a human-friendly title and a normalized playlist_id.
+    - Invokes _entries to produce a list of video entries (via url_result for each video URL) and wraps them into a playlist with playlist_result.
+
+Subclass extractors (list pages)
+
+- YouPornCategoryIE (YouPornListBase)
+  - Purpose: Category pages with optional sorting and pagination.
+  - URL pattern: /category/<id>[/<sort>]
+  - Tests cover full lists, filtered results, and single-page lists.
+
+- YouPornChannelIE (YouPornListBase)
+  - Purpose: Channel pages with sorting and pagination.
+  - URL pattern: /channel/<id>[/<sort>]
+  - Tests cover full lists and single-page results.
+
+- YouPornCollectionIE (YouPornListBase)
+  - Purpose: User collections (video playlists) with sorting/pagination.
+  - URL pattern: /collections/videos/<id>[/<sort>]
+  - Overrides _PLAYLIST_TITLEBAR_RE to match “Videos in …” sections.
+  - _real_extract(url):
+    - First, extracts the base playlist via parent implementation.
+    - Then scrapes collection-info/ui block to extract a collection title and uploader.
+    - Merges collection metadata into the playlist result when title/uploader can be found.
+
+- YouPornTagIE (YouPornListBase)
+  - Purpose: Tag pages (porntags) with sorting/pagination.
+  - URL pattern: /porntags/<id>[/{sort}]?
+  - _PLAYLIST_TITLEBAR_RE customized to “Videos tagged”.
+  - _PAGE_RETRY_COUNT = 1 to allow a retry on certain failures.
+  - Special handling:
+    - _get_next_url overridden to fix an issue where the next page URL may lose the sort parameter; it reconstitutes the URL when needed to preserve sort consistency.
+  - Tests include expected warnings for retries (duplicate/empty pages).
+
+- YouPornStarIE (YouPornListBase)
+  - Purpose: Pornstar pages with sorting and pagination.
+  - URL pattern: /pornstar/<id>[/<sort>]
+  - _get_title_from_slug similar to other list types.
+  - _real_extract(url):
+    - Uses parent to build a playlist, then extracts a “pornstar-info-wrapper” block to gather a description if present.
+    - Merges description into the playlist data.
+
+- YouPornVideosIE (YouPornListBase)
+  - Purpose: General video browse lists (browse or sorted lists like most_favorited, top_rated, etc.) with pagination.
+  - URL pattern:
+    - /(?:(browse)/)?<sort> (where sort includes various options)
+  - _PLAYLIST_TITLEBAR_RE targets both “Videos”/“VIDEOS” headers.
+  - Tests cover many sort/filter scenarios (most are marked as only_matching due to size).
+  - _get_title_from_slug(title_slug):
+    - Special-case: returns “YouPorn” if slug is “browse”; otherwise, returns the slug as title.
+
+Key implementation details and behaviors
+- Access and gating:
+  - Downloads the video pages with a Cookie age_verified=1 to bypass age gate where possible.
+  - If a page indicates the video is not watchable, raises an ExtractorError with a helpful message.
+
+- Formats extraction strategy:
+  - Primarily relies on a playervars JSON payload found in the page, mapping formats via mediaDefinitions.
+  - For HLS:
+    - Fetches format data and extracts actual hls URLs, then uses _extract_m3u8_formats with m3u8_native to produce formats.
+  - For MP4:
+    - Iterates over MP4 format definitions, normalizes videoUrl, and enriches format dictionaries with:
+      - height (from the URL if present in the pattern like 720p_1500k)
+      - tbr (bitrate)
+      - format_id combining height and bitrate (e.g., 720p-1500k)
+    - Appends all valid MP4 formats and sorts them via _sort_formats.
+  - Prioritizes actual master HLS streams to avoid duplicates from multiple master entries.
+
+- Metadata extraction:
+  - Title: multiple fallbacks (watch video title div, OpenGraph title, meta title).
+  - Description: HTML div with id="description" or OpenGraph description; falls back to None if not available.
+  - Thumbnail: extracted from imageurl/poster patterns in the page.
+  - Duration: from playervars duration (int) or video:duration meta tag.
+  - Uploader: parsed from the description area (submitByLink) when available.
+  - Upload date: parsed with several patterns and normalized with unified_strdate.
+  - Age limit: obtained via _rta_search.
+  - View count and comment count: parsed from data attributes and textual patterns; parsed counts with parse_count and extract_attributes.
+
+- Additional data sources:
+  - JSON-LD data (VideoObject) is used to fill/merge additional fields if present.
+  - Categories and tags are scraped from specific tag boxes on the page.
+
+- YouPornCollectionIE specifics:
+  - After collecting the base playlist, it augments the title and uploader using the collection-info block on the page.
+  - Returns the enhanced playlist only if a title can be extracted from the collection info.
+
+- Robustness and quirks handling:
+  - Some YouPorn pages are paginated with inconsistent next-page URLs; specific logic (e.g., YouPornTagIE) handles these edge cases and retry behavior.
+  - Several list-based extractors provide tests that verify pagination behavior, sorting/filtering, and presence/absence of data.
+
+Tests
+- The file includes extensive _TESTS for YouPornIE (individual videos) and the various list extractors (Category, Channel, Collection, Tag, Star, Videos browse). Tests cover typical success, deactivated/unavailable videos, embedded URLs, and pagination scenarios, including expected warnings for retry behavior.
+
+Summary
+- This module implements a comprehensive YouPorn extraction suite: a primary video extractor (YouPornIE) that gathers formats and metadata, plus a family of list extractors (YouPornListBase and its subclasses) for categories, channels, collections, tags, pornstars, and browse-style pages with robust pagination, sorting, and data extraction logic. It includes careful handling of site quirks (age gates, broken pagination, and data sources like JSON-LD), and enriches format data by decoding information embedded in video URLs.

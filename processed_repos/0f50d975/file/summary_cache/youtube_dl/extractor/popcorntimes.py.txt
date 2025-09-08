@@ -1,0 +1,44 @@
+This file implements a YouTube-DL extractor for Popcorntimes video pages.
+
+Main class
+- PopcorntimesIE(InfoExtractor): Subclass of InfoExtractor that handles Popcorntimes.tv pages.
+
+URL pattern and test
+- _VALID_URL: Matches URLs like https://popcorntimes.tv/<lang>/m/<id>/<display_id>
+- _TEST: Provides a sample URL and expected metadata (id, display_id, ext, title, description, thumbnail, creator, release_date, duration, tbr, width, height) to verify extraction.
+
+Core extraction flow (_real_extract)
+- Parse IDs:
+  - Extract video_id (id in URL) and display_id from the URL using _VALID_URL.
+- Download page:
+  - Fetch the webpage HTML using _download_webpage.
+- Title:
+  - Prefer <h1> text; if not found, fall back to the meta ya:ovs:original_name.
+- Video URL extraction (obfuscated in page):
+  - Locate PCTMLOC JavaScript variable in the page, capturing its value as loc.
+  - Decode loc with a two-step process:
+    1) Apply a ROT13-like transformation to letters (shift by 13, wrapping around A-Z or a-z). Non-letters are kept unchanged.
+    2) Base64-decode the resulting string to obtain video_url.
+- Description:
+  - Extract from a div with class pt-movie-desc via a regex; optional (fatal=False).
+- Thumbnail:
+  - Try an img tag with class video-preview and a src attribute; if not found, fall back to Open Graph thumbnail via _og_search_thumbnail.
+- Creator and release date:
+  - creator from video:director meta tag.
+  - release_date from video:release_date meta tag; remove hyphens if present.
+- Numeric metadata:
+  - Helper int_meta(name) reads a meta tag and converts to int via int_or_none.
+  - duration from video:duration; tbr from ya:ovs:bitrate; width from og:video:width; height from og:video:height.
+- Return dictionary:
+  - id, display_id, url (the decoded video URL), title, description, thumbnail, creator, release_date, duration, tbr, width, height.
+  - http_headers with Referer set to the original page URL (to help with hotlink protection on some sites).
+
+Implementation details
+- Decoding logic for the video URL is a custom obfuscation: a ROT13-like per-letter transformation followed by base64 decoding.
+- Uses helper methods from base extractor:
+  - _download_webpage, _search_regex, _html_search_meta, _og_search_thumbnail.
+- Uses compat_b64decode and compat_chr for cross-version compatibility when decoding the URL.
+- The _TEST includes an expected md5 for the downloaded video to validate integrity.
+
+Summary
+- This extractor retrieves Popcorntimes video URLs that are obfuscated in the page, decodes them, and collects video metadata such as title, description, thumbnail, creator, release date, and technical details (duration, bitrate, width/height). It returns a standard info dict suitable for youtube-dl processing, with appropriate headers (Referer) to access the video resource.

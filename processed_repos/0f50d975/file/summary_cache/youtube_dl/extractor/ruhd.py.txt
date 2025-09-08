@@ -1,0 +1,22 @@
+- Purpose: A youtube-dl extractor for RUHD.ru video pages. It parses the RUHD player page to obtain the direct video URL and metadata.
+
+- Key class and structure:
+  - Class: RUHDIE(InfoExtractor)
+  - _VALID_URL: Regex matching RUHD video URLs of the form http(s)://www.ruhd.ru/play.php?vid=<id>
+  - _TEST: Unit-test configuration with a sample URL, expected MD5 for the video file, and expected info dict (id, ext, title, description, thumbnail)
+
+- Main functionality (_real_extract):
+  - Extracts video_id from the URL using _match_id.
+  - Downloads the page HTML with _download_webpage.
+  - video_url: extracted from the page via regex on <param name="src" value="...">.
+  - title: extracted from the page title tag, matching a specific RUHD title format: <title>... RUHD.ru - Видео Высокого качества №1 в России!</title>.
+  - description: optionally extracted from the div with id="longdesc" up to the span with id="showlink" (fatal=False, so it’s optional).
+  - thumbnail: optionally extracted from <param name="previewImage" value="..."> and, if present, normalized to a full URL by prefixing http://www.ruhd.ru.
+  - Returns a dict with keys: id, url, title, description, thumbnail.
+
+- Important implementation details:
+  - Relies on specific HTML structure of RUHD pages: video URL in a param tag, title in the page title with a fixed suffix, description within longdesc, and an optional previewImage param for the thumbnail.
+  - Uses helper methods _download_webpage and _html_search_regex with appropriate error handling (fatal=False for optional fields).
+  - Thumbnail normalization ensures a full URL is returned when a relative path is provided.
+
+- Overall: Implements a focused extractor to fetch the direct video URL and metadata (title, description, thumbnail) from RUHD.ru’s play.php pages and returns a standard info dictionary compatible with youtube-dl’s ecosystem.

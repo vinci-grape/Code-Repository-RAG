@@ -1,0 +1,66 @@
+- Purpose
+  - Implement two YouTube-DL extractors to fetch SRG SSR media:
+    - SRGSSRIE handles direct SRG SSR media (srf, rts, rsi, rtr, swi).
+    - SRGSSRPlayIE handles play.srf.ch style pages and delegates to SRGSSR for actual extraction.
+
+- Key classes
+  - SRGSSRIE(InfoExtractor)
+    - _VALID_URL: Complex regex matching URNs from SRG SSR endpoints and identifying bu (srf, rts, rsi, rtr, swi), media type (video or audio), and a media_id (36-hex or digits).
+    - _GEO_BYPASS: False
+    - _GEO_COUNTRIES: ['CH'] (Geoblocking is Swiss-only)
+    - _ERRORS: Maps error codes to human-friendly messages (e.g., AGERATING12/18, GEOBLOCK, LEGAL, STARTDATE).
+    - _DEFAULT_LANGUAGE_CODES: Maps bu to a default language (srf/de, rts/fr, rsi/it, rtr/rm, swi/en).
+    - _get_tokenized_src(url, video_id, format_id): Fetches a token from http://tp.srgssr.ch/akahd/token?acl=*, appends authparams to the URL if present, and returns the possibly tokenized URL.
+    - _get_media_data(bu, media_type, media_id): Retrieves media data from https://il.srgssr.ch/integrationlayer/2.0/{bu}/mediaComposition/{media_type}/{media_id}.json
+      - If media_type == 'video', uses onlyChapters: True.
+      - Locates the specific media entry by id in the returned chapterList.
+      - Handles blockReason:
+        - If present and in _ERRORS, raises ExtractorError with a user-friendly message.
+        - If GEOBLOCK, raises a geo-restricted error with allowed country CH.
+      - Returns the media_data dict for further processing.
+    - _real_extract(url): Core extractor logic
+      - Parses bu, media_type, media_id from _VALID_URL.
+      - Fetches media_data via _get_media_data.
+      - Builds a formats list from media_data['resourceList'] (each source entry):
+        - Builds format_id from protocol, encoding, quality (skipping missing parts).
+        - If protocol is HDS or HLS:
+          - If tokenType is AKAMAI: obtain tokenized URL via _get_tokenized_src and extract formats via _extract_akamai_formats.
+          - If protocol is HLS: extract via _extract_m3u8_formats (mp4, m3u8_native).
+        - If protocol is HTTP/HTTPS: add a simple format dict with format_id, url, and quality (mapped via qualities(['SD','HD'])).
+      - Podcast support: If media_data.position == 0 (i.e., primary item), also add podcast formats for podcastSdUrl/podcastHdUrl (format_id 'PODCAST-SD' or 'PODCAST-HD'), with quality mapping.
+      - Sort formats with _sort_formats.
+      - Subtitles: If video, collect subtitles from media_data['subtitleList'] by locale (fallback to _DEFAULT_LANGUAGE_CODES[bu]); add to a subtitles dict.
+      - Return a dict with id, title, description, timestamp, thumbnail, duration, subtitles, formats.
+  - SRGSSRPlayIE(InfoExtractor)
+    - IE_DESC: Description of play sites
+    - _VALID_URL: Regex for srf.ch/play URLs (tv or radio) pointing to video or audio, including popup player variants and id/urn extraction.
+    - _TESTS: Tests covering various play URLs (video/audio, with and without direct manifest access).
+    - _real_extract(url):
+      - Extract bu, type (video/audio) and id from URL.
+      - Build a new SRG SSR URL key: srgssr:<bu[:3]>:<type>:<id>
+      - Delegate extraction to SRGSSR by returning self.url_result('srgssr:...','SRGSSR').
+
+- Main flow and implementation details
+  - Token and media data retrieval
+    - Uses _download_json to fetch token and media composition data.
+    - Tokens are appended to Akamai/HDS URLs via _get_tokenized_src.
+  - Formats handling
+    - Supports HDS, HLS (including AKAMAI tokens), and HTTP/HTTPS sources.
+    - For HLS, uses m3u8 formats; for AKAMAI, uses _extract_akamai_formats on the tokenized URL.
+    - Builds human-friendly format_ids from protocol/encoding/quality combos.
+  - Geolocation and errors
+    - _ERRORS provides user-friendly messages for AGERATING, GEOBLOCK, LEGAL, STARTDATE.
+    - GEOBLOCK triggers raise_geo_restricted with CH as allowed country.
+  - Media data interpretation
+    - title, description, date (parsed via parse_iso8601), imageUrl as thumbnail, duration (converted from ms via float_or_none with 1000 multiplier).
+  - Subtitles
+    - Only for video: builds a dict of language codes to subtitle URLs from subtitleList.
+  - Podcasts
+    - If the media position is 0, adds podcast URLs (podcastSdUrl/podcastHdUrl) with format IDs like PODCAST-SD or PODCAST-HD and corresponding quality.
+  - Language codes
+    - Uses _DEFAULT_LANGUAGE_CODES to infer default language for subtitles if locale is missing.
+
+- Summary of purpose
+  - Enables downloading and metadata extraction for SRG SSR media from multiple sources (video/audio on srgssr.ch) and their play sites.
+  - Handles tokenized streaming URLs, multiple formats (HDS/HLS/HTTP), geolocation restrictions, subtitles, and optional podcast feeds.
+  - Provides a Play URL adapter that delegates to the main SRGSSR extractor, ensuring consistent handling across SRG SSR play sites.

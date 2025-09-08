@@ -1,0 +1,47 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/crooksandliars.py
+
+- Purpose
+  - Implements an extractor CrooksAndLiarsIE for embedded Crooks and Liars videos, deriving video formats and metadata from the page.
+
+- Class and URL pattern
+  - Class: CrooksAndLiarsIE(InfoExtractor)
+  - _VALID_URL: matches embed.crooksandliars.com URLs for embed or v endpoints with an alphanumeric id
+  - _TESTS: includes a full extraction test and an only_matching test to verify URL matching
+
+- Main extraction flow (_real_extract)
+  - video_id = self._match_id(url)
+  - Downloads embed page: http://embed.crooksandliars.com/embed/{video_id}
+  - Extracts manifest JSON from page using regex: var manifest = ({...})
+  - Parses the JSON with self._parse_json(...)
+  - Builds format list from manifest['flavors']:
+    - Keeps items where item['mime'] starts with 'video/'
+    - Each format uses:
+      - 'url' = item['url']
+      - 'format_id' = item['type'] (e.g., webm_low, mp4_high)
+      - 'quality' = quality(item['type']) using a predefined order
+  - Sorts formats with self._sort_formats(formats)
+
+- Metadata and return value
+  - Returns a dict with:
+    - 'url': original page URL
+    - 'id': video_id
+    - 'title': manifest['title']
+    - 'description': manifest.get('description')
+    - 'thumbnail': self._proto_relative_url(manifest.get('poster'))
+    - 'timestamp': int_or_none(manifest.get('created'))
+    - 'uploader': manifest.get('author')
+    - 'duration': int_or_none(manifest.get('duration'))
+    - 'formats': the constructed formats list
+
+- Important implementation details
+  - Uses _DOWNLOAD_WEBPAGE to fetch the embed page and _SEARCH_REGEX to locate the manifest JSON embedded in JavaScript
+  - int_or_none converts numeric fields safely (e.g., created, duration)
+  - _proto_relative_url ensures thumbnail URLs are protocol-relative if needed
+  - qualities order is defined as ('webm_low', 'mp4_low', 'webm_high', 'mp4_high') to assign comparable quality scores to formats
+  - The extractor targets video flavors only (filtering by mime starting with 'video/')
+
+- Notes on tests
+  - The first test verifies the full metadata (id, ext inferred from formats, title, description digest, thumbnail, timestamp, uploader, duration)
+  - The second test ensures URL patterns are correctly matched (only_matching) without extraction
+
+In short, this extractor pulls a manifest embedded in Crooks and Liars’ embed page, constructs direct video formats from manifest flavors, then returns standard video info (title, description, thumbnail, timestamps, uploader, duration) along with the formats.

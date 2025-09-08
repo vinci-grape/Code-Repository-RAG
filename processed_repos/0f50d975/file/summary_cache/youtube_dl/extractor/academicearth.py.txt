@@ -1,0 +1,36 @@
+Concise summary of the file
+
+Purpose:
+- Implement a youtube-dl extractor for Academic Earth course playlists, returning a playlist with its lectures.
+
+Key class and constants:
+- Class: AcademicEarthCourseIE(InfoExtractor)
+- _VALID_URL: Regex matching Academic Earth playlist URLs like http(s)://www.academicearth.org/playlists/{id}
+- IE_NAME: 'AcademicEarth:Course'
+- _TEST: Provides a sample URL, expected id, title, description, and playlist_count (3 lectures)
+
+Main functionality (_real_extract):
+- Extract playlist_id from URL using self._match_id(url).
+- Download the playlist page: webpage = self._download_webpage(url, playlist_id).
+- Title extraction: title = self._html_search_regex(r'<h1 class="playlist-name"[^>]*?>(.*?)</h1>', webpage, 'title').
+- Description extraction: description = self._html_search_regex(r'<p class="excerpt"[^>]*?>(.*?)</p>', webpage, 'description', fatal=False). Optional description.
+- Lectures extraction: URLs found with re.findall(r'<li class="lecture-preview">\s*?<a target="_blank" href="([^"]+)">', webpage). This collects all lecture page URLs listed on the playlist page.
+- Entries construction: entries = [self.url_result(u) for u in urls], converting each lecture URL into a playable entry.
+- Return value: a playlist dictionary with:
+  - '_type': 'playlist'
+  - 'id': playlist_id
+  - 'title': extracted title
+  - 'description': extracted (optional) description
+  - 'entries': list of lecture entries
+
+Implementation details:
+- Inherits from InfoExtractor, using standard helper methods:
+  - _download_webpage to fetch page content
+  - _html_search_regex for HTML parsing
+  - self.url_result to create entry results
+  - _TEST for basic correctness checks
+- Uses unicode_literals for compatibility.
+- The extractor assumes a specific HTML structure (playlist-name header for title, excerpt paragraph for description, and lecture-preview list items with anchor tags for URLs).
+
+Output format:
+- A playlist dictionary suitable for youtube-dl, with a list of lecture entries as individual video URLs to be resolved by the broader framework.

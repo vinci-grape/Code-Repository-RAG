@@ -1,0 +1,49 @@
+- Purpose
+  - A YouTube-DL extractor for Springboard Platform videos. It fetches video metadata and formats from Springboard’s RSS feed and exposes both HTTP and HLS (m3u8) formats.
+
+- Key class
+  - SpringboardPlatformIE(InfoExtractor)
+    - _VALID_URL: Regex matching two URL patterns
+      - previews or embed_iframe paths with index and video id
+      - xml_feeds_advanced index/rss3 with video id
+    - _TESTS: Includes a sample video (with md5) and several “only_matching” examples to validate URL patterns.
+    - _extract_urls(webpage): Static method that scans a page for iframes loading embedded Springboard videos and returns their URLs. Used to discover additional entries from a page.
+    - _real_extract(url): Main extraction logic
+      - Parses video_id and index from the URL (from either the first or second URL pattern).
+      - Downloads the RSS feed XML:
+        http://cms.springboardplatform.com/xml_feeds_advanced/index/{index}/rss3/{video_id}
+      - Navigates the RSS/ MRSS structure:
+        - item = first <item>
+        - content = MRSS <content> element, reads url attribute as video_url
+        - title = unescaped <title> text
+      - Validation: if video_url contains 'error_video.mp4', raise ExtractorError (video no longer exists)
+      - Metadata extraction from content and item:
+        - duration, bitrate (tbr), fileSize (filesize), width, height (from content attributes)
+        - description (from item)
+        - thumbnail (from MRSS <thumbnail> element)
+        - timestamp (from a custom namespace element <created> under cms.springboardplatform.com)
+      - Formats construction:
+        - Primary HTTP format: url = video_url, with tbr, filesize, width, height, format_id='http'
+        - HLS format derived from video_url:
+          - Copy primary format and modify:
+            - url = video_url host replaced: cdn. -> hls. and append .m3u8
+            - ext = 'mp4'
+            - format_id = 'hls'
+            - protocol = 'm3u8_native'
+        - Append HLS format to formats and sort
+      - Return info dictionary:
+        - id (video_id), title, description, thumbnail, timestamp, duration, formats
+
+- Important implementation details
+  - Uses RSS/MRSS payload (XML feed) to obtain video data rather than parsing the page directly.
+  - Handles multiple namespaces:
+    - MRSS content and thumbnail elements
+    - A custom namespace for the created timestamp to compute upload date
+  - Robust metadata parsing with helper utilities:
+    - int_or_none, unescapeHTML, xpath_text, xpath_attr, xpath_element, unified_timestamp
+  - Video availability check via explicit error URL check ('error_video.mp4')
+  - Generates two formats per video: a direct HTTP/MP4 and a secondary HLS (m3u8) version by transforming the video URL host and appending .m3u8
+  - _extract_urls helps discover embedded Springboard videos from pages containing iframes pointing to embed_iframe URLs
+
+- Overall functionality
+  - Enables YouTube-DL to extract Springboard Platform videos by leveraging the index/video RSS feed, gather metadata, and expose both HTTP and HLS formats with proper titles, descriptions, timestamps, and thumbnails.

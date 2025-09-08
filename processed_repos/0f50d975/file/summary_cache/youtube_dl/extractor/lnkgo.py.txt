@@ -1,0 +1,57 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/lnkgo.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for LNK-Go video sites (lnk.lt, lnkgo.lt, lnk.alfa.lt). It fetches video metadata and available streaming formats (primarily HLS) and returns a standard info dictionary.
+
+- Key class
+  - LnkGoIE(InfoExtractor): main extractor class.
+
+- URL matching and tests
+  - _VALID_URL: Regex that matches video pages on lnk domains, capturing two parts from the path: a display slug and an optional episode/part id.
+  - _TESTS: Includes three test cases:
+    - Two real video pages with expected metadata (id, title, upload_date, description, duration, age_limit, timestamp, thumbnail, etc.) and a note to skip download (HLS).
+    - One non-matching URL to ensure only matching URLs are processed.
+
+- Important constants
+  - _AGE_LIMITS: Mapping of content ratings to ages (N-7 -> 7, N-14 -> 14, S -> 18).
+  - _M3U8_TEMPL: Template URL used to fetch the single M3U8 manifest for the video:
+    https://vod.lnk.lt/lnk_vod/lnk/lnk/%s:%s/playlist.m3u8%s
+    The first %s selects quality path (smil or mp4), the second %s is the videoUrl, and the third %s carries security token params.
+
+- Main logic (_real_extract)
+  - Parses two URL components via regex groups: assigns display_id and video_id from the URL, though video_id is later overridden.
+  - Fetches video metadata via API:
+    - Request: https://lnk.lt/api/main/video-page/%s/%s/false
+    - Parameters: (display_id, video_id or '0')
+    - Response path: ['videoConfig']['videoInfo']
+  - Extracts video_info:
+    - video_id = compat_str(video_info['id'])
+    - title = video_info['title']
+    - prefix = 'smil' if video_info.get('isQualityChangeAvailable') else 'mp4'
+  - Formats:
+    - Builds an HLS URL using _M3U8_TEMPL with (prefix, videoInfo['videoUrl'], videoInfo.get('secureTokenParams') or '')
+    - Calls _extract_m3u8_formats with the constructed URL, video_id, extension 'mp4', and 'm3u8_native'
+    - Sorts formats with _sort_formats
+  - Poster/thumbnail
+    - poster_image = video_info.get('posterImage')
+    - thumbnail = 'https://lnk.lt/all-images/' + poster_image if present
+  - Other metadata
+    - duration: int_or_none(video_info.get('duration'))
+    - description: clean_html(video_info.get('htmlDescription'))
+    - age_limit: derived from _AGE_LIMITS based on video_info.get('pgRating'), default 0
+    - timestamp: parse_iso8601(video_info.get('airDate'))
+    - view_count: int_or_none(video_info.get('viewsCount'))
+  - Returns a dict with:
+    - id: video_id
+    - display_id: display_id (from URL)
+    - title, formats, thumbnail
+    - duration, description, age_limit, timestamp, view_count
+
+- Implementation details and notes
+  - Uses Youtube-dl utilities: clean_html, parse_iso8601, int_or_none, compat_str
+  - Uses _download_json to retrieve API data
+  - The extractor prioritizes HLS formats (via m3u8) and uses a dynamic prefix (smil/mp4) based on quality-change availability
+  - The thumbnail is built from a base URL plus the posterImage path if available
+  - The code handles potential missing fields gracefully by using defaults and helper functions
+
+Overall, this extractor fetches video configuration from lnk.lt’s API, constructs the appropriate HLS manifest URL, extracts and sorts available formats, and returns a complete info dictionary including title, duration, description, age rating, timestamp, and thumbnail.

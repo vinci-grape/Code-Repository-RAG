@@ -1,0 +1,98 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/rtve.py
+
+Overview
+- This module provides multiple extractors for RTVE content (Spain’s public broadcaster):
+  - RTVEALaCartaIE: main extractor for RTVE “a la carta” videos (alacarta/filmoteca).
+  - RTVEInfantilIE: specialized subclass for RTVE Infantil content (inherits from RTVEALaCartaIE).
+  - RTVELiveIE: extractor for RTVE live streams (inherits from RTVEALaCartaIE).
+  - RTVETelevisionIE: extracts RTVE television pages that link to alacarta videos, delegating to RTVEALaCartaIE.
+- Core functionality: fetch video metadata, decode obfuscated streaming URLs embedded in a PNG image, build a list of playable formats (including HLS/DASH manifests when available), and handle subtitles and live streams.
+
+Key components and how they work
+
+1) RTVEALaCartaIE (core extractor)
+- URL pattern: matches RTVE alacarta/filmoteca pages with a numeric id.
+- Initialization (_real_initialize):
+  - Builds a base64-encoded user-agent from std_headers['User-Agent'].
+  - Requests a manager object from http://www.rtve.es/odin/loki/ + base64_user_agent to obtain a manager id used to fetch format URLs later.
+- URL decryption (_decrypt_url):
+  - Static-like function that decodes obfuscated video URLs embedded in a PNG file.
+  - Steps:
+    - Base64-decode the PNG, skip first 8 bytes, then iterate over chunks (length, type).
+    - For tEXt chunks, parse into an alphabet and a text string containing "quality%%url".
+    - Reconstruct a custom alphabet and map-characters via a bit-heuristic to derive the actual URL.
+    - Yield (quality, url) pairs for each decoded entry.
+  - This is the core anti-DRM/obfuscation logic used by RTVE to hide URLs.
+- _extract_png_formats(video_id):
+  - Downloads the hidden URL list PNG: http://www.rtve.es/ztnr/movil/thumbnail/{manager}/videos/{video_id}.png with query q=v2.
+  - Iterates through (quality, video_url) decoded by _decrypt_url.
+  - For each URL:
+    - If extension is m3u8: fetch formats via _extract_m3u8_formats (native HLS).
+    - If extension is mpd: fetch formats via _extract_mpd_formats (dash).
+    - Otherwise, add a direct format with format_id=quality and a quality score derived from a quality mapping: Media, Alta, HQ, HD_READY, HD_FULL.
+  - Sort formats before returning.
+- _real_extract(url):
+  - Extracts video_id from the URL.
+  - Fetches JSON config: http://www.rtve.es/api/videos/{video_id}/config/alacarta_videos.json.
+  - If info['state'] == 'DESPU', video is no longer available.
+  - Title and duration extracted; formats via _extract_png_formats(video_id).
+  - Subtitles: if sbtFile exists, fetch via _get_subtitles(video_id, sbt_file) (delegates to an endpoint that returns per-language subtitle URLs in .json format).
+  - Live handling: is_live if info.get('live') is True, and title is adjusted for live via _live_title(title) when needed.
+  - Returns a dict with id, title, formats, thumbnail, subtitles, duration (float), is_live, and series (programTitle).
+- _get_subtitles(video_id, sub_file):
+  - Downloads sub_file.json and builds a dict mapping language codes to a list with dicts of {'ext': 'vtt', 'url': ...} for each subtitle entry.
+  - Used by the main extractor when subtitles are present.
+
+2) RTVEInfantilIE (infantil content)
+- Inherits from RTVEALaCartaIE.
+- Different IE_NAME and _VALID_URL geared toward RTVE Infantil pages.
+- Includes its own _TESTS with expected metadata.
+- Reuses the same underlying decryption and format extraction logic as the main a la carta extractor.
+
+3) RTVELiveIE (live streams)
+- Inherits from RTVEALaCartaIE but with its own _VALID_URL for direct live pages: http(s)://.../directo/{id}
+- _real_extract(url):
+  - Extracts video_id from the URL.
+  - Downloads the page and derives a live title by cleaning the og:title and removing “Estoy viendo ”.
+  - Attempts to find a video player id (vidplayer_id) using multiple regex patterns that search for embedded player IDs or data-asset IDs.
+  - Returns:
+    - id: the page id
+    - title: live title (via _live_title)
+    - formats: obtained via _extract_png_formats(vidplayer_id)
+    - is_live: True
+
+4) RTVETelevisionIE (television pages linking to alacarta)
+- IE_NAME and _VALID_URL for TV program pages that contain alacarta links.
+- _real_extract(url):
+  - Extracts page_id and downloads the page.
+  - Searches for an alacarta URL in the page (data-location="alacarta_videos" with a URL value).
+  - If not found, raises ExtractorError (expected).
+  - If found, returns a result that delegates to RTVEALaCartaIE by calling url_result(alacarta_url, ie=RTVEALaCartaIE.ie_key()).
+
+Important implementation details
+
+- The manager token mechanism:
+  - A per-session manager string is obtained via a JSON endpoint that uses a base64-encoded user agent. This manager id is used to fetch the obfuscated video URL list PNG.
+- Decryption logic:
+  - The _decrypt_url function decodes a PNG containing tEXt chunks with encoded URLs and a per-entry quality label.
+  - It reconstructs a bespoke alphabet and decodes the actual video URLs; yields multiple (quality, url) pairs for each video.
+  - This is the key to discovering all available formats for a given video.
+- Format handling:
+  - Supports multiple format types:
+    - Direct mp4 URLs
+    - HLS (m3u8) via _extract_m3u8_formats
+    - DASH (mpd) via _extract_mpd_formats
+  - Uses a quality mapping for non-manifest URLs to order formats.
+  - Formats are sorted with _sort_formats.
+- Subtitles:
+  - If a subtitles file is referenced (sbtFile), subtitles are fetched via a separate JSON endpoint, formatted as VTT.
+- Live content:
+  - Live videos produce titles via _live_title and set is_live accordingly.
+  - Live extraction is handled differently in RTVELiveIE by parsing the live page to obtain the internal video id used to fetch formats.
+- Error handling:
+  - Specific ExtractorError with expected flag for content that is no longer available or pages that don’t contain a video.
+- Tests:
+  - Each extractor includes _TESTS with representative URLs and expected metadata or behavior (including expected warnings for failed manifest downloads).
+
+In short
+- This file implements a comprehensive RTVE extraction pipeline: it fetches a manager token, decodes obfuscated URLs from a PNG to enumerate all available formats (including HLS and DASH), handles live and on-demand content, supports subtitles, and delegates from RTVE Television pages to the main alacarta extractor. The core novelty is the _decrypt_url mechanism that reverses a custom encoding used by RTVE to hide streaming URLs.

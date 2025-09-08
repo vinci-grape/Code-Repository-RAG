@@ -1,0 +1,40 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/tvland.py
+
+- Purpose
+  - Defines an extractor for TV Land content within youtube-dl, leveraging common logic for Paramount networks.
+
+- Class and inheritance
+  - TVLandIE inherits from ParamountNetworkIE (imported from .spike).
+  - This uses the shared Paramount/Spike extraction workflow, with TV Land-specific configuration.
+
+- Key attributes
+  - IE_NAME = 'tvland.com'
+    - Identifier used by youtube-dl for this extractor.
+  - _VALID_URL
+    - Regex: matches TV Land pages for video clips or full episodes.
+    - Pattern extracts an id segment from URLs like:
+      - http(s)://www.tvland.com/video-clips/... or /episodes/... or /full-episodes/...
+  - _FEED_URL = 'http://www.tvland.com/feeds/mrss/'
+    - MRSS feed URL used to fetch media metadata for the TV Land content.
+  - _TESTS
+    - Contains three test cases:
+      1) An episode page expected to yield a playlist with at least 5 items; metadata includes a specific MD5 for description and a title 'The Dog'. Notes geo-restriction behavior (proxy changes).
+
+      2) A video-clip page expected to extract a single MP4 asset:
+         - id '891f7d3c-5b5b-4753-b879-b7ba1a601757'
+         - title format includes show name, date, season/episode info
+         - description MD5 and upload_date/timestamp provided
+         - md5 and skip_download=True (only metadata extraction)
+
+      3) A full-episodes URL where only_matching is True (ensures URL is recognized by the extractor, not necessarily fetched here).
+
+- Main functionality and implementation details
+  - The file itself does not implement detailed extraction logic; instead, it configures TV Land to use the shared ParamountNetworkIE logic.
+  - By providing the _VALID_URL and _FEED_URL, it directs the base class to locate and parse TV Land content via the MRSS feed and URL patterns.
+  - The tests illustrate how metadata is expected (titles, descriptions, dates) and behavior for geo-restricted content, confirming integration with the broader Paramount network extraction flow.
+
+- Notes
+  - The code includes a comment indicating geo-restriction behavior and a redirection when using a proxy.
+  - It maintains compatibility with Python 2/3 style (__future__ import).
+
+In short, TVLandIE is a thin, configuration-focused subclass of ParamountNetworkIE that enables youtube-dl to extract TV Land videos by pointing the shared Paramount logic at TV Land’s MRSS feed and specific URL patterns.

@@ -1,0 +1,79 @@
+Concise summary of youtube-dl extractor FOXIE (File: youtube-dl/youtube_dl/extractor/fox.py)
+
+- Purpose
+  - Extracts FOX network videos available on fox.com/watch, including clips and episodes.
+  - Handles authorization via Adobe Pass / MVPD entitlements and geo-restrictions.
+  - Fetches video metadata, streams (HLS), and SCC subtitles when available.
+
+- Key class
+  - FOXIE(AdobePassIE)
+    - Inherits AdobePassIE to leverage MVPD entitlement handling.
+
+- URL pattern and tests
+  - _VALID_URL: matches https://www.fox.com/watch/{id} where id is a hex string.
+  - _TESTS: includes a sample clip with expected fields; two geo-restricted episodes (marked as only_matching).
+
+- Core constants and state
+  - _GEO_BYPASS = False
+  - _HOME_PAGE_URL = 'https://www.fox.com/'
+  - _API_KEY = 'abdcbed02c124d393b39e818a4312055'
+  - _access_token: cached access token (None initially)
+
+- API interaction
+  - _call_api(self, path, video_id, data=None)
+    - Sends request to https://api2.fox.com/v2.0/{path} with header X-Api-Key and, if available, Authorization: Bearer {token}.
+    - On 403, parses entitlementIssues from the response:
+      - If an entitlement issue has errorCode 1005, raises a user-friendly ExtractorError suggesting cookies (MVPD) usage.
+      - Otherwise raises an ExtractorError with concatenated issue messages (marked as expected).
+  - _real_initialize(self)
+    - Attempts to obtain an access token from the mvpd-auth cookie on FOX home page.
+    - If not present, calls login endpoint with a random deviceId to obtain a new access token and stores it.
+
+- Real extraction flow
+  - _real_extract(self, url)
+    - video_id = extracted ID from URL.
+    - video = _call_api('vodplayer/{video_id}', video_id) to fetch video metadata.
+    - title = video['name']; release_url = video['url'].
+    - Fetch play URL: m3u8_url = _download_json(release_url, video_id)['playURL'].
+      - If 403, try to parse error JSON:
+        - If error is GeoLocationBlocked, raise geo-restricted (US).
+        - Else raise ExtractorError with the provided description (expected).
+    - Extract formats from m3u8_url using _extract_m3u8_formats with m3u8_native, id 'hls'.
+    - _sort_formats(formats)
+
+  - Metadata and attributes
+    - data = video.get('trackingData', {}).get('properties', {}) as a fallback.
+    - duration: prefer durationInSeconds, then duration, else parse_duration(video.get('duration')).
+    - timestamp: unified_timestamp(video.get('datePublished')).
+    - creator: data.get('brand') or data.get('network') or video.get('network').
+    - series: video.get('seriesName') or data.get('seriesName') or data.get('show').
+
+  - Subtitles
+    - Initializes subtitles dict.
+    - Iterates video.get('documentReleases', []) for entries with a 'url' and format 'SCC'.
+    - Adds English subtitle: {'en': [{'url': rel_url, 'ext': 'scc'}]} and breaks after the first match.
+
+  - Output fields
+    - id: video_id
+    - title
+    - formats
+    - description: video.get('description')
+    - duration
+    - timestamp
+    - age_limit: parse_age_limit(video.get('contentRating'))
+    - creator
+    - series
+    - season_number: int_or_none(video.get('seasonNumber'))
+    - episode: video.get('name')
+    - episode_number: int_or_none(video.get('episodeNumber'))
+    - release_year: int_or_none(video.get('releaseYear'))
+    - subtitles
+
+- Important implementation details
+  - Uses an API key and optional Bearer token for FOX API calls.
+  - Handles SSL 403 responses from both video metadata fetch and m3u8 play URL fetch, translating them into user-friendly errors or geo-restriction notices.
+  - Incorporates MVPD entitlement checks and informative error messaging when access is restricted to cable subscribers.
+  - Falls back gracefully when optional fields are missing (tracking properties, series, etc.).
+  - Subtitles support for SCC format, taken from documentReleases when available.
+
+Overall, FOXIE is responsible for authenticated access to FOX streaming assets, retrieving video metadata and m3u8 streams, handling entitlements and geo restrictions, and returning a standard video extract dictionary for youtube-dl.

@@ -1,0 +1,48 @@
+- Purpose: A YouTube-DL extractor for Moscow election (Vybory Mos) live streams. It handles two URL formats and builds multiple stream formats from channel data.
+
+- Class and inheritance:
+  - VyboryMosIE(InfoExtractor): main extractor class.
+
+- URL handling:
+  - _VALID_URL matches:
+    - http(s)://vybory.mos.ru/#precinct/<id>
+    - http(s)://vybory.mos.ru/account/channels?...station_id=<id>
+  - _TESTS include:
+    - A precinct URL (station_id 13636) with expected id, extension, title pattern, description, and is_live.
+    - An account/channels URL with station_id, used to test URL-matching behavior.
+
+- Core logic in _real_extract(url):
+  1) Extract station_id from URL using _match_id.
+  2) Download channels JSON:
+     - Request: http://vybory.mos.ru/account/channels?station_id=<station_id>
+     - Source content structure: a list where each item is a tuple (sid, hosts, name, _).
+     - Build formats by iterating over channels and their hosts:
+       - For each channel (cam) and for each host, create a format:
+         - url: http://<host>/master.m3u8?sid=<sid>
+         - ext: mp4
+         - format_id: camera<cam_num>-host<host_num>
+         - format_note: "<name>, <host>"
+  3) Download optional station JSON (fatal=False if missing):
+     - Request: http://vybory.mos.ru/json/voting_stations/<first3_digits_of_station_id>/<station_id>.json
+     - Use compat_str(station_id)[:3] to derive directory.
+     - If found, use info['name'] for title and info['address'] for description.
+  4) Build and return the final info dictionary:
+     - id: station_id
+     - title: self._live_title(info['name'] if info else station_id)
+     - description: info.get('address')
+     - is_live: True
+     - formats: list of constructed formats
+
+- Important implementation details:
+  - Uses _download_json to fetch JSON data.
+  - Uses compat_str to safely handle station_id when building the station JSON path.
+  - Multiplies formats across all cameras and hosts, enabling multiple parallel streams per station.
+  - format_id follows the pattern camera{index}-host{index}; format_note combines channel name and host.
+  - _live_title is used to derive a user-friendly title, with a fallback to station_id if station info is unavailable.
+  - is_live is explicitly set to True, indicating live streams.
+  - The station JSON is optional (fatal=False); extractor gracefully handles its absence.
+
+- Summary of behavior:
+  - Given a station ID, it queries the channels/index data to produce a list of live stream formats (one per camera-host pair) pointing to master.m3u8 streams.
+  - It optionally augments the metadata with a station name and address from a separate station JSON.
+  - Returns a structured info dictionary suitable for youtube-dl to download or list formats.

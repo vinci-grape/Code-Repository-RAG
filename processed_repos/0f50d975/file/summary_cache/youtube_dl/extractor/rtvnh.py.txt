@@ -1,0 +1,55 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/rtvnh.py
+
+- Purpose
+  - YouTube-DL extractor for RTV Noord-Holland video pages (RTVNH). It extracts available video formats from RTVNH video URLs and returns metadata including title and thumbnail.
+
+- Key class
+  - RTVNHIE(InfoExtractor): Main extractor class for RTVNH videos.
+
+- URL pattern
+  - _VALID_URL = r'https?://(?:www\.)?rtvnh\.nl/video/(?P<id>[0-9]+)'
+  - Extracts the numeric video ID from URLs like http://www.rtvnh.nl/video/131946.
+
+- Testing data
+  - _TEST provides a sample URL, expected MD5 for the content, and an info_dict with id, extension (mp4), title, and a thumbnail URL pattern.
+
+- Core logic (_real_extract)
+  1. Identify video_id via self._match_id(url).
+  2. Download and parse metadata JSON from:
+     - http://www.rtvnh.nl/video/json?m=<video_id>
+     - Parsed with self._parse_json(..., video_id)
+  3. Validate status:
+     - If meta.get('status') != 200, raise ExtractorError with an informative message and expected=True (non-fatal for extractor probing).
+  4. Formats gathering:
+     - Initialize formats = [].
+     - Obtain initial RTMP/SMIL formats via self._extract_smil_formats('http://www.rtvnh.nl/video/smil?m=<video_id>', video_id) and extend formats.
+     - For each RTMP format:
+       - Build an RTSP variant:
+         - rtmp_url = "<url>/<play_path>"
+         - Copy the RTMP format, remove play_path and ext to form rtsp_format
+         - Update rtsp_format with:
+           - format_id: replace 'rtmp' with 'rtsp' in the original format_id
+           - url: rtmp_url with rtmp:// replaced by rtsp://
+           - protocol: 'rtsp'
+         - Append rtsp_format to formats.
+       - Build HTTP base URL from RTMP URL (http_base_url = rtmp_url with rtmp:// -> http://)
+       - Extend formats with:
+         - HLS (M3U8) formats from http_base_url + '/playlist.m3u8' using self._extract_m3u8_formats(..., m3u8_id='hls', fatal=False)
+         - HDS (F4M) formats from http_base_url + '/manifest.f4m' using self._extract_f4m_formats(..., f4m_id='hds', fatal=False)
+  5. Sort all collected formats with self._sort_formats(formats).
+  6. Return a dict with:
+     - 'id': video_id
+     - 'title': meta['title'].strip()
+     - 'thumbnail': meta.get('image')
+     - 'formats': formats
+
+- Important implementation details
+  - Multi-protocol support: Extracts RTMP/SMIL formats, converts RTMP entries to RTSP variants, and also discovers HTTP-based formats via HLS (M3U8) and HDS (F4M).
+  - Robustness: Checks the JSON metadata status code and raises a descriptive ExtractorError if the status is not 200.
+  - Metadata handling: Uses title from JSON (trimmed) and thumbnail from the image field when available.
+  - Data sourcing: Relies on RTVNH endpoints:
+    - Video JSON: http://www.rtvnh.nl/video/json?m=<id>
+    - SMIL/RTMP: http://www.rtvnh.nl/video/smil?m=<id>
+    - Additional formats derived from the base RTMP URL (http) for HLS/HDS.
+
+Overall, the extractor fetches RTVNH video metadata, enumerates RTMP/RTSP streams via SMIL, augments with HTTP-based streaming formats (HLS/HDS), and returns a unified formats list along with basic metadata.

@@ -1,0 +1,45 @@
+Overview:
+- This is a youtube-dl extractor for moviezine.se video pages. It defines how to locate a video, fetch metadata, and build a downloadable format list.
+
+Key components:
+- Class: MoviezineIE (inherits from InfoExtractor)
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?moviezine\.se/video/(?P<id>[^?#]+)'
+  - Extracts video_id from the URL path after /video/
+
+- Test data: _TEST provides a sample URL and the expected extracted fields (id, ext, title, description, thumbnail).
+
+Main extraction flow (_real_extract):
+1) Parse video_id from URL using the _VALID_URL regex.
+2) Download the video page HTML: self._download_webpage(url, video_id)
+3) Download the Moviezine API JS player file:
+   - URL: http://www.moviezine.se/api/player.js?video=<video_id>
+   - Identifier for the download: video_id
+   - Description for the download: 'Downloading js api player'
+4) Build formats list (only one format is produced here):
+   - format_id: 'sd'
+   - url: extracted from the JS player content using _html_search_regex on the pattern file: "(.+?)",
+   - ext: 'mp4'
+   - quality: 0
+5) Sort formats with self._sort_formats(formats)
+6) Return the info dictionary:
+   - id: video_id
+   - title: extracted from the JS player via _search_regex on title: "(.+?)",
+   - thumbnail: extracted from the JS player via _search_regex on image: "(.+?)",
+   - formats: the formats list created above
+   - description: extracted from the page via self._og_search_description(webpage)
+
+Implementation details:
+- The code relies on regex extraction from the JS API player response rather than parsing the HTML.
+- It assumes the JS file exposes:
+  - file: "<video_url>"
+  - title: "<title>"
+  - image: "<thumbnail_url>"
+- Only a single SD MP4 format is supported in this extractor (no multiple quality levels).
+- Description is pulled from OpenGraph tags on the main webpage (not from the JS), ensuring a fallback if the JS doesn’t provide a description.
+
+Potential caveats:
+- If Moviezine changes the structure of api/player.js (e.g., different field names or nesting), the regexes may fail.
+- If there are multiple formats in the JS, this extractor currently only collects one (sd).
+
+Overall purpose:
+- To enable youtube-dl to download Moviezine.se videos by parsing a simple API JS response to obtain the video URL and related metadata (title and thumbnail), while deriving the description from the page’s OpenGraph data.

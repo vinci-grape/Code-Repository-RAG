@@ -1,0 +1,65 @@
+Summary of the code in youtube-dl/youtube_dl/extractor/sportdeutschland.py
+
+- Purpose
+  - Implement SportDeutschlandIE, an extractor for sportdeutschland.tv. It retrieves video metadata and formats for either a single video or a playlist of videos tied to a permalink (permalink-based URL).
+
+- URL matching and tests
+  - _VALID_URL matches sportdeutschland.tv permalinks and captures an id used to query the API.
+  - _TESTS include:
+    - A single video within a playlist URL with playlistId, expecting a specific id, MP4 ext, title, and duration (noplaylist used to fetch only one video).
+    - The same URL without noplaylist, expecting a playlist of two videos with a description and total duration.
+    - A different URL with only_matching for a non-video page.
+
+- Core data flow (_real_extract)
+  - Derives display_id from the URL using _match_id.
+  - Fetches JSON data from https://backend.sportdeutschland.tv/api/permalinks/{display_id} with access_token=true.
+  - Extracts asset = data['asset'] and builds common fields:
+    - title: asset['title'] or asset['label'], stripped.
+    - id: asset['id'] or asset['uuid'].
+    - description: clean_html(asset['body'] or asset['description']) or asset['teaser'].
+    - duration: int_or_none(asset['seconds']).
+  - videos = asset.get('videos') or []
+
+- Single video vs. multi-video handling
+  - If len(videos) > 1 (multi-video/playlist):
+    - Determine playlist_id from the URL query string (playlistId).
+    - If a playlistId exists:
+      - If --no-playlist is used, select only that video (videos[int(playlist_id)]) and print a message about downloading just one video.
+      - Otherwise print a message about downloading the entire playlist.
+    - Builds entries() generator:
+      - Iterates over videos, requiring video['uuid'] and video['url'].
+      - Creates formats via _extract_m3u8_formats(video_url.replace('.smil', '.m3u8'), video_id, 'mp4', fatal=False).
+      - Yields per-video dicts with:
+        - id: video_id
+        - formats: formats
+        - title: base title plus video label or "Teil N"
+        - duration: float_or_none(video['duration'])
+    - Sets info['_type'] = 'multi_video' and info['entries'] = entries().
+  - If a single video (len(videos) == 1):
+    - Formats = _extract_m3u8_formats(videos[0]['url'].replace('.smil', '.m3u8'), asset_id, 'mp4')
+    - section_title = strip_or_none(try_get(data, lambda x: x['section']['title']))
+    - Updates info with:
+      - 'formats': formats
+      - 'display_id': asset.get('permalink')
+      - 'thumbnail': try_get(asset, lambda x: x['images'][0])
+      - 'categories': [section_title] if section_title else None
+      - 'view_count': int_or_none(asset.get('views'))
+      - 'is_live': asset.get('is_live') is True
+      - 'timestamp': parse_iso8601(asset.get('date') or asset.get('published_at'))
+  - Returns the assembled info dictionary.
+
+- Implementation details and behavior
+  - Uses the backend API response structure:
+    - asset with id/uuid, title/label, body/description/teaser, seconds, videos[], date/published_at, images[], is_live, views, permalink.
+    - Each video item has uuid, url, label, duration.
+  - Video formats are derived by replacing .smil with .m3u8 in the provided URLs and using _extract_m3u8_formats (mp4).
+  - For multi-video playlists, the extractor provides an entries() generator so youtube-dl can enumerate and download individual items as a multi_video playlist.
+  - The code respects the --no-playlist flag to download a single video when multiple videos exist.
+  - Robustness: uses clean_html, int_or_none, float_or_none, parse_iso8601, and try_get to gracefully handle missing fields.
+  - Display and metadata:
+    - display_id comes from asset['permalink'] for single video.
+    - thumbnail often comes from asset['images'][0].
+    - section title from data['section']['title'] is used as category.
+    - is_live and timestamp reflect live state and publish date when available.
+
+In short, SportDeutschlandIE fetches permalink-based data from SportDeutschland’s API, supports both single and multi-video assets, respects playlist-related query parameters, and converts video URLs to HLS/M3U8 formats while assembling rich info dictionaries for downstream consumption.

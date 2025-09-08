@@ -1,0 +1,79 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/twitcasting.py
+
+Purpose
+- Implement a YouTube-DL extractor for TwitCasting movie pages, returning metadata and video formats for a given video URL.
+
+Key class
+- TwitCastingIE (subclass of InfoExtractor)
+
+URL pattern
+- _VALID_URL = r'https?://(?:[^/]+\.)?twitcasting\.tv/(?P<uploader_id>[^/]+)/movie/(?P<id>\d+)'
+  - Matches TwitCasting movie pages, capturing uploader_id and video id.
+
+Tests
+- _TESTS contains two sample TwitCasting movie pages with expected metadata:
+  - Basic page with inline details (no password).
+  - Page requiring a video password (videopassword: 'abc'), showing how the extractor handles password-protected videos.
+
+Main functionality (_real_extract)
+- Parse uploader_id and video_id from the URL using the _VALID_URL regex.
+
+Password handling
+- If a videopassword is provided via self._downloader.params['videopassword'], the code posts this password to the page (via urlencode_postdata) and downloads the page with this POST data.
+- This enables access to password-protected videos.
+
+Page download
+- webpage = self._download_webpage(url, video_id, data=request_data)
+
+Metadata extraction
+- Title:
+  - First tries the element with id 'movietitle' (cleaned with clean_html).
+  - If not found, falls back to og:title / twitter:title meta tags via _html_search_meta.
+
+- Video data and formats:
+  - Attempts to read m3u8_url from a data-movie-url attribute using a regex.
+  - If not found, reads data-movie-playlist (JSON) attribute, parses the first element, and uses its source.url as the m3u8_url.
+  - Formats are extracted with _extract_m3u8_formats(m3u8_url, video_id, 'mp4', m3u8_id='hls').
+  - Note: The code uses the m3u8 entry_protocol (comment in code) as a workaround until better support for EXT-X-MAP is available.
+
+- Thumbnail:
+  - Prefer video_js_data['thumbnailUrl'] if present; otherwise fall back to the Open Graph thumbnail via _og_search_thumbnail.
+
+- Description:
+  - Use the element with id 'authorcomment' if present; otherwise fall back to meta descriptions (description, og:description, twitter:description).
+
+- Duration:
+  - If video_js_data contains 'duration', convert from milliseconds to seconds using float_or_none(..., 1000).
+  - Otherwise, try to parse a duration from the element with class 'tw-player-duration-time' via parse_duration.
+
+- View count:
+  - Extract using regex r'Total\s*:\s*([\d,]+)\s*Views' and convert to int with str_to_int.
+
+- Timestamp:
+  - Extract from a datetime attribute found in an element with data-toggle="true" using unified_timestamp.
+
+Return value
+- A dict with:
+  - id: video_id
+  - title
+  - description
+  - thumbnail
+  - timestamp
+  - uploader_id
+  - duration
+  - view_count
+  - formats: list of available video formats (constructed from the m3u8 URL)
+
+Implemented helpers and utilities used
+- clean_html, get_element_by_id, get_element_by_class
+- _og_search_thumbnail, _html_search_meta
+- _search_regex, _parse_json
+- unified_timestamp, parse_duration, str_to_int, float_or_none
+- urlencode_postdata
+- _extract_m3u8_formats (for handling m3u8 playlists)
+
+Notable implementation details
+- Password-protected videos are supported by posting a password to the page before extraction.
+- The extractor first tries to find a direct data-movie-url; if unavailable, it falls back to parsing a JSON playlist from data-movie-playlist and uses the first item’s source URL.
+- Uses m3u8 formats (HLS) with m3u8_id='hls' and comments indicate this as a temporary workaround for mapping issues.
+- Robust metadata extraction with multiple fallbacks for title, thumbnail, description, and timestamp.

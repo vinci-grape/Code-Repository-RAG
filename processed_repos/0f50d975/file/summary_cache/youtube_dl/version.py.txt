@@ -1,0 +1,10 @@
+Concise summary of ./youtube-dl/youtube_dl/version.py
+
+- Purpose: Defines the package version as a single public constant.
+- Main functionality: Exposes __version__ = '2025.04.07' for consumers to read the library version.
+- Key implementation details:
+  - Imports unicode_literals from __future__ to ensure string literals are Unicode in Python 2, aiding compatibility.
+  - Contains no functions/classes or side effects; only assigns the version string.
+  - Version string format appears to be YYYY.MM.DD.
+- Usage: Other modules can import this value to display or check the library version (e.g., import youtube_dl.version as v; v.__version__).
+- Context: A minimal, standalone module used to centralize the library’s version.

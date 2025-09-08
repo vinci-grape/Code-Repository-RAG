@@ -1,0 +1,88 @@
+Here is a concise yet comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/daum.py.
+
+Overview
+- Purpose: Implement YouTube-DL extractors for Daum TV/Daum Clip/Daum MyPot content. The extractors mainly resolve Daum video pages to the Kakao embedded player URLs and, for lists (playlists and user channels), assemble a playlist of video entries.
+- Core idea: Daum video content is served via a Kakao embed player. The extractors map various Daum URLs to a Kakao embed URL and delegate actual media extraction to the Kakao extractor.
+
+Key classes
+- DaumBaseIE
+  - Base class for Daum extractors.
+  - _KAKAO_EMBED_BASE: Base URL for Kakao embed player: http://tv.kakao.com/embed/player/cliplink/
+
+- DaumIE
+  - Top-level extractor for Daum video pages.
+  - _VALID_URL matches either:
+    - http://tvpot.daum.net/v/… or http://m.tvpot.daum.net/v/… or
+    - videofarm.daum.net/controller/player/VodPlayer.swf?vid=…
+  - _real_extract(url):
+    - Extracts video_id from URL, unquoting it.
+    - If video_id is not purely numeric, appends @my to the id (to form a Kakao cliplink id).
+    - Returns a Kakao embed URL via self.url_result using _KAKAO_EMBED_BASE + video_id and extractor name 'Kakao'.
+  - Tests cover various Daum video URLs and their expected metadata.
+
+- DaumClipIE
+  - Extractor for clip view pages.
+  - _VALID_URL matches:
+    - http(s)://(m.)?tvpot.daum.net/clip/ClipView.do?clipid=… or
+    - http(s)://(m.)?tvpot.daum.net/mypot/View.do?clipid=…
+  - _URL_TEMPLATE: http://tvpot.daum.net/clip/ClipView.do?clipid=%s
+  - _real_extract(url):
+    - video_id = self._match_id(url)
+    - Returns a Kakao embed URL for video_id (same as DaumIE) via self.url_result(_KAKAO_EMBED_BASE + video_id, 'Kakao').
+  - suitable(cls, url):
+    - Override to exclude DaumPlaylistIE and DaumUserIE, ensuring clip extractor is not used for playlist/user URLs.
+  - Tests include a typical clip URL and a non-matching mobile variant.
+
+- DaumListIE
+  - Shared base for list-based extractors (playlists and user pages).
+  - _get_entries(list_id, list_id_type):
+    - Iterates pages from 1 upwards, calling:
+      http://tvpot.daum.net/mypot/json/GetClipInfo.do?size=48&init=true&order=date&page=%d&<list_id_type>=<list_id>
+    - Converts each clip entry into a video URL: http://tvpot.daum.net/v/<clip['vid']>
+    - Accumulates entries as self.url_result entries with Daum video URLs (which will be handled by other extractors, typically DaumIE or DaumClipIE).
+    - Tracks a playlist name from playlist_bean.name or potInfo.name.
+    - Stops when has_more is false.
+    - Returns (name, entries).
+  - _check_clip(url, list_id):
+    - Parses query string for clipid.
+    - If clipid is present:
+      - If --no-playlist is set (noplaylist), returns a DaumClip result for that clip (single video).
+      - Otherwise prints a message about downloading a playlist and allows playlist handling to continue.
+
+- DaumPlaylistIE
+  - For playlist URLs.
+  - _VALID_URL matches:
+    - http(s)://(m.)?tvpot.daum.net/mypot/(View.do|Top.tv)? with playlistid=…
+  - _URL_TEMPLATE: http://tvpot.daum.net/mypot/View.do?playlistid=%s
+  - _real_extract(url):
+    - list_id = extracted playlist id.
+    - clip_result = self._check_clip(url, list_id)
+      - If a single clip was requested (via clipid and --noplaylist), returns that DaumClip result.
+    - name, entries = self._get_entries(list_id, 'playlistid')
+    - Returns self.playlist_result(entries, list_id, name)
+  - suitable(url):
+    - Returns False if the URL matches a DaumUserIE URL; otherwise uses the base suitability.
+
+- DaumUserIE
+  - For user pages (ownerid) on MyPot.
+  - _VALID_URL matches:
+    - http(s)://(m.)?tvpot.daum.net/mypot/(View|Top).(do|tv)? with ownerid=…
+  - _real_extract(url):
+    - list_id = extracted owner id.
+    - clip_result = self._check_clip(url, list_id)
+      - If a single clip is requested (via clipid and --noplaylist), returns that DaumClip result.
+    - Parses query for playlistid:
+      - If playlistid present, redirects to the corresponding DaumPlaylist via its URL template.
+    - name, entries = self._get_entries(list_id, 'ownerid')
+    - Returns self.playlist_result(entries, list_id, name)
+
+Important implementation details
+- Embedding approach: The Daum extractors do not fetch the video directly. They construct a Kakao embed URL (http://tv.kakao.com/embed/player/cliplink/<id>) and delegate actual video extraction to the Kakao extractor by returning a URL result with extractor name 'Kakao'.
+- ID handling: For non-numeric IDs from Daum URLs, the code appends '@my' to form a valid Kakao cliplink id.
+- List fetching: For playlists and user pages, the code uses Daum’s JSON API at GetClipInfo.do with paging until has_more is false, collecting clip video IDs to build a playlist of URLs (http://tvpot.daum.net/v/<vid>).
+- Clip vs. playlist handling: If a URL includes clipid, _check_clip handles the case where the user asked for a single video (--noplaylist). Otherwise, it treats it as a potential playlist and proceeds accordingly.
+- Class interdependencies: DaumPlaylistIE and DaumUserIE inherit from DaumListIE to reuse the list-fetching logic; DaumClipIE is kept separate but can be invoked for single-clip URLs when appropriate.
+- Tests: The file includes _TESTS definitions for several URL patterns (direct videos, clip view pages, playlist and user pages), including metadata expectations and special cases like noplaylist.
+
+In short
+- This module implements multiple extractors to cover Daum video formats (video pages, clip views, playlists, and user channels) by resolving them to Kakao embed URLs for actual media extraction. It uses a shared list-fetching utility to assemble playlists from Daum’s GetClipInfo API and handles single-clip and playlist-invocation logic accordingly.

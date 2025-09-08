@@ -1,0 +1,73 @@
+- Purpose:
+  - A youtube-dl extractor for HowStuffWorks video pages. It parses the page, extracts the video information and available formats (HLS, FLV, MP4 variants, and a SMIL-based fallback), and returns a structured video object with metadata.
+
+- Key class:
+  - HowStuffWorksIE(InfoExtractor)
+
+- URL matching:
+  - _VALID_URL is a regular expression that matches a variety of HowStuffWorks-related domains (howstuffworks.com and related subdomains) and captures the video id from URLs like ...-video.htm.
+
+- Tests:
+  - _TESTS includes:
+    - A real example with expected id, extension, title, and description (verified via md5).
+    - A non-fetching test ensuring URL pattern matching with only_matching.
+
+- Main functionality (_real_extract):
+  - Display id extraction:
+    - display_id = self._match_id(url)
+
+  - Page retrieval:
+    - webpage = self._download_webpage(url, display_id)
+
+  - Clip data extraction:
+    - clip_js = self._search_regex(r'(?s)var clip = ({.*?});', webpage, 'clip info')
+    - clip_info = self._parse_json(clip_js, display_id, transform_source=js_to_json)
+    - video_id = clip_info['content_id']
+
+  - Formats collection (in priority order):
+    - m3u8 (HLS):
+      - If clip_info has 'm3u8' and its extension is m3u8, fetch formats via _extract_m3u8_formats with format_id 'hls' and fatal=True.
+    - FLV:
+      - If clip_info has 'flv_url', add a format with that URL and format_id 'flv'.
+    - MP4 variants:
+      - For each entry in clip_info.get('mp4', []), add a format with:
+        - url = video['src']
+        - format_id = 'mp4-{bitrate}'
+        - vbr = int_or_none(video['bitrate'].rstrip('k'))
+    - SMIL fallback (if no formats yet):
+      - Download SMIL data from http://services.media.howstuffworks.com/videos/{video_id}/smil-service.smil
+      - Extract httpBase via an XPath on the SMIL XML, handling the SMIL namespace.
+      - Define a URL_SUFFIX ('?v=2.11.3&fp=LNX 11,2,202,356&r=A&g=A').
+      - Iterate over video elements under body/switch/video, extract system-bitrate (scale to kbps via int_or_none with scale=1000).
+      - Append a format for each video with:
+        - url = http_base/src + URL_SUFFIX
+        - format_id = '{vbr}k'
+        - vbr = vbr
+
+  - Sorting:
+    - self._sort_formats(formats)
+
+  - Return structure:
+    - id: video_id
+    - display_id: display_id
+    - title: unescapeHTML(clip_info['clip_title'])
+    - description: unescapeHTML(clip_info.get('caption'))
+    - thumbnail: clip_info.get('video_still_url')
+    - duration: int_or_none(clip_info.get('duration'))
+    - formats: formats
+
+- Important implementation details:
+  - JSON extraction:
+    - The code locates a JavaScript object assigned to var clip and parses it with _parse_json, using transform_source=js_to_json to convert JS object syntax to JSON-safe syntax.
+  - Multiple format sources:
+    - Supports HLS (m3u8), FLV, and MP4 variants if provided by the page.
+  - SMIL fallback:
+    - If no direct formats are found, it fetches a SMIL description to build additional formats. It correctly handles SMIL namespaces when querying XML.
+  - Robustness:
+    - Uses int_or_none to safely convert bitrate values and gracefully handles missing fields.
+  - Metadata extraction:
+    - Title and description are unescaped to produce clean text.
+  - Namespace handling:
+    - When parsing SMIL, uses the proper SMIL 2.0 namespaces in XPath queries.
+
+Overall, the extractor focuses on retrieving all available video formats from HowStuffWorks pages (direct sources first, with a SMIL-based fallback) and assembling a complete metadata dictionary for youtube-dl.

@@ -1,0 +1,35 @@
+- Purpose: A youtube-dl information extractor for videofy.me that fetches a direct video URL and metadata for a given video page.
+
+- Key class:
+  - VideofyMeIE(InfoExtractor): Implements the extraction logic for VideofyMe.
+
+- URL matching:
+  - _VALID_URL matches videofy.me pages (and p.videofy.me/v) that contain a numeric video id.
+  - _TEST provides an example URL and expected metadata for testing.
+
+- Main functionality (in _real_extract):
+  - Extracts video_id from the URL using _match_id.
+  - Downloads JSON data from an external loader: http://vf-player-info-loader.herokuapp.com/{video_id}.json and reads the 'videoinfo' field.
+  - From the loaded config:
+    - video: contains video-specific info (title, description, date, views, likes, nrOfComments, and sources).
+    - blog: optional uploader information (name, identifier).
+  - Returns a dict with fields:
+    - id: video_id
+    - title: video['title']
+    - url: video['sources']['source']['url'] (direct video URL)
+    - thumbnail: video.get('thumb')
+    - description: video.get('description')
+    - timestamp: parse_iso8601(video.get('date'))
+    - uploader: blog.get('name')
+    - uploader_id: blog.get('identifier')
+    - view_count: int from video.get('views') using a regex (via int_or_none and _search_regex)
+    - likes: int_or_none(video.get('likes'))
+    - comment_count: int_or_none(video.get('nrOfComments'))
+
+- Important implementation details:
+  - Uses parse_iso8601 to convert the ISO8601 date to a UNIX timestamp.
+  - view_count is extracted using a regex from video.get('views'), with fatal=False to avoid failing if the format isn’t strictly numeric.
+  - int_or_none is used to safely convert numeric fields (likes, comment_count) to integers, returning None if not present or non-numeric.
+  - blog information is optional; default to {} to avoid KeyError.
+
+- Output: A standard youtube-dl info dictionary containing id, title, url, and optional metadata like thumbnail, description, timestamp, uploader, and counts. The direct video URL is used for playback/download.

@@ -1,0 +1,56 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/cnn.py
+
+What it does
+- Provides YouTube-DL extractors for CNN video content, plus support for CNN Blogs and CNN Article pages that link to CNN video players.
+- Main goal: locate CNN video data via Turner CVP (CVP: CNN Video Player) endpoints and return a normalized video info dict (id, title, ext, description, upload_date, duration, etc.).
+
+Key classes and their roles
+- CNNIE (TurnerBaseIE)
+  - Inherits from TurnerBaseIE to reuse CNN’s CVP extraction workflow.
+  - _VALID_URL: complex regex to match CNN video URLs across subdomains (edition, www, money) and various page formats; captures sub_domain, path, and title.
+  - _CONFIG: per-subdomain configuration for data_src (where to fetch video data XML) and media_src (base URL for media).
+  - _extract_timestamp: stub that returns None (timestamp extraction not implemented).
+  - _real_extract(url):
+    - Parses URL with _VALID_URL to get sub_domain, path, page_title.
+    - Normalizes sub_domain to 'edition' if it isn’t 'money' or 'edition'.
+    - Looks up config for the sub_domain and builds the data URL via config['data_src'] % path.
+    - Calls _extract_cvp_info (inherited from TurnerBaseIE) with:
+      - data_src URL (XML/endpoint containing CVP data)
+      - page_title (used as the video title)
+      - a dict with:
+        - default: {'media_src': <configured media_src>}
+        - f4m: {'host': 'cnn-vh.akamaihd.net'}
+    - This delegates the heavy lifting to the CVP data parser to produce a standardized info dict.
+
+- CNNBlogsIE (InfoExtractor)
+  - _VALID_URL: matches CNN blog URLs (blogs.cnn.com).
+  - _real_extract(url):
+    - Downloads the blog page, extracts the embedded CNN video URL from data-url attribute.
+    - Returns a result that delegates extraction to CNNIE (via CNNIE.ie_key()) using the found URL.
+
+- CNNArticleIE (InfoExtractor)
+  - _VALID_URL: matches CNN article pages that are not direct video pages.
+  - _real_extract(url):
+    - Downloads the article page and finds video URL expression via regex video:\s*'([^']+)'.
+    - Builds a CNN video URL: http://cnn.com/video/?/video/<extracted>
+    - Delegates extraction to CNNIE (via CNNIE.ie_key()) for the actual CVP processing.
+
+Important implementation details
+- URL handling and routing:
+  - CNNIE uses a robust _VALID_URL with named groups (sub_domain, path, title) to map many CNN video URL formats to a canonical data source URL.
+  - If a non-supported subdomain is encountered, it defaults to 'edition' for config lookup.
+- Data source configuration:
+  - _CONFIG contains per-subdomain data_src (XML endpoint) and media_src (base CDN path).
+  - data_src URLs are built by inserting the captured path into the template (config['data_src'] % path).
+  - The CVP extraction is driven by _extract_cvp_info with media_src for actual media, and an explicit f4m host for streaming fallback.
+- CVP extraction:
+  - Relies on TurnerBaseIE’s _extract_cvp_info to parse CVP XML data and assemble the final info dict (including parsing durations, descriptions, etc.).
+  - _extract_timestamp is not implemented (returns None), so upload_date may come from CVP data or be absent.
+- Tests:
+  - _TESTS in CNNIE cover multiple CNN URL formats, expecting fields like id, ext, title, description, duration, upload_date, and sometimes a warning about failing to download m3u8 information.
+  - Some tests set skip_download for m3u8 to avoid network fetch.
+  - CNNBlogsIE and CNNArticleIE tests demonstrate delegation to CNNIE for extraction.
+
+Summary of main flow
+- CNNIE handles CNN video pages by extracting the path and title, selecting the right per-domain config, fetching the data source XML, and using Turner CVP extraction to produce a unified video info dict.
+- CNNBlogsIE and CNNArticleIE are convenience wrappers that locate the actual CNN video URL from blogs or articles and then reuse CNNIE to extract the video information.

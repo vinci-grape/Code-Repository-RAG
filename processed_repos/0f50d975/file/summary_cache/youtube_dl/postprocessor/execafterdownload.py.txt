@@ -1,0 +1,24 @@
+Concise summary
+
+- Purpose: A YouTube-DL postprocessor that executes a user-specified shell command after a download completes, operating on the downloaded file.
+
+- Key class: ExecAfterDownloadPP(PostProcessor)
+  - __init__(downloader, exec_cmd): stores the downloader reference and the command to run.
+  - run(information): core logic to run the external command.
+
+- How it works:
+  - Takes the configured command (self.exec_cmd). If it does not contain a {} placeholder, it appends " {}" so the output filepath is included.
+  - Replaces {} with a shell-escaped version of information['filepath'] using compat_shlex_quote to prevent injection.
+  - Logs the exact command being executed to the downloader’s screen.
+  - Executes the command via subprocess.call with shell=True after encoding the argument with encodeArgument.
+  - If the command returns a non-zero exit code, raises PostProcessingError with the code.
+  - Returns a tuple: ([], information) indicating no new files produced by this postprocessor and preserving the original information.
+
+- Important implementation details:
+  - Placeholder handling: '{}' is the placeholder for the downloaded file path; if absent, the path is appended.
+  - Security: filepath is shell-escaped using compat_shlex_quote before inclusion in the command.
+  - Compatibility/Encoding: Uses encodeArgument to prepare the command string for subprocess; shell=True is used.
+  - Error handling: Non-zero exit codes raise PostProcessingError to signal failure in the post-processing step.
+  - Integration: Uses self._downloader.to_screen for logging and follows the PostProcessor interface by returning (new_files, information).
+
+- Typical usage: Configure this postprocessor with an external command to run (e.g., move, notify, or process the downloaded file) after each download completes.

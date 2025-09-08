@@ -1,0 +1,108 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/bbc.py.
+
+Overview
+- This file implements multiple extractors for BBC content used by BBC iPlayer and related BBC sites. The core functionality revolves around discovering video/audio formats, subtitles, and metadata from various BBC data sources (media selections, playlists, embedded players, and legacy endpoints) and returning them in a unified ytdl format.
+
+Main classes and their responsibilities
+- BBCCoUkIE (InfoExtractor)
+  - Primary extractor for BBC iPlayer and BBC.co.uk content.
+  - Handles login (optional), media selection, ASX/MPEG/DASH/HLS/HDS formats, RTMP, and direct HTTP URLs.
+  - Key helpers:
+    - _extract_asx_playlist, _extract_items, _extract_medias, _get_subtitles
+    - _download_media_selector, _download_media_selector_url, _process_media_selector
+    - _download_playlist, _process_legacy_playlist, _extract_from_legacy_playlist
+    - _real_extract: main extraction flow for a given URL
+  - Media selection workflow:
+    - Tries multiple media sets (pc, iptv-all, etc.) via _MEDIA_SELECTOR_URL_TEMPL.
+    - Handles errors via MediaSelectionError (special handling for notuk/geolocation/selectionunavailable).
+    - Builds formats list with detailed fields (format_id, width/height, tbr, vcodec/acodec, url, playback options).
+    - Supports various transfer formats: dash (mpd), hls (m3u8), hds (f4m), asx, and direct HTTP/RTMP links.
+  - Playlist and legacy support:
+    - _download_playlist and _process_legacy_playlist_url handle legacy and new playlist formats.
+    - _extract_from_legacy_playlist parses EMP playlist namespaces to produce formats and subtitles.
+  - Subtitles:
+    - _get_subtitles looks up CCP captions and constructs subtitle entries.
+  - Error handling:
+    - _raise_extractor_error formats BBC-specific errors into ExtractorError objects.
+  - Login support:
+    - _login handles BBC account sign-in via a form, used by _real_initialize.
+
+- BBCIE (extends BBCCoUkIE)
+  - A broader extractor for BBC content on bbcc.co.uk and .com domains, with a different URL regex and _MEDIA_SETS.
+  - _real_extract is a large, multi-path method that handles:
+    - Direct media metadata (data-pid, data-playable, vpid, externalIdentifier)
+    - playlist.sxml (legacy) and its combination with media selectors
+    - Data-playable blocks with playlistObject.items (vpid) and those without
+    - Initial data sources: window.__INITIAL_DATA__, window.__PRELOADED_STATE__, Morph payloads
+    - BBC Three specific payloads (bbcthreeConfig) and their content
+    - Morph-based embeds and SMP data
+    - PRELOADED_STATE and INITIAL_DATA fallbacks to construct entry lists
+    - Multiple entrypoints: article clips, embedded videos, reels, and “playlist” pages
+  - It can return:
+    - A single video entry (with id, title, description, formats, subtitles, duration, etc.)
+    - A playlist (list of entries) via playlist_result
+    - A url_result pointing to other BBC extractors (BBCCoUk or BBCCoUkIE)
+  - Handles a lot of BBC-specific edge cases and data structures (INITIAL_DATA, PRELOADED_STATE, data-media-meta, vxp playlists, etc.)
+
+- BBCCoUkArticleIE (InfoExtractor)
+  - Extractor for BBC Programme articles that embed multiple videos.
+  - _real_extract builds a playlist from Clip blocks found in the article page and returns a playlist_result with id, title, description.
+
+- BBCCoUkPlaylistBaseIE (InfoExtractor)
+  - Base class for BBC iPlayer-style playlists (not SMP-based).
+  - _entries generator yields per-video entries from a playlist page, handling pagination.
+  - _real_extract parses title/description, then builds a playlist result from _entries.
+
+- BBCCoUkIPlayerPlaylistBaseIE (InfoExtractor)
+  - Base class for iPlayer SMP-based playlists (Mobile/Tablet/PC SMP API).
+  - Provides a GraphQL/REST-like API integration to fetch episodes/entries:
+    - _get_default, _get_description helpers
+    - _fetch_page, _call_api to fetch page data from the BBC IBL API
+    - _get_elements, _get_episode, _get_playlist_data, _get_playlist_title
+  - Subclasses use these to assemble a list of playable episode entries with fields like id, title, url, thumbnail, description, series, etc.
+
+- BBCCoUkIPlayerEpisodesIE (BBCCoUkIPlayerPlaylistBaseIE)
+  - Inherits from BBCCoUkIPlayerPlaylistBaseIE
+  - IE_NAME set to “bbc.co.uk:iplayer:episodes”
+  - _VALID_URL targets the SMP-based episodes endpoints
+  - Tests include various episode lists, season views, and paging
+
+- BBCCoUkIPlayerGroupIE (BBCCoUkIPlayerPlaylistBaseIE)
+  - Inherits from BBCCoUkIPlayerPlaylistBaseIE
+  - IE_NAME set to “bbc.co.uk:iplayer:group”
+  - _VALID_URL targets the SMP-based group endpoints
+  - Tests include group pages with multiple episodes and paging
+
+- BBCCoUkPlaylistIE (BBCCoUkPlaylistBaseIE)
+  - IE_NAME “bbc.co.uk:playlist”
+  - _VALID_URL matches playlists for BBC programmes (clips, broadcasts, etc.)
+  - _extract_title_and_description helper for page title/description extraction
+  - Uses BBCCoUkIE for video entries inside playlists
+
+Key implementation details
+- URL/ID handling
+  - BBCCoUkIE uses a robust _VALID_URL and _ID_REGEX to identify BBC program IDs (vpids, pids) across multiple BBC services (iPlayer, music, radio, events, etc.).
+- Data sources and formats
+  - Primary data source is the BBC Media Selector endpoint, with multiple media sets (pc, iptv-all, mobile-tablet-main, etc.) to try different formats and qualities.
+  - Supports multiple streaming formats: DASH (MPD), HLS (M3U8), HDS (F4M), ASX playlists, direct HTTP/HTTPS URLs, and RTMP (with application, play_path, and related fields).
+  - Subtitles are pulled from caption/caption-like endpoints when available (TTML).
+- Fallbacks and aliases
+  - If media selector fails, falls back to legacy playlist endpoints and legacy sxml parsing.
+  - Handles data embedded in various page structures: media metadata (data-media-meta), initial data blobs (INITIAL_DATA, PRELOADED_STATE), Morph payloads, and data-playable blocks.
+  - Special handling for BBC Three content via bbcthreeConfig payload.
+- Error handling
+  - Custom MediaSelectionError triggers friendly error messages (e.g., geolocation, not in UK).
+  - _raise_extractor_error converts these into ExtractorError with expected=True.
+- Login support
+  - BBCCoUkIE._login implements BBC account sign-in flow, reading login form fields, submitting with credentials, and error handling on failure.
+- Data extraction patterns
+  - Extensive use of regular expressions to locate IDs, titles, descriptions, timestamps, and embedded data.
+  - Uses JSON parsing (including js_to_json transformations) to handle embedded JSON-like strings.
+  - Handles various data representations: JSON-LD, structured JSON in scripts, and HTML meta tags.
+- Output shape
+  - Each extractor returns either a playlist (playlist_result) or a single video entry (id, title, description, duration, thumbnail, formats, subtitles, etc.), with some entries including uploader, uploader_id, timestamp, categories, and alt_title.
+
+Summary
+- The file provides a comprehensive suite of BBC extractors to cover BBC iPlayer, BBC articles, SMP-based iPlayer content, and numerous embedded/bundled media formats.
+- The core logic revolves around fetching a media selection (formats), with robust fallbacks to legacy playlists and various embedded data sources, extracting metadata (title, description, timestamp, thumbnails), and assembling a list of playable formats (with support for DASH/HLS/HDS/RTMP/ASX and direct links) plus optional subtitles.
+- It includes substantial error handling, login support, and a wide variety of tests demonstrating common BBC content scenarios.

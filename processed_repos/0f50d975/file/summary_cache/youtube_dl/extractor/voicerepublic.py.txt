@@ -1,0 +1,44 @@
+- Purpose: Implement a YouTube-dl extractor for Voice Republic audio talks. It fetches talk metadata and available audio formats from a talk page or embed page.
+
+Key components:
+- Class VoiceRepublicIE(InfoExtractor)
+  - _VALID_URL: Regex matching Voice Republic talk and embed URLs:
+    - http(s)://voicerepublic.com/talks/<id> or /embed/<id>
+  - _TESTS: Contains test cases
+    - A full talk URL test with expected metadata (id, display_id, ext, title, description, duration, view_count)
+    - An embed URL test marked as only_matching (ensures the URL pattern matches)
+  - _real_extract(self, url): Core extraction logic
+    - display_id = self._match_id(url): extracts the id portion from the URL using _VALID_URL
+    - webpage = self._download_webpage(url, display_id): fetches the page content
+    - If the page contains the string '>Queued for processing, please stand by...<', raise ExtractorError with message 'Audio is still queued for processing' and expected=True (signals a known, non-fatal issue)
+    - talk = self._parse_json(self._search_regex(r'initialSnapshot\s*=\s*({.+?});', webpage, 'talk'), display_id)['talk']:
+      - Extracts a JSON object embedded in the page (initialSnapshot) and accesses its 'talk' field
+    - title = talk['title']: talk title
+    - formats: builds a list of audio formats from talk['media_links']
+      - For each (format_id, talk_url) in talk['media_links'].items():
+        - url: urljoin(url, talk_url) (resolves relative URLs)
+        - ext: determine_ext(talk_url) or format_id
+        - vcodec: 'none' (audio-only formats)
+        - format_id: format_id
+      - self._sort_formats(formats): sorts formats by quality/preference
+    - Return dict with metadata:
+      - 'id': compat_str(talk.get('id') or display_id)
+      - 'display_id': display_id
+      - 'title': title
+      - 'description': talk.get('teaser')
+      - 'thumbnail': talk.get('image_url')
+      - 'duration': int_or_none(talk.get('archived_duration'))
+      - 'view_count': int_or_none(talk.get('play_count'))
+      - 'formats': formats
+
+Implementation details:
+- Uses helper utilities:
+  - compat_str to ensure string type for IDs
+  - int_or_none to safely convert numeric fields
+  - determine_ext to infer file extension from URLs
+  - urljoin to resolve relative format URLs against the page URL
+- Data source: The extractor reads a JavaScript-embedded JSON object from the webpage (initialSnapshot) to obtain the talk metadata and a map of media_links for all available formats.
+- Output: A standard InfoExtractor result containing id, display_id, title, description, thumbnail, duration, view_count, and a list of audio formats (each with URL, format_id, ext, and vcodec='none').
+
+Main functionality summary:
+- Parses Voice Republic talk pages to gather talk metadata and all available audio formats, prioritizes audio-only streams, and returns a structured metadata dictionary suitable for downloading via youtube-dl. Handles the “queued for processing” state gracefully with a dedicated error.

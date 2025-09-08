@@ -1,0 +1,123 @@
+Here’s a concise, focused summary of the code in ./youtube-dl/youtube_dl/extractor/aenetworks.py.
+
+Overview
+- Provides YouTube-DL extractors for A&E Networks portals (History, A&E, Lifetime, FYI, Biography, History Vault).
+- Core media retrieval is built around ThePlatform (ThePlatformIE) with behind-the-wall (MVPD) support.
+- Also includes GraphQL-based playlist/collection/show extractors for some sections (History Vault, etc.).
+- Handles geo-restrictions and behind-wall authentication when needed.
+- Contains dedicated extractors for individual topics/players and for Biography pages that embed History players.
+
+Key classes and main functionality
+
+1) AENetworksBaseIE (base class)
+- Inherits from ThePlatformIE.
+- Constants:
+  - _BASE_URL_REGEX: flexible URL matching for multiple A&E domains (history.com, aetv.com, mylifetime.com, lifetimemovieclub.com, fyi.tv, historyvault.com, biography.com, etc.).
+  - _THEPLATFORM_KEY / _THEPLATFORM_SECRET: credentials used to sign ThePlatform URLs.
+  - _DOMAIN_MAP: maps domain hostnames to a pair (brand, slug) used to query A&E feeds (e.g., history.com -> ('HISTORY','history'), aetv.com -> ('AETV','aetv'), etc.). Some domains map to (None, slug) if the brand is not needed.
+- _extract_aen_smil(self, smil_url, video_id, auth=None)
+  - Builds several ThePlatform SMIL URLs by augmenting the base SMIL URL with different query variants (assetTypes and switches like hls_high_ak, hls_high_fastly, etc.).
+  - Signs each URL, fetches ThePlatform SMIL data via _extract_theplatform_smil, and aggregates formats and subtitles.
+  - Supports behind-wall auth: if a request fails with a non-Geo error, it stores the last error and continues trying other variants; if only errors occur and no formats were gathered, re-raises the last error.
+  - Returns a dict with id, formats, and subtitles, after sorting formats.
+- _extract_aetn_info(self, domain, filter_key, filter_value, url)
+  - Uses the domain to determine requestor_id and brand from _DOMAIN_MAP.
+  - Loads the A&E feed JSON for videos via feeds.video.aetnd.com/api/v2/{brand}/videos with a filter.
+  - Selects the relevant result (first item where filter_key matches filter_value).
+  - If not found, raises an ExtractorError indicating the show is not in the A&E feed.
+  - Extracts title, video_id, and media_url (public URL).
+  - Fetches ThePlatform metadata for the video (path extracted from media_url).
+  - Parses ThePlatform metadata to a local info dict; if behind a wall, builds MVPD auth via _get_mvpd_resource and _extract_mvpd_auth.
+  - Merges ThePlatform SMIL formats via _extract_aen_smil and adds title, series, season/episode numbers to the info.
+  - Returns a dict with all merged metadata.
+
+2) AENetworksIE
+- Entry-point extractor for most A&E networks.
+- IE_NAME = 'aenetworks'.
+- _VALID_URL: combines _BASE_URL_REGEX with patterns for shows, movies, etc.
+- _TESTS: includes examples for History, A&E, and other domains; demonstrates geo-restriction and behind-wall behavior; also contains several only_matching entries for non-extractable pages.
+- _real_extract(self, url)
+  - Extracts domain and canonical path, then delegates to _extract_aetn_info(domain, 'canonical', '/' + canonical, url).
+
+3) AENetworksListBaseIE
+- Abstract base for GraphQL-based playlists:
+  - _call_api(self, resource, slug, brand, fields)
+    - Calls GraphQL endpoint https://yoga.appsvcs.aetnd.com/graphql with:
+      - brand as a query param
+      - a GraphQL query built from resource, slug, and fields
+    - Returns data[resource].
+  - _real_extract(self, url)
+    - Extracts domain and slug; derives brand from _DOMAIN_MAP.
+    - Calls _call_api with the class’ _RESOURCE, slug, brand, and _FIELDS.
+    - Builds a list of video entries by iterating playlist[self._ITEMS_KEY]; for each item:
+      - Gets a document via _get_doc(item); uses canonical to build the video URL: base_url + canonical.
+      - Creates a YouTube-DL result for AENetworksIE with that URL and the doc's id.
+    - Optionally attaches a playlist description from _PLAYLIST_DESCRIPTION_KEY.
+    - Returns a playlist_result with id, title, and description.
+
+4) AENetworksCollectionIE
+- Inherits AENetworksListBaseIE.
+- IE_NAME = 'aenetworks:collection'.
+- _VALID_URL matches collection/list URLs.
+- Uses:
+  - _RESOURCE = 'list'
+  - _ITEMS_KEY = 'items'
+  - _PLAYLIST_TITLE_KEY = 'display_title'
+  - _FIELDS with collection structure
+  - _get_doc(item) returns item.get('doc') or {}
+- Purpose: extract a collection of videos from a History Vault/related collection page via GraphQL.
+
+5) AENetworksShowIE
+- Inherits AENetworksListBaseIE.
+- IE_NAME = 'aenetworks:show'.
+- _VALID_URL matches shows/... URLs.
+- Uses:
+  - _RESOURCE = 'series'
+  - _ITEMS_KEY = 'episodes'
+  - _PLAYLIST_TITLE_KEY = 'title'
+  - _PLAYLIST_DESCRIPTION_KEY = 'description'
+  - _FIELDS includes series and episodes (canonical, id)
+  - _get_doc(item) returns item directly
+- Purpose: extract a show’s episodes as a playlist.
+
+6) HistoryTopicIE
+- IE_NAME = 'history:topic', description for History.com topic pages.
+- _VALID_URL matches History topic pages ending with -video.
+- _real_extract(url)
+  - Derives display_id from URL and redirects to the History video page:
+    http://www.history.com/videos/{display_id}
+  - Returns a result that uses AENetworksIE as the underlying extractor (via url_result) to fetch the actual video.
+
+7) HistoryPlayerIE
+- IE_NAME = 'history:player'
+- _VALID_URL matches History player URLs: history or biography domain, /player/{id}
+- _real_extract(url)
+  - Extracts domain and video_id from the URL.
+  - Delegates to _extract_aetn_info(domain, 'id', video_id, url) to fetch metadata and ThePlatform SMIL formats.
+
+8) BiographyIE
+- For Biography videos that embed History players.
+- _VALID_URL matches biography.com/video/{id}
+- _TESTS includes a sample Biography video.
+- _real_extract(url)
+  - Gets display_id from URL, downloads the page.
+  - Locates an embedded player URL with a regex that points to HistoryPlayerIE’s _VALID_URL.
+  - Returns a result using HistoryPlayerIE to extract the actual video.
+
+Implementation details and notable behavior
+- ThePlatform integration:
+  - ThePlatform SMIL URLs are signed with _THEPLATFORM_KEY/SECRET before fetching formats.
+  - _extract_aen_smil tries multiple asset types and HLS/DASH switches (M3U, MPEG-DASH, etc.) to assemble a complete set of formats and subtitles.
+  - GeoRestrictedError handling: if a particular SMIL variant is geo-restricted, it’s skipped (unless all variants fail, in which case the last error bubbles up).
+- Behind-wall (MVPD) support:
+  - When ThePlatform metadata indicates a behind-wall resource, MVPD authentication is obtained via _get_mvpd_resource and _extract_mvpd_auth using A&E-specific identifiers from the metadata.
+- GraphQL-based playlist extraction:
+  - For collections and shows, the code queries a GraphQL API (yoga.appsvcs.aetnd.com) with fields tailored to the item type, then reconstructs playable video URLs from canonical paths.
+- Domain-aware logic:
+  - _DOMAIN_MAP guides how different domains are treated (brand slug, feed endpoints, etc.).
+  - History Vault, Biography, and History topics have specialized paths to map to standard ThePlatform-based extraction or to History video pages.
+- Output structure:
+  - Standard ThePlatform-based videos: dicts with id, formats, and possibly subtitles; for playlists: playlist entries as url_results, plus id, title, and description.
+
+In short
+- This file provides a robust extractor set for A&E Networks using ThePlatform for media delivery, with support for geo-restricted and behind-wall content, plus GraphQL-driven playlist/collection handling for several sites. It includes specialized handling for History topics/players and Biography pages that embed History content, and uses a combination of ThePlatform SMIL extraction and MVPD authentication when needed.

@@ -1,0 +1,39 @@
+- Purpose: A youtube-dl extractor for Bigo TV live streams. It fetches internal studio info for a given user and builds a video info dictionary suitable for downloading or streaming.
+
+- Class and inheritance:
+  - BigoIE(InfoExtractor): Implements the extraction logic for Bigo TV.
+
+- URL pattern:
+  - _VALID_URL = r'https?://(?:www\.)?bigo\.tv/(?:[a-z]{2,}/)?(?P<id>[^/]+)'
+  - Handles URLs with an optional language subpath (e.g., ja/221338632) or just the user id.
+
+- Tests:
+  - _TESTS includes:
+    - A live example with expected metadata (id, title, thumbnail, uploader, uploader_id, is_live) and skipped due to being livestream.
+    - A couple of only_matching tests for URL pattern validation.
+
+- Core logic (_real_extract):
+  - Extract user_id from URL via self._match_id(url).
+  - Request internal studio info via POST to https://bigo.tv/studio/getInternalStudioInfo with data encoded as siteId=user_id using urlencode_postdata.
+  - Validate response:
+    - If info_raw is not a dict -> raise ExtractorError('Received invalid JSON data').
+    - If info_raw contains a truthy 'code' -> raise ExtractorError with message 'Bigo says: <msg> (code <code>)' (marked as expected).
+  - info = info_raw.get('data') or {}.
+  - If info.get('alive') is not truthy -> raise ExtractorError('This user is offline.', expected=True).
+  - Build and return the result dictionary:
+    - id: info.get('roomId') or user_id
+    - title: info.get('roomTopic') or info.get('nick_name') or user_id
+    - formats: a list with a single entry:
+      - url: info.get('hls_src')
+      - ext: 'mp4'
+      - protocol: 'm3u8'
+    - thumbnail: info.get('snapshot')
+    - uploader: info.get('nick_name')
+    - uploader_id: user_id
+    - is_live: True
+
+- Important implementation details:
+  - Uses a POST request to fetch live studio data rather than scraping a page.
+  - Robust error handling for JSON structure and API error codes.
+  - Treats an absent or offline user as an expected error (not a hard failure).
+  - The returned formats rely on an HLS source (hls_src) with m3u8 protocol but marked as mp4 extension.

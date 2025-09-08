@@ -1,0 +1,32 @@
+Here is a concise, focused summary of the Embedly extractor code.
+
+- Purpose
+  - Implements an extractor for Embedly widget URLs and delegates extraction to the underlying media URL specified in the widget.
+
+- Key class
+  - EmbedlyIE(InfoExtractor)
+
+- Main functionality
+  - _VALID_URL: Regex that matches Embedly widget pages like:
+    - http(s)://(www|cdn).embedly.com/widgets/media.html?...&url=ENCODED_URL
+    - It captures the value of the url parameter (percent-encoded) as the id group.
+  - _TESTS: Includes a sample Embedly URL (with many query params) and marks it as only_matching.
+
+- Core logic
+  - _real_extract(self, url):
+    - Uses _match_id(url) to extract the captured id (the encoded value of the underlying media URL after url=...).
+    - Applies compat_urllib_parse_unquote to decode percent-encoding (turns %3A into :) to obtain the actual target URL.
+    - Returns self.url_result(target_url), delegating extraction to the appropriate extractor for that URL (e.g., YouTube, Vimeo, etc.).
+
+- Important implementation details
+  - The unquoting uses compat_urllib_parse_unquote to handle Python 3/2 compatibility.
+  - The extraction does not itself parse or fetch the media; it simply resolves to the underlying URL and hands control to the corresponding extractor.
+
+- Behavior and edge cases
+  - If the Embedly URL contains the actual media URL in the url parameter, this extractor will route to that URL’s own extractor.
+  - The code assumes the target URL is properly encoded in the url parameter and decodes it before delegation.
+
+- Example
+  - Given an Embedly widget URL with url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DSU4fj_aEMVw, the extractor decodes to https://www.youtube.com/watch?v=SU4fj_aEMVw and delegates to the YouTube extractor.
+
+Overall, EmbedlyIE is a lightweight resolver that forwards to the real media URL embedded by Embedly, enabling youtube-dl to apply the appropriate extraction logic for the actual media resource.

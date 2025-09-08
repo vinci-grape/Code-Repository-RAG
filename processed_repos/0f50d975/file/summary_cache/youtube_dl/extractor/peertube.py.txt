@@ -1,0 +1,103 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/peertube.py
+
+Purpose
+- Implement a PeerTube extractor (PeerTubeIE) for youtube-dl.
+- Retrieve video metadata, formats, and subtitles from PeerTube instances, using the instance API, and return a normalized info_dict suitable for download.
+
+Key classes and functions
+- PeerTubeIE(InfoExtractor)
+  - Core extractor class that implements PeerTube-specific logic.
+- _INSTANCES_RE
+  - Very large regex listing many known PeerTube instance domains. Used to identify/validate hosts and to build API URLs.
+- _UUID_RE
+  - Regex for a standard UUID (video identifier).
+- _API_BASE
+  - Template for PeerTube API endpoints: https://<host>/api/v1/videos/<video_id>/<path>.
+- _VALID_URL
+  - Regex for matching PeerTube video URLs and the peertube:host:id pseudo-URL form. Supports:
+    - peertube:host:id
+    - https://<host>/videos/watch|embed/UUID
+    - https://<host>/api/v1/videos/UUID
+- _extract_peertube_url(webpage, source_url)
+  - Static helper to extract a PeerTube watch/embed URL from a page and convert it to a peertube:host:id pseudo-URL if the page indicates PeerTube is playable (via specific strings in the HTML).
+- _extract_urls(webpage, source_url)
+  - Static helper to find embedded PeerTube iframes in a page (src matching //<host>/videos/embed/UUID).
+  - Falls back to _extract_peertube_url if no iframes found.
+  - Returns a list of URLs (either actual URLs or peertube:host:id strings) to be processed.
+- _call_api(self, host, video_id, path, note=None, errnote=None, fatal=True)
+  - Wrapper around _download_json to query the PeerTube API for a given host/video_id and API path.
+- _get_subtitles(self, host, video_id)
+  - Fetches captions via the API path 'captions' and constructs a subtitles dict: { language_code: [{url: ...}, ...] }.
+  - Handles missing/invalid data gracefully.
+- _real_extract(self, url)
+  - Main extraction workflow:
+    - Parse URL with _VALID_URL to extract host and video_id.
+    - Retrieve video JSON via API (path '').
+    - Build formats by aggregating:
+      - video.get('files')
+      - streamingPlaylists[].files (if present)
+      - For each file: derive file_url, filesize, format_id (resolution label), and use parse_resolution to produce a format dict.
+      - Mark 0p as video with vcodec 'none'; otherwise set fps.
+      - Sort formats with _sort_formats.
+    - Description handling:
+      - Use video['description'] if short.
+      - If length >= 250, fetch full description via API path 'description' and replace when available.
+    - Subtitles via extract_subtitles(host, video_id) (delegates to _get_subtitles internally).
+    - Helper functions to read nested data:
+      - data(section, field, type_)
+      - account_data(field, type_)
+      - channel_data(field, type_)
+    - Metadata extraction:
+      - title, thumbnail, timestamp (unified_timestamp on publishedAt)
+      - uploader/uploader_id/uploader_url (account data)
+      - channel/channel_id/channel_url (channel data)
+      - language (language.id), license (licence.label)
+      - duration, view_count, like_count, dislike_count
+      - age_limit (derived from nsfw if boolean)
+      - tags, categories (single category wrapped in a list)
+    - webpage_url computed as https://<host>/videos/watch/<video_id>
+    - Returns a dict with id, title, description, thumbnail, timestamp, uploader, uploader_id, uploader_url, channel, channel_id, channel_url, language, license, duration, view_count, like_count, dislike_count, age_limit, tags, categories, formats, subtitles, webpage_url.
+
+Important implementation details and nuances
+- Flexible URL input:
+  - Accepts both direct PeerTube URLs and the peertube:host:id pseudo-URL used internally by youtube-dl.
+  - _extract_urls allows extraction from embedded iframes on a page, enabling multi-source detection across many PeerTube instances.
+- Large instance list:
+  - _INSTANCES_RE is a long, curated list of PeerTube hosts; this allows robust URL recognition across many deployments.
+- API-driven metadata:
+  - All video data is retrieved from the PeerTube REST API (https://<host>/api/v1/videos/<id>/...), including:
+    - '' path for the main video JSON
+    - 'captions' for subtitles
+    - 'description' for full description when the short one is truncated
+- Formats assembly:
+  - Supports multiple formats from both files and streaming playlists.
+  - Each file contributes a format dict with:
+    - 'url': direct video URL
+    - 'format_id': human-readable resolution label
+    - 'filesize': size if provided
+    - 'vcodec': 'none' for 0p (likely audio-only or placeholder)
+    - 'fps': frames per second when available
+  - Uses parse_resolution to interpret format_id into a standard width/height, then updates the format dict accordingly.
+  - Formats are sorted via _sort_formats for proper ranking (e.g., higher resolutions first).
+- Subtitles:
+  - Captions are retrieved via API and mapped to language codes. Missing data is tolerated.
+- Description handling:
+  - Short descriptions are used as-is; long descriptions trigger a separate API call to fetch the full text, ensuring completeness when available.
+- Metadata extraction:
+  - Uses safe access patterns with try_get, int_or_none, str_or_none, and compat_str to handle inconsistent or missing JSON fields.
+  - Maps nested account and channel data to uploader/channel fields, including IDs and URLs.
+- NSFW handling:
+  - age_limit is derived only if video.get('nsfw') is a boolean; true -> 18, false -> 0; otherwise None (not strictly enforcing a hard NSFW rule if the API doesn't provide a boolean).
+- Robustness:
+  - Numerous type checks and guards (isinstance, if not, continue) guard against malformed API responses.
+  - The code is designed to tolerate missing fields and gracefully degrade.
+
+Tests
+- _TESTS contains several test cases covering:
+  - Typical Framasoft FramaTube example with full metadata and formatting.
+  - An issue-specific case (spacepub.space) with an embedded/URL-based video.
+  - Matching-only URLs (nsfw cases and API-watch endpoints).
+  - Pseudo-URL form (peertube:host:id) for internal testing.
+
+In short
+- PeerTubeIE fetches video data via PeerTube API, aggregates all available video formats (from files and streaming playlists), resolves metadata (title, description, uploader/channel info, language, license, duration, counts), handles subtitles, and returns a consistent info_dict for download. It supports both direct video URLs and embedded/iframe pages across a wide range of PeerTube instances, with careful handling of descriptions and NSFW flags.

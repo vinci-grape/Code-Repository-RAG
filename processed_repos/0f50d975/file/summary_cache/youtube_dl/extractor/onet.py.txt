@@ -1,0 +1,87 @@
+Here is a concise, functionality-focused summary of the code in ./youtube-dl/youtube_dl/extractor/onet.py.
+
+Main purpose
+- Implement multiple extractors for the Onet family of Polish video sites (onet.tv, onet100.vod.pl, and related domains) to fetch video metadata and available formats, and to build playlists for channels.
+
+Key classes and their roles
+- OnetBaseIE (InfoExtractor)
+  - Shared base for Onet extractors.
+  - _URL_BASE_RE: URL base pattern for Onet domains (onet.tv or onet100.vod.pl).
+  - _search_mvp_id(webpage): Extracts an MVP ID from a webpage using the pattern id="mvp:<id>".
+  - _extract_from_id(video_id, webpage=None): Core logic to fetch video metadata/formats via an API and return a standard info dict.
+    - Calls the API at http://qi.ckm.onetapi.pl/ with a JSON-RPC-like payload to get asset details (body[method]=get_asset_detail, etc.).
+    - Handles API errors by raising ExtractorError with the API-provided message.
+    - Iterates over video['formats'] to build a list of formats:
+      - ism... formats -> extract via _extract_ism_formats
+      - mpd (dash) -> _extract_mpd_formats
+      - hls... formats -> _extract_m3u8_formats
+      - Other HTTP formats: assemble a format dict with url, format_id, audio bitrate (abr), and video properties (height, width, vbr). Distinguishes audio vs video via format_type.
+    - Sorts formats with _sort_formats.
+    - Metadata: tries og:title/og:description from the page if available, otherwise uses meta['title'] / meta.get('description').
+    - duration from meta['length'] or meta['lenght'] (note the typo is accounted for).
+    - timestamp parsed from meta['addDate'] via parse_iso8601.
+    - Returns a dict with id, title, description, duration, timestamp, formats.
+
+- OnetMVPIE
+  - _VALID_URL = onetmvp:(<id>), where id is a digit sequence with decimal (e.g., 381027.1509591944).
+  - _real_extract(url): delegates to _extract_from_id(self._match_id(url)) to fetch MVP-based video details.
+
+- OnetIE
+  - _VALID_URL = OnetBaseIE._URL_BASE_RE + [path] capturing display_id and id.
+  - IE_NAME = 'onet.tv'
+  - _real_extract(url):
+    - Extracts display_id and video_id from URL.
+    - Downloads the page and extracts mvp_id via _search_mvp_id(webpage).
+    - Uses _extract_from_id(mvp_id, webpage) to get the video info.
+    - Inserts id (video_id) and display_id into the resulting info dict and returns it.
+
+- OnetChannelIE
+  - _VALID_URL = OnetBaseIE._URL_BASE_RE + (?P<id>[a-z]+) (channel per slug)
+  - IE_NAME = 'onet.tv:channel'
+  - _real_extract(url):
+    - channel_id = matched slug.
+    - Downloads channel page.
+    - Parses currentClip data (JSON) embedded in the page to get ckmId and URL for the current video.
+    - video_id = remove the 'mvp:' prefix from ckmId.
+    - video_name = basename of the current video URL.
+    - If --no-playlist, fetch just that video via _extract_from_id(video_id, webpage).
+    - Otherwise:
+      - Find additional video links on the channel page (regex capturing onetmvp-like paths).
+      - Build a list of entries using OnetIE as the extractor for each video link.
+      - Extract channel metadata: title and description from elements with classes o_channelName / o_channelDesc.
+      - Return a playlist_result with entries, channel_id, channel_title, channel_description.
+
+- OnetPlIE
+  - _VALID_URL matches several Polish Onet domains (onet.pl, businessinsider.pl, plejada.pl) with a path that ends in an id.
+  - IE_NAME = 'onet.pl'
+  - _search_mvp_id(webpage, default=NO_DEFAULT): Looks for data-(params-)?mvp="id" in the page.
+  - _real_extract(url):
+    - video_id = matched id from URL.
+    - Download the page and try to find mvp_id via _search_mvp_id(webpage, default=None).
+    - If not found, try fallback: extract a PulseMbed embed URL, download that, and search for mvp id again.
+    - Return a URL result pointing to the MVP-based extractor: 'onetmvp:<mvp_id>' with OnetMVPIE as the extractor and video_id set to mvp_id.
+  - This handles embedded or across-domain cases (PulseMbed) to obtain the MVP ID.
+
+Important implementation details
+- Formats handling:
+  - Supports multiple formats depending on the type and provider:
+    - isms (ISM) via _extract_ism_formats
+    - MPD/DASH via _extract_mpd_formats
+    - HLS via _extract_m3u8_formats
+    - Direct HTTP(S) progressive streams with metadata: format_id, audio bitrate (abr), and for video: height, width, vbr. Audio-only formats get vcodec='none'.
+- Metadata extraction:
+  - Uses OpenGraph (og) helpers when a webpage is available, otherwise relies on meta fields in the API response.
+  - duration retrieved from meta['length'] or meta['lenght'] (to accommodate a known typo).
+  - addDate parsed with parse_iso8601 to produce a timestamp.
+- MVP-based flow:
+  - The core data source for actual assets appears to be an MVP system. The code extracts mvp IDs from pages, then fetches asset details via a JSON-RPC-like call to http://qi.ckm.onetapi.pl/.
+- Channel and playlist handling:
+  - Channel pages can yield multiple video entries; the code constructs a playlist_result with channel metadata and a list of video entries. If no-playlist is requested, it falls back to single-video extraction.
+- Fallbacks and edge cases:
+  - OnetPlIE covers fallback to Pulsembed if a direct MVP ID isn’t present in the page.
+  - Robust handling of various URL forms and domain variants (onet.tv, onet100.vod.pl, businessinsider.pl, plejada.pl, Eurosport subpath, etc.).
+- Tests:
+  - The file includes _TEST entries for several extractors to verify behavior (e.g., sample Onet.tv video, channel, and MVP URL).
+  
+In short
+- This file provides a cohesive set of extractors for Onet video content: a shared base (OnetBaseIE) that fetches and decodes MVP-asset data, plus specialized extractors for MVP URLs (OnetMVPIE), standard Onet pages (OnetIE), channels (OnetChannelIE), and Polish Onet domain pages (OnetPlIE) with a PulseMbed fallback. It handles a variety of format types (ISM, MPD/DASH, HLS, and progressive HTTP), extracts rich metadata, and supports both single-video and playlist-fetching workflows.

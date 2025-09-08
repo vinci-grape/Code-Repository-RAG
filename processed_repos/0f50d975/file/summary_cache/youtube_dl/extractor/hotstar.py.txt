@@ -1,0 +1,84 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/hotstar.py
+
+What it does
+- Implements YouTube-DL extractors for HotStar:
+  - HotStarIE: extracts a single video, including available formats (HLS/DASH or direct URLs), metadata, and thumbnails.
+  - HotStarPlaylistIE: extracts a playlist by resolving items from a tray API and returning entries that link to HotStarIE.
+  - HotStarBaseIE: shared utilities for calling HotStar APIs with Akamai-based authentication and robust error handling.
+
+Main functionality and flow
+- Akamai-authenticated API calls:
+  - _AKAMAI_ENCRYPTION_KEY is used to generate a hotstarauth header with a time-based signature (st, exp, acl, hmac). All API calls go through _call_api_impl with this header.
+  - _call_api and _call_api_v2 wrap _call_api_impl for different endpoints and error handling, including region restrictions and login requirements.
+- Video extraction (HotStarIE):
+  - Downloads the page and parses window.APP_STATE to locate the content’s data (video_data) matching the video_id.
+  - Checks for DRM; if DRM is present, raises an ExtractorError.
+  - Obtains a user token and device ID via API v2 if not already present.
+  - Calls playback APIs to obtain a list of playbackSets (formats), handling:
+    - HLS (m3u8) and DASH (mpd) streams
+    - Direct URLs with width/height information
+    - Special handling to rewrite certain URLs (staragvod to web…)
+    - Encryption/plain vs other encryption tags to filter streams
+    - DRM/geo errors: marks geo_restricted if 403 occurs, and raises geo restriction when appropriate
+  - Aggregates formats, sorts them, and attaches Referer headers to each format.
+  - Extracts thumbnail image from video_data and returns a structured dict with id, title, description, duration, timestamp, channel info, series/season/episode metadata, and the list of formats.
+- Playlist extraction (HotStarPlaylistIE):
+  - Calls the tray/find API with the playlist’s uqId to get a collection of items.
+  - Builds a list of entries by creating HotStarIE URLs for each item’s contentId.
+  - Returns a playlist result containing these entries.
+  
+Key classes and important implementation details
+- HotStarBaseIE (InfoExtractor)
+  - _AKAMAI_ENCRYPTION_KEY: hardcoded key used to compute Akamai-based authorization.
+  - _call_api_impl(path, video_id, headers, query, data=None):
+    - Creates a time-bound auth header (st, exp, acl) and a SHA256 HMAC signature.
+    - Sends request to https://api.hotstar.com/{path} with merged headers.
+  - _call_api(path, video_id, query_name='contentId'):
+    - Uses IN country and JIO platform headers.
+    - Passes query_name: video_id and tas: 10000.
+    - Validates response statusCode == 'OK' and returns response['body']['results'].
+  - _call_api_v2(path, video_id, headers, query=None, data=None):
+    - Adds X-Request-Id header and calls _call_api_impl.
+    - On HTTP 402: raises login required.
+    - If error response contains region-related messages, raises geo restriction.
+    - Otherwise raises ExtractorError with the message.
+- HotStarIE
+  - _VALID_URL matches a 10-digit contentId and extracts video_id.
+  - _real_extract:
+    - Reads APP_STATE from the page to locate the content by matching contentId.
+    - Checks DRM protection and aborts if DRM is present.
+    - Creates or reuses DEVICE_ID and USER_TOKEN via API v2.
+    - Calls playback/v2 endpoints to fetch playbackSets with device-id and platform/app/version headers.
+    - For each playbackSet:
+      - Derives format URL, applies URL transformation for specific host paths.
+      - Filters by tags (encryption:plain required to accept).
+      - Determines type (HLS/DASH or direct) and extracts formats accordingly:
+        - HLS: _extract_m3u8_formats with m3u8_native, id 'hls'
+        - DASH: _extract_mpd_formats with mpd_id 'dash'
+        - Direct: adds a basic format with width/height if provided
+      - Handles HTTP 403 as geo-restriction and continues to try others if possible.
+    - If no formats found but geo_restricted is True, raises IN geo restriction.
+    - Sorts formats, attaches Referer headers, and builds a result dict containing:
+      id, title, thumbnail, description, duration, timestamp, formats, channel info, series/season/episode metadata.
+- HotStarPlaylistIE
+  - _VALID_URL matches HotStar TV playlists with a list path and an id (t-(id)).
+  - _real_extract:
+    - Fetches collection via o/v1/tray/find with the playlist id (uqId).
+    - Builds a list of entries by referencing each video’s contentId and pointing to HotStarIE.
+    - Returns a playlist_result with those entries.
+
+Important handling and edge cases
+- DRM protection: videos flagged as drmProtected raise an ExtractorError (expected).
+- Region/geo restrictions: errors related to region availability or country support are translated into geo restrictions; a fallback mechanism raises IN geo restriction when needed.
+- Login flow: 402 HTTP errors trigger a login prompt requirement flow.
+- Robust retrieval: prefers API v2 for playback data; gracefully skips problematic playbackSets while noting geo restrictions if applicable.
+- Headers and session data:
+  - Referer header is added to all formats.
+  - X-HS-Platform, X-HS-AppVersion, X-HS-UserToken headers are used for API v2 playback calls.
+- URL handling: special treatment of staragvod URLs to ensure correct host path for format extraction.
+- Output structure:
+  - For videos: id, title, description, duration, timestamp, thumbnail, channel info, series/season/episode metadata, and formats.
+  - For playlists: a list of video entries constructed via HotStarIE.
+
+Tests
+- Includes several _TESTS for HotStarIE (examples covering DRM, description, duration, timestamp, etc.) and a few for HotStarPlaylistIE to verify playlist extraction and matching behavior.

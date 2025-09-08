@@ -1,0 +1,56 @@
+Concise but comprehensive summary of ./youtube-dl/youtube_dl/extractor/sevenplus.py
+
+Overview
+- Defines a YouTube-DL extractor for the Australian site 7plus, built on top of Brightcove metadata parsing.
+- Class SevenPlusIE inherits from BrightcoveNewIE and enriches/normalizes data from 7plus playback and content APIs.
+
+Key components
+- Class: SevenPlusIE(BrightcoveNewIE)
+  - IE_NAME = '7plus'
+  - _VALID_URL: Matches URLs like https://7plus.com.au/... with a query parameter episode-id=..., capturing path and id.
+  - _TESTS: Includes realistic test with expected metadata (id, title, description hash, uploader_id, dates, series, season/episode numbers) and a skip_download/bestvideo setup.
+
+Main workflow (_real_extract)
+1) Parse URL components
+   - Extracts path and episode_id from the URL using the defined _VALID_URL regex.
+
+2) Retrieve Brightcove media metadata via playback API
+   - Requests JSON from https://videoservice.swm.digital/playback with:
+     - episode_id as the second arg
+     - query params: appId=7plus, deviceType=web, platformType=web, accountId=5303576322001, referenceId='ref:' + episode_id, deliveryId='csai', videoType='vod'
+   - Accesses the 'media' field of the response.
+   - Error handling for 403:
+     - If the error is an HTTP 403, it attempts to parse a JSON body from the HTTP error and raises an ExtractorError with an expected error code extracted from that body. This allows signaling known, expected errors.
+   - Normalizes all source URLs by ensuring the query parameter 'rule' is present and set to '' (update_url_query).
+
+3) Parse Brightcove metadata
+   - Uses self._parse_brightcove_metadata(media, episode_id) to obtain an initial info dict (includes title, description, uploader_id, etc.).
+
+4) Enrich with additional content data (infoPanel) from content CDN
+   - Fetches content from https://component-cdn.swm.digital/content/ + path with header {'market-id': 4}, fatal=False (don’t fail if not found).
+   - Iterates content['items'] (if present). For items where componentData.componentType == 'infoPanel':
+     - Copy over title and shortSynopsis to info as title/description when available.
+     - Set info['series'] from item['seriesLogo']['name'] if present.
+     - If title follows the pattern "S{season} E{episode} - {name}", parse and set:
+       - season_number (int)
+       - episode_number (int)
+       - episode (name)
+
+5) Return final info
+   - The function returns the enriched info dictionary, which includes Brightcove-derived fields plus any added/overridden data from the content API (title, description, series, season/episode, etc.).
+
+Important implementation details
+- URL matching requires the episode-id parameter to be present; _VALID_URL extracts both the path and id for API calls and content fetch.
+- Playback API interaction is specific to 7plus/SWM backend (playback endpoint with appId, accountId, referenceId, etc.).
+- Robust 403 handling: attempts to parse a structured error code from the HTTP error body and raise an ExtractorError marked as expected.
+- Source URL normalization: ensures sources have a clean query by removing or resetting the 'rule' parameter.
+- Metadata enrichment strategy:
+  - Start with Brightcove metadata via BrightcoveNewIE.
+  - Augment with an optional infoPanel-based payload from the content CDN, which may supply a better title/description and series name, and can extract season/episode numbers from titles like "S7 E3 - Wind Surf".
+- Uses market-id header when requesting content metadata from the content CDN.
+
+What this achieves
+- Provides a complete, enriched metadata extraction for 7plus videos, including:
+  - Brightcove-driven core metadata (title, description, uploader, dates, etc.).
+  - Additional content-panel data for improved description, series, and explicit season/episode parsing when available.
+- Handles known API error cases gracefully and gracefully degrades when the content API is unavailable.

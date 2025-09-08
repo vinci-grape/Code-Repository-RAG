@@ -1,0 +1,52 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/scrippsnetworks.py
+
+Overview
+- Provides two extractors for Scripps Networks content in youtube-dl:
+  1) ScrippsNetworksWatchIE: handles videos on watch.geniuskitchen.com by obtaining temporary AWS credentials via Cognito and STS, then fetching video metadata via a Scripps/AWS API, and finally delegating to AnvatoIE to fetch the actual video.
+  2) ScrippsNetworksIE: handles other Scripps networks (Cooking Channel, Discovery, DIY Network, Food Network, HGTV, Travel Channel) by constructing ThePlatform URLs and delegating to ThePlatform extractor.
+
+Key classes
+- ScrippsNetworksWatchIE(AWSIE)
+  - IE_NAME: 'scrippsnetworks:watch'
+  - _VALID_URL: Regex matching watch.geniuskitchen.com URLs for various player formats and IDs.
+  - _TESTS: Includes a test for a sample Genius Kitchen video, asserting typical fields (id, title, description, uploader, timestamps) and specifying AnvatoIE as a nested extractor.
+  - _SNI_TABLE: Maps site IDs to SNI brand strings (e.g., 'geniuskitchen' -> 'genius').
+  - AWS-related constants:
+    - _AWS_API_KEY, _AWS_PROXY_HOST, _AWS_USER_AGENT
+  - _real_extract(self, url):
+    - Extracts site_id and video_id from the URL.
+    - Obtains an OpenID token via Cognito Identity using a region-specific endpoint.
+    - Uses the token to assume an AWS role with web identity via STS to obtain temporary credentials (AccessKeyId, SecretAccessKey, SessionToken).
+    - Calls the internal Scripps API (via _aws_execute_api) to fetch metadata including mcpId for the video: /1/web/brands/<brand>/episodes/scrid/<video_id>.
+    - Builds an Anvato video URL using the mcpId and wraps it with smuggle_url to set geo_countries: ['US'].
+    - Returns a video result using AnvatoIE (Anvato extractor key).
+  - Important implementation details:
+    - Multi-step AWS authentication flow: Cognito token -> STS temporary credentials -> API call to obtain mcpId.
+    - Uses X-Amz-Content-Sha256 header with the SHA-256 of the Cognito JSON payload.
+    - The final video is retrieved through Anvato (AnvatoIE).
+
+- ScrippsNetworksIE(InfoExtractor)
+  - _VALID_URL: Regex matching multiple Scripps network domains (cookingchanneltv, discovery, diynetwork, foodnetwork, hgtv, travelchannel) with video slug and numeric ID at the end.
+  - _TESTS: Includes:
+    - A valid Cooking Channel video URL with expected fields and ThePlatform as the nested extractor.
+    - Several other URLs marked as only_matching (indicating they are valid but not exercised fully in tests).
+  - _ACCOUNT_MAP: Maps domains to ThePlatform account IDs used to construct the ThePlatform URL.
+  - _TP_TEMPL: Template URL for ThePlatform media GUID access.
+  - _real_extract(self, url):
+    - Extracts site and guid from the URL.
+    - Constructs a ThePlatform URL using the account map and guid.
+    - Uses smuggle_url to add force_smil_url: True (to ensure SMIL manifest is used).
+    - Returns a ThePlatform video result via ThePlatform extractor (ThePlatform).
+
+Main functionality
+- ScrippsNetworksWatchIE:
+  - Enables access to specific Scripps videos hosted on Genius Kitchen’s watch site by performing an authenticated request flow with AWS services to obtain an internal mcpId, then handing off to Anvato for actual video retrieval.
+- ScrippsNetworksIE:
+  - General path for Scripps networks’ video pages; delegates to ThePlatform to fetch and stream the content.
+
+Implementation notes
+- Uses smuggle_url to attach extra parameters (geo restrictions for Anvato, and force_smil_url for ThePlatform) without changing the underlying extractor logic.
+- Relies on parent classes (AWSIE, InfoExtractor) for HTTP helpers (_download_json, _download_xml, _aws_execute_api) and for returning the final video objects.
+- Includes test cases to verify extraction paths and expected metadata, including uploader, timestamps, and IDs.
+
+In short, the file implements two extractors for Scripps Networks: one for watch.geniuskitchen.com videos via a complex AWS-based authentication flow leading to Anvato, and a second that forwards other Scripps network videos to ThePlatform.

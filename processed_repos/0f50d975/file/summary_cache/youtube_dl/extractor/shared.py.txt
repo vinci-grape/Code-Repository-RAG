@@ -1,0 +1,86 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/shared.py
+
+Purpose
+- Implement extractors for two related sites (shared.sx and vivo.sx/vivo.st) that host video files. A common base class handles shared logic, while site-specific subclasses implement how to obtain the actual video URL and metadata.
+
+Key classes
+- SharedBaseIE (InfoExtractor)
+  - _real_extract(url)
+    - Derives video_id from URL.
+    - Downloads the page with _download_webpage_handle.
+    - Checks for a not-found marker using self._FILE_NOT_FOUND; raises ExtractorError if present.
+    - Retrieves the actual video URL via _extract_video_url.
+    - Extracts title via _extract_title and filesize via _extract_filesize.
+    - Returns a dict with id, url, ext='mp4', filesize, and title.
+  - _extract_title(webpage)
+    - Reads a base64-encoded title from the HTML meta tag full:title, decodes it, and returns as UTF-8 string.
+  - _extract_filesize(webpage)
+    - Reads a full:size meta tag (fatal=False if unavailable) and returns the size string (converted later as needed).
+
+- SharedIE (SharedBaseIE)
+  - IE description and URL pattern:
+    - IE_DESC = 'shared.sx'
+    - _VALID_URL = https?://shared.sx/<10 base-16 alphanumeric chars>
+    - _FILE_NOT_FOUND = '>File does not exist<'
+  - _extract_video_url(self, webpage, video_id, url)
+    - Extracts hidden form inputs from the page (_hidden_inputs).
+    - Submits a POST request to the same URL (with those form fields) to fetch a video page.
+      - Uses urlencode_postdata(download_form) and appropriate headers (Content-Type and Referer).
+    - Extracts the final video URL from the response by locating data-url="..." and returning its value.
+    - This URL is the actual video stream (usually mp4).
+
+- VivoIE (SharedBaseIE)
+  - IE_DESC = 'vivo.sx'
+  - _VALID_URL = https?://vivo.s[xt]/<10 base-16 alphanumeric chars>
+  - _FILE_NOT_FOUND = '>The file you have requested does not exists or has been removed'
+  - _TESTS
+    - Example Vivo URL returns id, ext, title, and filesize as expected.
+    - Also matches the domain vivo.st (only_matching True).
+  - _extract_title(self, webpage)
+    - Tries to extract a title from a data-name="..." attribute using a regex.
+    - If found, strips a known video extension from the end if present (using determine_ext and KNOWN_EXTENSIONS).
+    - If not found, falls back to OpenGraph title (_og_search_title).
+  - _extract_filesize(self, webpage)
+    - Uses a regex to locate a size value presented as a number in parentheses following a “Watch” label, then parses it to a numeric filesize with parse_filesize. Fatal=False allows missing data.
+  - _extract_video_url(self, webpage, video_id, url)
+    - Attempts two strategies to obtain the stream URL:
+      1) Old-style data-stream attribute:
+         - Looks for data-stream="..." and base64-decodes it via a helper decode_url_old.
+         - If decoded URL is valid, returns it.
+      2) New-style JSON initialization:
+         - Looks for a JavaScript call InitializeStream({ ... }) and extracts the JSON object inside.
+         - Parses JSON via _parse_json(..., transform_source=js_to_json).
+         - Retrieves the 'source' field from the parsed JSON.
+         - Applies a decoding function to the URL: rot47(URL-decoded content) before returning.
+    - The implemented order prefers the data-stream attribute if present, otherwise uses the JSON-based approach.
+
+Implementation details and helpers used
+- Inheritance and flow:
+  - SharedBaseIE handles common logic for both sites (downloading page, detecting not-found, extracting title/filesize, and orchestrating video URL extraction).
+  - SharedIE implements a page-to-video URL flow via a POST of hidden form inputs.
+  - VivoIE implements multiple strategies to locate the stream URL and has a more complex title/size extraction to accommodate Vivo’s pages.
+- Title and filesize extraction:
+  - Base uses a base64-encoded title in a meta tag full:title and decodes to UTF-8.
+  - Vivo optionally reads a data-name attribute for title, strips common extensions if present, otherwise falls back to OpenGraph title.
+  - Filesize in Base is read from a full:size meta tag; in Vivo, a regex extracts a numeric value described in the page and parsed to a filesize.
+- Video URL extraction specifics:
+  - SharedIE: POSTs a form built from hidden inputs to obtain a secondary page; the final URL is in a data-url attribute on that page.
+  - VivoIE: tries a data-stream attribute first (base64 decoding). If not found, parses InitializeStream({ ... }) to obtain a JSON object with a 'source' URL, decoding with rot47 and URL-unescaping.
+- Encodings and decoding utilities:
+  - compat_b64decode for base64 decoding.
+  - compat_urllib_parse_unquote_plus for URL-decoding.
+  - rot47 for a simple obfuscation used in some Vivo URLs.
+  - js_to_json and _parse_json for converting JavaScript-initialized JSON to Python dicts.
+  - determine_ext and KNOWN_EXTENSIONS to normalize and strip known extensions from titles.
+  - parse_filesize to convert textual size into numeric bytes.
+  - urlencode_postdata and _hidden_inputs for POSTing form data to obtain the video page.
+- Compatibility and error handling:
+  - Uses _FILE_NOT_FOUND markers to detect nonexistent videos and raise ExtractorError with expected=True.
+  - Ext is consistently returned as 'mp4' for all cases (video file extension).
+  - The code relies on standard youtube-dl extraction helpers for HTML/regex searches and page downloads.
+
+In short
+- This file provides a shared extraction framework for two related sites and two concrete extractors:
+  - SharedIE for shared.sx, which fetches a secondary video page via a posted hidden-form and reads the final video URL from data-url.
+  - VivoIE for vivo.sx/vivo.st, which supports multiple decoding paths to derive the video URL (data-stream, or InitializeStream JSON with a rot47/URL-decoding step), plus site-specific title and size extraction.
+- Both yield a dict with id, url, ext='mp4', filesize (if available), and title.

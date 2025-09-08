@@ -1,0 +1,51 @@
+- Purpose
+  - Implement a yieldable extractor for Syfy video pages that uses Adobe Pass (MVPD) authentication when required and delegates the actual media URL extraction to ThePlatform.
+
+- Class and inheritance
+  - SyfyIE extends AdobePassIE, leveraging MVPD authentication flow provided by the base class.
+
+- URL pattern
+  - _VALID_URL matches Syfy video pages:
+    - http(s)://www.syfy.com/(optional slug/)?videos/{id}
+  - Captures the video id as the display_id.
+
+- Tests
+  - _TESTS contains a sample Syfy video page, expecting:
+    - id: MPX video GUID
+    - title, description, uploader, upload_date, timestamp
+    - mp4 extension
+    - Uses ThePlatform extractor (added via add_ie)
+
+- Core extraction flow (_real_extract)
+  1) Determine display_id from URL and download the page HTML.
+  2) Locate the MPX metadata within the Drupal settings injected into the page:
+     - Uses regex to find a JSON blob in a jQuery.extend(Drupal.settings, {...});
+     - Parses the JSON, accesses syfy.syfy_mpx, and selects the first MPX entry.
+  3) Extract basic video info:
+     - video_id from mpxGUID
+     - title from episodeTitle
+  4) Prepare a query dict for ThePlatform:
+     - mbr = 'true' (likely to request a MP4/TS manifest)
+     - manifest = 'm3u'
+  5) MVPD authentication handling:
+     - If entitlements indicate 'auth', build an MVPD resource via _get_mvpd_resource('syfy', title, video_id, mpxRating or 'TV-14')
+     - Obtain an auth string using _extract_mvpd_auth(url, video_id, 'syfy', resource) and attach it to the query as 'auth'
+  6) Build the final URL to ThePlatform:
+     - Start from syfy_mpx['releaseURL'], make it a relative URL via _proto_relative_url
+     - Attach the query parameters with update_url_query
+     - Use smuggle_url to force the SMIL URL through ThePlatform by setting {'force_smil_url': True}
+  7) Return a transparent URL result:
+     - _type: 'url_transparent'
+     - ie_key: 'ThePlatform' (delegate extraction to ThePlatform)
+     - url: the constructed URL to ThePlatform with the appropriate query and force_smil_url flag
+     - title, id (video_id), display_id (original URL-derived)
+
+- Important implementation details
+  - The extractor primarily serves as a bridge to ThePlatform, supplying a ready-to-use releaseURL and optional MVPD auth.
+  - Entitlement handling is conditional: only when entitlement == 'auth' is an MVPD auth token constructed and appended.
+  - Uses AdobePassIE’s methods (_get_mvpd_resource, _extract_mvpd_auth) to perform MVPD authentication workflow.
+  - The final URL is a relative release URL augmented with query parameters (mbr, manifest, and possibly auth) and wrapped to ensure ThePlatform uses the SMIL resource.
+  - The code expects the Drupal settings JSON to contain a nested structure under syfy.syfy_mpx and takes the first entry, which may imply there can be multiple MPX entries but only the first is used.
+
+- Summary
+  - This file defines an extractor for Syfy video pages that may require MVPD authentication. It parses internal Drupal settings to locate MPX metadata, optionally obtains MVPD authentication, and then delegates the actual media retrieval to ThePlatform by returning a url_transparent entry pointing to ThePlatform with a m3u manifest.

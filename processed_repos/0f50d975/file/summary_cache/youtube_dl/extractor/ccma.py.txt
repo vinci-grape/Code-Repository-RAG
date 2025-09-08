@@ -1,0 +1,87 @@
+Concise but comprehensive summary of CCMAIE in ./youtube-dl/youtube_dl/extractor/ccma.py
+
+Purpose
+- Implement an InfoExtractor for CCMA (Catalan media site) that retrieves video/audio metadata, available formats, subtitles, thumbnails, and ancillary info from CCMA’s media API.
+
+Key components
+- Class: CCMAIE(InfoExtractor)
+  - _VALID_URL: Regex to match CCMA URLs for video or audio items. Example: https://www.ccma.cat/.../video/123456/
+  - _TESTS: Three test cases demonstrating video and audio extraction, including expected id, format, title, description, timestamps, duration, subtitles, age rating, and series/category data.
+
+Main functionality (_real_extract)
+1. URL parsing
+   - Extracts media_type (video|audio) and media_id from the URL using _VALID_URL.
+
+2. Data retrieval
+   - Fetches media metadata via a JSON endpoint:
+     - URL: http://dinamics.ccma.cat/pvideo/media.jsp
+     - Query params: media=media_type, idint=media_id
+   - Response structure expected to include:
+     - media: contains media_url (could be a single URL or a list of format entries)
+     - informacio: metadata block with title, duration, description, etc.
+     - subtitols: subtitles info
+     - imatges: thumbnail data
+     - codi_etic: age/censorship code
+
+3. Formats extraction
+   - If media['media']['url'] is a list:
+     - Each entry may contain 'file' (URL) and 'label' (resolution/format label).
+     - Uses parse_resolution(label) to create a format dict, then updates with 'url' and 'format_id' (set to label).
+   - If a single URL:
+     - Adds a single format with 'url' and sets 'vcodec' to 'none' for audio formats; otherwise leaves vcodec as None.
+   - Sorts formats with self._sort_formats(formats).
+
+4. Metadata extraction
+   - Title: informacio['titol']
+   - Description: clean_html(informacio.get('descripcio'))
+   - Duration: 
+     - Prefer milisegons (milliseconds) via durada.milisegons (divided by 1000) or
+     - Fallback to parsing durada.text with parse_duration
+   - Temàtica (category): try_get(informacio, lambda x: x['tematica']['text'])
+
+5. Timestamp handling
+   - Attempts to parse emission date/time from data_emissio.utc using extract_timezone to adjust to local timezone, then converts to epoch seconds via calendar.timegm.
+   - Falls back gracefully on failure.
+
+6. Subtitles
+   - Substitutes subtitols from media.get('subtitols') (handles dict or list).
+   - Each subtitle entry contributes to a language key (prefers 'iso', then 'text', else defaults to 'ca').
+   - Each language maps to a list of subtitle dicts with 'url'.
+
+7. Thumbnails
+   - If media images exist (imatges):
+     - Uses imatges.url as thumbnail URL
+     - Optionally includes width/height from imatges.amplada and imatges.alcada
+
+8. Age rating
+   - Derives age_limit from informacio.codi_etic.id if present.
+   - Expected format: something like "XXX_TP" or "XXX_NN".
+     - If second part is 'TP', age_limit = 0
+     - Else age_limit = int(part after underscore)
+
+9. Return value
+   - A dict with:
+     - id: media_id
+     - title
+     - description
+     - duration
+     - timestamp
+     - thumbnails
+     - subtitles
+     - formats
+     - age_limit
+     - alt_title: informacio.titol_complet
+     - episode_number: int_or_none(informacio.capitol)
+     - categories: [tematica] if available
+     - series: informacio.programa
+
+Important implementation details
+- Uses robust helpers:
+  - int_or_none, parse_duration, parse_resolution, try_get, url_or_none, clean_html, extract_timezone
+- Handles both single and multiple format URLs gracefully.
+- Subtitles language keys are determined with a sane fallback to 'ca' (Catalan) if explicit language is not available.
+- Timestamps are calculated with timezone awareness via extract_timezone and calendar.timegm.
+- Handles missing fields gracefully via try_get and fallbacks.
+- Keeps formatting data consistent with YouTube-DL’s expected InfoExtractor output (formats, subtitles, thumbnails, etc.).
+
+Overall, CCMAIE is a dedicated extractor that consumes CCMA’s media.jsp API, builds a comprehensive set of streaming formats, and attaches rich metadata (titles, descriptions, duration, timestamps, age ratings, series/categories, thumbnails, and subtitles) suitable for YouTube-DL.

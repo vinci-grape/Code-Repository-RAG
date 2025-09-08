@@ -1,0 +1,83 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/xstream.py
+
+Purpose
+- Implement an InfoExtractor (XstreamIE) for the Xstream platform. It fetches a video’s metadata and formats from Xstream’s XML feed and returns a structured dict compatible with youtube-dl.
+
+Key components
+- Class: XstreamIE(InfoExtractor)
+- URL validation: _VALID_URL regex matches:
+  - xstream:<partner_id><separator either ":" or /feed/video/?id=> and <id>
+  - or http(s)://frontend.xstream.dk/net|dk/<partner_id>/... with id
+- Tests: _TESTS contains two tests:
+  - A real feed URL with expected metadata (title, description, timestamp, etc.) and md5 for the video file.
+  - A second URL marked only_matching (to ensure URL recognition works without fetching data).
+
+Main functionality (_real_extract and helpers)
+- _real_extract(url)
+  - Parses partner_id and video_id from the URL using _VALID_URL.
+  - Delegates to _extract_video_info(partner_id, video_id).
+
+- _extract_video_info(partner_id, video_id)
+  - Downloads XML feed:
+    - URL: http://frontend.xstream.dk/{partner_id}/feed/video/?platform=web&id={video_id}
+    - Uses video_id as the download name/id.
+  - Namespaces (NS_MAP)
+    - atom: http://www.w3.org/2005/Atom
+    - xt: http://xstream.dk/
+    - media: http://search.yahoo.com/mrss/
+  - Entry extraction
+    - Finds the atom:entry node.
+    - title: atom:title
+    - description: atom:summary
+    - timestamp: parse_iso8601(atom:published)
+  - Formats extraction
+    - Iterates over media:group/media:content elements.
+    - For each:
+      - url = content attribute 'url'
+      - tbr = int_or_none(content attribute 'bitrate')
+      - If the URL matches an RTMP pattern: rtmp://host/app/playpath
+        - Creates a format with:
+          - url: RTMP base URL
+          - play_path: 'mp4:' + playpath
+          - app: app
+          - ext: 'flv'
+          - tbr: bitrate
+          - format_id: 'rtmp-{bitrate}'
+      - Else: creates a format with:
+          - url: content URL
+          - tbr: bitrate
+    - After collecting formats, calls self._sort_formats(formats) to order by quality/bitrate.
+  - Original link handling
+    - Looks for a atom:link with rel='original' using find_xpath_attr.
+    - If present, appends a format with:
+      - url: href of the link
+      - format_id: rel value
+      - preference: 1 (high priority)
+  - Thumbnails extraction
+    - Builds thumbnails from xt:splash elements within media_group:
+      - url, width, height (converted to int where applicable)
+  - Return dict with:
+    - id: video_id
+    - title
+    - description
+    - timestamp
+    - formats
+    - thumbnails
+
+Implementation details and utilities
+- Uses helper utilities:
+  - int_or_none: convert strings to integers when possible
+  - parse_iso8601: parse ISO 8601 timestamps
+  - xpath_with_ns, xpath_text: XPath helpers with namespaces
+  - find_xpath_attr: find an element attribute with a given attribute name
+- Robust namespace handling:
+  - NS_MAP includes atom, xt, media for correct XPath queries.
+- Format construction:
+  - Special handling for RTMP content URLs to provide proper RTMP fields (url, play_path, app, ext, tbr, format_id).
+  - Fallback to direct HTTP(S) URLs when RTMP pattern does not match.
+- Data enrichment:
+  - Original media link is added as a high-priority format if available.
+  - Thumbnails are collected as a list of dictionaries with url, width, and height.
+
+Overall
+- The extractor focuses on retrieving a single video’s metadata and a set of available formats from an XML feed, supports both RTMP and direct HTTP formats, and enriches results with an original-source link and thumbnails. It adheres to youtube-dl conventions for format sorting and metadata extraction.

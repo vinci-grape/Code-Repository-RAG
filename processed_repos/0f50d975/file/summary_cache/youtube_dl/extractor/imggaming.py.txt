@@ -1,0 +1,73 @@
+Concise functional summary of the code in youtube-dl/youtube_dl/extractor/imggaming.py
+
+Overview
+- Implements a base extractor for ImgGaming streaming content (live, video-on-demand, and playlists).
+- Handles login/authentication to the ImgGaming API, API calls, playlist expansion, video data extraction, formats (HLS/DASH), subtitles, and metadata.
+
+Key components and functionality
+- ImgGamingBaseIE(InfoExtractor)
+  - Constants and setup
+    - _API_BASE: API root URL for ImgGaming (https://dce-frontoffice.imggaming.com/api/v2/).
+    - _API_KEY: Static API key used for requests.
+    - _HEADERS: Shared HTTP headers for API requests; populated after login.
+    - _MANIFEST_HEADERS: Headers used when fetching media manifests (Accept-Encoding: identity) to avoid compressed manifests.
+    - _REALM: Subclasses should set this to define the realm (affects Realm header).
+    - _VALID_URL_TEMPL: Template for the URL pattern (domain, type: live/playlist/video, id, optional playlistId). Note: the code references _VALID_URL, implying subclass or later code provides the concrete _VALID_URL.
+  - _real_initialize()
+    - Builds authentication headers including Realm and x-api-key.
+    - Obtains user credentials via _get_login_info(); raises login-required if not provided.
+    - Performs login against API (POST to login) with email/secret, using the prepared headers.
+    - Stores the returned authorisationToken in self._HEADERS['Authorization'] as Bearer token for subsequent API calls.
+  - _call_api(path, media_id)
+    - Helper to call API endpoints under _API_BASE with the given path and media_id.
+    - Uses self._HEADERS for authentication.
+  - _extract_dve_api_url(media_id, media_type)
+    - Constructs a stream path based on media_type:
+      - video: 'stream/vod/'
+      - live: 'stream'
+      - otherwise: 'stream?eventId='
+    - Calls API to retrieve a response containing playerUrlCallback, which is the URL to fetch further media/video data.
+    - Error handling: if a 403 occurs, extracts a user-friendly message from the JSON body and raises an ExtractorError with that message (not fatal; user-visible).
+  - _real_extract(url)
+    - Parses the URL with _VALID_URL to obtain domain, media_type (live|playlist|video), media_id, and optional playlist_id.
+    - Playlist handling:
+      - If a playlist_id is present and --no-playlist is not set, switches to playlist mode (or informs user if --no-playlist).
+      - For media_type 'playlist', fetches vod/playlist data via API (vod/playlist/ + playlist_id).
+      - Builds a list of entries by iterating videos in playlist['videos']['vods'], extracting each video id, and creating a result pointing to the domain's video URL (https://domain/video/{video_id}) with the appropriate extractor key.
+      - Returns a playlist_result containing the entries, playlist_id, title, and description.
+    - Non-playlist/video handling:
+      - Obtains the DVE API URL via _extract_dve_api_url(media_id, media_type) and downloads video_data from it.
+      - is_live is true if media_type == 'live'.
+      - Title:
+        - Live: obtained from _call_api('event/', media_id)['title'] and passed through _live_title.
+        - Non-live: video_data['name'].
+      - Formats:
+        - Iterates over protocols ('hls', 'dash').
+        - For each protocol, resolves media_url either as video_data['<proto>Url'] or video_data[<proto>]['url']; skips if not present.
+        - HLS:
+          - Uses _extract_m3u8_formats on media_url with appropriate type:
+            - 'm3u8' if is_live else 'm3u8_native'
+          - m3u8_id='hls', fatal=False, headers=self._MANIFEST_HEADERS
+          - Each extracted format gets http_headers updated with MANIFEST_HEADERS.
+        - DASH:
+          - Uses _extract_mpd_formats on media_url with mpd_id='dash', fatal=False, headers=MANIFEST_HEADERS.
+        - After collection, _sort_formats(formats).
+      - Subtitles:
+        - Reads video_data.get('subtitles') and constructs a subtitles dict mapping language (default 'en_US') to a list of {'url': ...} entries.
+      - Returns a dict with: id (media_id), title, formats, thumbnail, description, duration (int), tags, is_live, subtitles.
+  - Implementation notes
+    - Uses try_get to safely navigate potentially nested JSON (e.g., playlist videos).
+    - Robust error handling for 403 responses when fetching the playerUrlCallback, surfacing a user-friendly message.
+    - Uses Accept-Encoding: identity for manifest fetches to ensure stable M3U8/DASH parsing.
+    - Builds playlist entries that link back to the domain’s video URLs, enabling proper per-video extraction.
+    - Relies on subclass to set _REALM to form proper Realm header and potentially provide the concrete _VALID_URL for URL matching.
+
+Important implementation details
+- Authentication flow: login via API with user-provided credentials; Authorization header is stored for subsequent API calls.
+- API interactions: all calls go through _call_api and share the same authenticated headers.
+- Playlist vs video handling: explicit support for playlists expands to per-video entries; standalone videos are fetched via a DVE API URL producing formats/subtitles.
+- Formats handling: supports both HLS and DASH; HLS uses either live or native m3u8 parsing depending on is_live; DASH uses MPD parsing. Manifest fetches use dedicated headers to avoid compression.
+- Error messaging: 403 errors from the player URL callback are converted into user-facing ExtractorError messages by parsing the response body.
+
+Overall
+- This extractor provides login-protected access to ImgGaming content, resolves either single videos or playlists, fetches live or VOD data from the DVE API, and builds a robust set of streaming formats and subtitles for use in youtube-dl.

@@ -1,0 +1,32 @@
+- This file defines two extractors for Comedy Central content, both built on top of MTVServicesInfoExtractor (reuses MTV/MRSS-based extraction logic).
+
+- Common base behavior
+  - Both classes rely on an MRSS feed to fetch video metadata (title, description, timestamps, etc.) and to produce a standard info_dict for youtube-dl.
+  - They use _FEED_URL to point to the MRSS feed and rely on the parent class to parse it.
+  - The code includes __future__ import for Unicode compatibility and provides test cases that check the resulting info_dict structure (id, ext, title, description, timestamp/upload_date).
+
+- ComedyCentralIE (for cc.com)
+  - Purpose: extract metadata for cc.com video pages (episodes or video/ video-clips).
+  - URL pattern (_VALID_URL): matches http/https URLs like cc.com/episodes/<id> or cc.com/video(-clips)/<id>, where <id> is a 6-character lowercase alphanumeric string.
+  - Feed: _FEED_URL = http://comedycentral.com/feeds/mrss/
+  - Tests: includes a valid video-clips URL with expected info_dict (id, ext mp4, title, description md5, timestamp, upload_date). Also includes two only_matching tests for episode and video URLs to verify proper URL matching without requiring feed parsing.
+  - Inheritance implies all feed parsing is handled by MTVServicesInfoExtractor; no additional methods overridden.
+
+- ComedyCentralTVIE (for comedycentral.tv)
+  - Purpose: extract metadata for comedycentral.tv Folgen (episodes) pages.
+  - URL pattern (_VALID_URL): matches http/https URLs like comedycentral.tv/folgen/<id>, where <id> is a 6-character lowercase alphanumeric string.
+  - Feed: _FEED_URL = http://feeds.mtvnservices.com/od/feed/intl-mrss-player-feed
+  - GEO restriction: _GEO_COUNTRIES = ['DE'] (content restricted to Germany)
+  - Test: provides a sample Folge URL and an expected info_dict with id (GUID), ext mp4, title, and German description.
+  - Custom feed query: _get_feed_query(self, uri) returns a dict of parameters tailored for the MRSS request, including:
+    - accountOverride: 'intl.mtvi.com'
+    - arcEp: 'web.cc.tv'
+    - ep: 'b9032c3a'
+    - imageEp: 'web.cc.tv'
+    - mgid: uri
+  - The override indicates that the feed needs specific query parameters (especially mgid) to retrieve the correct item from the international MTVN MRSS feed.
+
+- Key takeaways
+  - The file provides two specialized extractors for Comedy Central content across two domains (cc.com and comedycentral.tv), both leveraging a shared MRSS-based extraction approach via MTVServicesInfoExtractor.
+  - ComedyCentralIE handles cc.com video/episodes pages; ComedyCentralTVIE handles comedycentral.tv Folge pages and includes a specialized feed query and a Germany geo restriction.
+  - Tests demonstrate expected metadata fields (id, ext, title, description, timestamp/upload_date) and how the feed parsing yields MP4 videos.

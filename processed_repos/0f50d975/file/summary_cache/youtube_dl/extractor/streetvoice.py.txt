@@ -1,0 +1,65 @@
+Here is a concise, comprehensive summary of the code in youtube-dl/youtube_dl/extractor/streetvoice.py:
+
+- Purpose
+  - Implement an InfoExtractor for StreetVoice (streetvoice.com) to download and extract metadata for songs.
+
+- Class and URL handling
+  - Class: StreetVoiceIE(InfoExtractor)
+  - URL pattern: _VALID_URL matches URLs like https://streetvoice.com/username/songs/<id>/ and captures the numeric song id.
+  - _TESTS: Includes a detailed test for a real song URL and a second test ensuring URL matching for a variant domain.
+
+- Main workflow (_real_extract)
+  - Extracts the song_id from the URL using _match_id.
+  - Constructs API endpoint: https://streetvoice.com/api/v4/song/<song_id>/
+  - Downloads song metadata as JSON with a fields query to fetch numerous song properties (album, comments_count, created_at, id, image, length, likes_count, name, nickname, plays_count, profile, share_count, synopsis, user, username).
+
+- Metadata extraction
+  - title: song['name']
+  - description: synopsis, stripped via strip_or_none
+  - thumbnail: image
+  - duration: length (converted to int via int_or_none)
+  - timestamp: parsed from created_at using parse_iso8601
+  - uploader: nickname found under user.profile.nickname via try_get
+  - uploader_id: user.id as string via str_or_none
+  - uploader_url: constructed from username if available, using urljoin(url, '/<username>/')
+  - view_count: plays_count via int_or_none
+  - like_count: likes_count via int_or_none
+  - comment_count: comments_count via int_or_none
+  - repost_count: share_count via int_or_none
+  - track: same as title
+  - track_id: song_id
+  - album: album.name via try_get(song, lambda x: x['album']['name'])
+
+- Formats extraction
+  - Attempts three possible format endpoints relative to the base API:
+    - hls: base_url + 'hls/file/'
+    - http: base_url + 'file/'
+    - original: base_url + 'file/original/'
+  - For each endpoint, fetches JSON with data=b'' and fatal=False to avoid aborting if missing; looks for 'file' URL in response.
+  - For each found file URL:
+    - Creates a format dict with:
+      - ext: 'mp3'
+      - format_id: 'hls' / 'http' / 'original'
+      - url: the file URL
+      - vcodec: 'none' (audio-only)
+      - If format_id is 'hls', sets protocol to 'm3u8_native'
+    - Infers bitrate from the URL using regex \.mp3\.(\d+)k; if found, sets abr and tbr accordingly (as integers).
+  - Collected formats are appended to a list and returned in the final dict.
+
+- Robustness and helpers
+  - Uses helper utilities for safe extraction and type conversion:
+    - int_or_none, str_or_none, strip_or_none, parse_iso8601, try_get, urljoin
+  - Uses a local get_count lambda to extract counts (plays, likes, comments, share) as integers from song data.
+
+- Return structure
+  - Returns a dictionary compatible with youtube-dl info dictionaries:
+    - id, formats, title, description, thumbnail, duration, timestamp
+    - uploader, uploader_id, uploader_url
+    - view_count, like_count, comment_count, repost_count
+    - track, track_id, album
+
+Key implementation details
+- The code fetches multiple potential audio formats (hls, mp3, original) and computes bitrate when present in the URL.
+- It gracefully handles missing fields with try_get and int_or_none, ensuring extraction does not fail if some data is absent.
+- uploader_url is only provided when a username is available; otherwise, it’s None.
+- The _TESTS entry demonstrates expected metadata layout, including nested uploader information and album data.

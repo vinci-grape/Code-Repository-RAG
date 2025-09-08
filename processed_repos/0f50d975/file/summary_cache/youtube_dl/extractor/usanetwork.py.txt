@@ -1,0 +1,33 @@
+- Purpose: Implement a YouTube-DL extractor for USA Network video pages by leveraging the NBCUniversal family extractor (NBCIE).
+
+- Class and inheritance:
+  - USANetworkIE(NBCIE): Subclasses NBCIE to reuse NBC-specific video extraction logic.
+
+- URL matching:
+  - _VALID_URL uses a regex to identify USA Network video pages and capture the video id.
+  - Pattern extracts the id from URLs like https://www.usanetwork.com/.../video/.../1234567.
+  - The captured groups include:
+    - permalink: the full URL portion after the scheme
+    - id: numeric video identifier used by the extractor
+
+- Tests:
+  - _TESTS contains one test case for a sample URL: 
+    https://www.usanetwork.com/peacock-trailers/video/intelligence-trailer/4185302
+  - Expected info_dict:
+    - id: '4185302'
+    - ext: 'mp4'
+    - title: 'Intelligence (Trailer)'
+    - description: 'A maverick NSA agent enlists the help of a junior systems analyst in a workplace power grab.'
+    - upload_date: '20200715'
+    - timestamp: 1594785600
+    - uploader: 'NBCU-MPAT'
+  - params: {'skip_download': True} to avoid actual download during tests
+  - Indicates support for m3u8/mp4 download paths (the test notes m3u8 download path)
+
+- Main functionality:
+  - Does not define its own _real_extract logic; relies on NBCIE’s implementation to fetch and parse video metadata from NBCUniversal pages.
+  - The URL pattern and inherited behavior enable extraction of standard video metadata (title, description, upload date, uploader, etc.) and the appropriate file extension (mp4, typically via m3u8 or direct mp4).
+
+- Key implementation details:
+  - Keeps the extraction tightly coupled with NBC’s metadata structure by subclassing NBCIE, ensuring consistent handling across NBCUniversal properties.
+  - The id extracted from the URL is used by NBCIE to locate and fetch the video resource.

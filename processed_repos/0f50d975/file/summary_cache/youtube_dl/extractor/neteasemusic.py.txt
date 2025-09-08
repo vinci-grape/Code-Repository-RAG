@@ -1,0 +1,113 @@
+Concise yet comprehensive summary of ./youtube-dl/youtube_dl/extractor/neteasemusic.py
+
+Overview
+- A set of extractors for网易云音乐 (NetEase Music) used by youtube-dl to fetch metadata and media formats for various NetEase endpoints.
+- Supports: songs, albums, artists (singers), playlists/toplists, MV, radio programs, and DJ radiostations.
+- Core logic centers on constructing encrypted requests to NetEase’s enhanced player API to obtain actual media URLs, then returning youtube-dl style info dicts.
+
+Key classes
+- NetEaseMusicBaseIE (InfoExtractor)
+  - Shared utilities and API helpers used by all specific extractors.
+  - Constants:
+    - _FORMATS = ['bMusic', 'mMusic', 'hMusic'] – target media formats/types from NetEase.
+    - _NETEASE_SALT and _API_BASE for encryption and base API URL.
+  - _encrypt(dfsid): Classmethod that XORs the dfsid with a salted key, MD5s, base64-encodes, and adjusts characters (for compatibility with NetEase’s obfuscated token scheme).
+  - make_player_api_request_data_and_headers(song_id, bitrate): Builds a request payload for NetEase’s enhanced player API.
+    - Uses AES-ECB with key 'e82ckenh8dichen8' and PKCS#7 padding.
+    - Creates a MD5 digest of a specific formatted message, constructs an obfuscated data string, encrypts it, and hex-encodes the result.
+    - Returns a pair: (encrypted_params, headers) to be sent with the request.
+  - _call_player_api(self, song_id, bitrate): Calls the enhanced player API at https://interface3.music.163.com/eapi/song/enhance/player/url with encrypted data and headers. Returns parsed JSON data or {} on failure.
+  - extract_formats(self, info): Builds a list of available media formats for a given song.
+    - Iterates over _FORMATS, calls _call_player_api for each available format to fetch URLs.
+    - Validates URLs, then appends format dicts with: url, ext, abr (bitrate), format_id, filesize, asr (sample rate).
+    - Handles errors and geo-restriction messaging if no formats are found.
+  - convert_milliseconds(ms): Utility to convert ms to seconds (int).
+  - query_api(self, endpoint, video_id, note): Performs a GET to NetEase API base URL with proper Referer header and returns parsed JSON.
+
+Specific extractors
+- NetEaseMusicIE (NetEase Music Song)
+  - IE_NAME: 'netease:song'
+  - _VALID_URL: matches song URLs with id parameter.
+  - _real_extract(url):
+    - Fetches song detail via query_api('song/detail?...').
+    - Builds formats via extract_formats(info) and sorts them.
+    - Downloads lyrics via 'song/lyric' API and merges original with translated lyrics using _process_lyrics.
+    - Handles optional alt title (transNames) and artist list.
+    - Returns info dict: id, title, alt_title, creator, timestamp, thumbnail, duration, description (lyrics), formats.
+  - _process_lyrics(self, lyrics_info): If translations exist, merges time-stamped original lyrics with translations, producing a combined lyrics string.
+
+- NetEaseMusicAlbumIE (Album)
+  - IE_NAME: 'netease:album'
+  - _VALID_URL: matches album pages.
+  - _real_extract(url):
+    - Retrieves album data via query_api('album/{id}?id={id}').
+    - Builds a list of song entries pointing to individual song URLs.
+    - Returns a playlist_result with album id, title, and description.
+
+- NetEaseMusicSingerIE (Singer/Artist)
+  - IE_NAME: 'netease:singer'
+  - _VALID_URL: matches artist pages.
+  - _real_extract(url):
+    - Retrieves artist data via query_api('artist/{id}?id={id}').
+    - Builds a name that includes translated/alias information if present.
+    - Creates entries for hotSongs and returns as a playlist_result with singer id and name.
+
+- NetEaseMusicListIE (Playlist / Toplists)
+  - IE_NAME: 'netease:playlist'
+  - _VALID_URL: matches playlists and toplists.
+  - _real_extract(url):
+    - Retrieves playlist data via query_api('playlist/detail?id={id}&lv=-1&tv=-1').
+    - If specialType == 10 (chart/toplist), appends a date stamp to the name from updateTime.
+    - Builds entries for each track in info['tracks'] and returns a playlist_result.
+
+- NetEaseMusicMvIE (MV)
+  - IE_NAME: 'netease:mv'
+  - _VALID_URL: matches MV pages.
+  - _real_extract(url):
+    - Fetches MV data via query_api('mv/detail?id={id}&type=mp4').
+    - Builds a list of formats from info['brs'] (bitrate to URL mappings), each as {'url', 'ext': 'mp4', 'format_id', 'height'}.
+    - Returns id, title, description, creator, upload_date, thumbnail, duration, and formats.
+
+- NetEaseMusicProgramIE (Radio Program)
+  - IE_NAME: 'netease:program'
+  - _VALID_URL: matches radio program pages.
+  - _real_extract(url):
+    - Fetches program data via query_api('dj/program/detail?id={id}').
+    - If there are no songs or noplaylist is set, downloads only the mainSong using extract_formats and returns a single-audio info dict.
+    - If there is a playlist, builds a list of song entries for the entire program (mainSong first, then rest) and returns a playlist_result.
+    - Includes fields: id, title, description, creator, timestamp, thumbnail, duration, formats when single song; otherwise uses playlist entries.
+
+- NetEaseMusicDjRadioIE (DJ Radio)
+  - IE_NAME: 'netease:djradio'
+  - _VALID_URL: matches DJ radio pages.
+  - _PAGE_SIZE: 1000 (pagination size)
+  - _real_extract(url):
+    - Iterates over pages of programs in a DJ radio using query_api('dj/program/byradio?...)' with offset increments.
+    - Aggregates program entries and collects the radio name/description from the first page.
+    - Returns a playlist_result with all program entries.
+
+Important implementation details
+- Encryption-based access to actual media URLs:
+  - The code constructs a special encrypted payload for NetEase's enhanced player API (eapi) to obtain streaming URLs. This involves:
+    - An AES-ECB encryption with key 'e82ckenh8dichen8'.
+    - PKCS7 padding on the prepared string.
+    - A specific concatenation format that includes a MD5 digest of a constructed message.
+  - The function make_player_api_request_data_and_headers handles this, and _call_player_api consumes the resulting payload.
+- Multiple formats per song:
+  - The extractor queries for each format type (bMusic, mMusic, hMusic) and aggregates available URLs with details such as bitrate (abr), format_id, filesize, and sample rate (asr).
+- Lyrics handling:
+  - Lyrics can have translated versions. _process_lyrics merges original and translated lyrics by matching timestamped lines, producing a combined lyrics block if translations exist.
+- API interactions and error handling:
+  - All data fetching is done via query_api, which calls the NetEase API with proper Referer header.
+  - If no playable media URLs are found, it raises a user-friendly error or geo-restriction notice.
+- Geo restrictions:
+  - The code uses a geo-notice path when media is not available from the requester’s region (China).
+- Playlist and program handling:
+  - Albums, singers, and playlists are exposed as youtube-dl playlists with entries pointing to individual NetEase songs.
+  - Programs (DJ radio) and DJ radio collections support paging and aggregation of multiple programs.
+
+Test coverage
+- The file includes _TESTS for several extractors with sample URLs and expected metadata to validate extraction behavior.
+
+Overall
+- This module provides comprehensive NetEase Music extraction support for youtube-dl by implementing a unified base with the enhanced-player URL retrieval, plus specialized extractors for songs, albums, artists, playlists, MVs, and radio content. It handles encryption, multiple formats, lyrics processing, and geo-restriction messaging, delivering standard youtube-dl info dictionaries for downstream processing.

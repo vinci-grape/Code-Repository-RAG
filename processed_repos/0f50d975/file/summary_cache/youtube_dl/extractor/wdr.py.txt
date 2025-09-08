@@ -1,0 +1,103 @@
+Here is a concise, end-to-end summary of the code in ./youtube-dl/youtube_dl/extractor/wdr.py describing the main functionality, key classes/functions, and important details.
+
+Overview
+- This module implements multiple YouTube-DL extractors for various WDR media sources:
+  - WDRIE: core extractor for WDR on-demand assets served from the deviceids-medp endpoint.
+  - WDRPageIE: page-based extractor for WDR pages (including WDR Maus) that may contain multiple videos or link to individual assets.
+  - WDRElefantIE: extractor for WDR Maus Elefantenseite entries, which resolves to a video URL via a table of contents/XML metadata flow.
+  - WDRMobileIE: lightweight extractor for a mobile domain, returning a direct mp4 URL with a mobile user-agent (not actively working in this code).
+
+Key classes and main functionality
+- WDRIE (InfoExtractor)
+  - Purpose: Extracts a single WDR on-demand video asset from the device IDs API.
+  - URL handling and IDs:
+    - _API_URL_TPL = '//deviceids-medp.wdr.de/ondemand/%s/%s'
+    - _VALID_URL supports:
+      - Direct API URL form (https:nil) with numeric IDs
+      - A pseudo URL form starting with wdr: (treated as a direct asset reference)
+    - _asset_url(wdr_id): builds a concrete asset URL from a WDR id. It ensures a minimum ID length, truncates for the first template parameter, and appends .js to the endpoint.
+  - Metadata and formats:
+    - Downloads metadata JSON via _download_json, stripping JSONP if present.
+    - Determines is_live from metadata['mediaType'].
+    - Reads tracker_data and media_resource:
+      - title from trackerData.trackerClipTitle
+      - media_resource contains possible formats under keys 'dflt' and 'alt'
+      - For each media entry containing videoURL or audioURL, determines file extension with determine_ext and builds formats:
+        - m3u8 -> _extract_m3u8_formats (HDL/HLS)
+        - f4m -> converts manifest URL with hdcore/plugin query, then _extract_f4m_formats
+        - smil -> _extract_smil_formats
+        - others -> direct URL format; if extension is unknown_video, performs a lightweight fetch to determine the actual extension via urlhandle_detect_ext
+      - Formats are collected and sorted with _sort_formats
+  - Subtitles:
+    - captionURL becomes de-subtitles as TTML
+    - captionsHash (if a dict) contributes additional German subtitles (de)
+  - Result fields:
+    - id (prefers trackerClipId, fallback to video_id)
+    - title (live titles adjusted with _live_title if is_live)
+    - alt_title (trackerClipSubcategory)
+    - formats, subtitles
+    - upload_date (unified_strdate on trackerClipAirTime)
+    - is_live
+  - Tests: includes a test case with a sample WDR asset URL and expected metadata (ext mp4, title, upload_date).
+
+- WDRPageIE (WDRIE subclass)
+  - Purpose: Handles WDR pages that may contain multiple videos or Maus content; also can edge into individual asset URLs via embedded metadata.
+  - URL matching:
+    - _MAUS_REGEX and _PAGE_REGEX help detect Maus pages and standard WDR pages.
+    - _VALID_URL matches WDR family sites (kinder.wdr.de, sportschau.de, etc.) and WDR Maus URLs.
+  - Real extraction logic:
+    - Fetches the page and attempts to locate embedded media metadata using a JSON blob embedded in HTML attributes (data-extension).
+    - For each found media blob, loads nested JSON (via js_to_json) to get a jsonp_url or a ref to a mediaObj:
+      - If jsonp_url ends with .assetjsonp, fetch that asset (strip JSONP) to get trackerClipId, and derive a new asset URL via _asset_url.
+      - If a clip_id is found, builds a concrete asset URL and yields a WDRIE URL result (ie=WDRIE.ie_key()).
+    - If no direct asset entries found, falls back to creating a playlist by collecting links on the page that match _PAGE_REGEX and returning a playlist of those entries (each as a WDRPageIE or suitable child IE).
+  - Returns a playlist_result with entries and playlist_id derived from the display_id.
+
+- WDRElefantIE (InfoExtractor)
+  - Purpose: Handles WDR Maus Elefanten-Seite entries by resolving to a video via a metadata chain.
+  - _VALID_URL matches: https://www.wdrmaus.de/elefantenseite/#<id>
+  - Extraction flow:
+    - Uses a known endpoint to fetch a table of contents (data/tableOfContentsJS.php5) and looks up the display_id.
+    - Reads xmlPath from the table, fetches the XML metadata, and locates movie/zmdb_url.
+    - If zmdb_url exists, returns a URL result pointing to that URL with the WDRIE extractor (ie=WDRIE.ie_key()).
+  - This effectively redirects Elefanten content to the underlying WDRIE asset.
+
+- WDRMobileIE (InfoExtractor)
+  - Purpose: Handles a mobile domain URL scheme.
+  - _VALID_URL matches a mobile on-demand URL containing age limit, id and title groups.
+  - IE_NAME = 'wdr:mobile'
+  - _WORKING = False (indicates the domain is not currently functional in this extractor)
+  - _TEST: example URL with expected fields and a note that loading data has problems.
+  - Extraction returns a basic dict with:
+    - id, title, age_limit, url
+    - http_headers including User-Agent: 'mobile'
+  - This is a lightweight direct-link extractor intended for the mobile domain.
+
+Key implementation details and helper usage
+- Formats handling:
+  - Supports multiple formats: HLS (m3u8), HDS (f4m), SMIL, and direct URLs.
+  - For unknown video extensions, attempts to fetch the resource header to determine the actual extension (urlhandle_detect_ext).
+  - _sort_formats is applied to ensure a sensible order (best first).
+- Subtitles:
+  - Subtitles typically come from captionURL (TTML) and from captionsHash (dictionary of other caption formats).
+  - Subtitles are added under the German language code 'de'.
+- Metadata and IDs:
+  - Uses trackerData fields for titles, AirTime for upload_date, and trackerClipId for the final id (with fallbacks).
+  - Live streams are detected via mediaType and title is adjusted with _live_title when is_live.
+- Geo restriction:
+  - WDRIE declares _GEO_COUNTRIES = ['DE'] to restrict European (German) geo access.
+- Robustness:
+  - Many fallbacks for cases where direct asset URLs are not available or where embedded JSON structures differ.
+  - Uses transform_source=strip_jsonp or js_to_json when parsing JSONP-like responses.
+  - Handles both direct API-style URLs and the wdr: shorthand form (treated as an asset reference).
+- Tests:
+  - _TESTS in WDRIE for an example asset, asserting id, ext, title, and upload_date.
+  - _TESTS in WDRPageIE include multiple page scenarios (video, live, playlist), with some tests skipped due to 404s or instability.
+
+In short
+- The file provides a comprehensive set of WDR video extractors:
+  - WDRIE fetches and decodes asset metadata to produce formats and subtitles.
+  - WDRPageIE discovers assets on WDR pages or Maus pages and routes to WDRIE assets or builds playlists.
+  - WDRElefantIE resolves Elefanten pages to their underlying WDRIE assets via a table-of-contents/XML metadata flow.
+  - WDRMobileIE offers a mobile-domain extraction path (currently not active).
+- It focuses on robust handling of multiple content delivery formats (HLS, HDS, SMIL, direct URLs), subtitle extraction, live content handling, and graceful fallbacks for page-based playlists.

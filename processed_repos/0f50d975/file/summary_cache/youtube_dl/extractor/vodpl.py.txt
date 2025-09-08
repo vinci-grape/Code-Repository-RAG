@@ -1,0 +1,33 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/vodpl.py
+
+- Purpose
+  - A YouTube-DL extractor for videos on the Polish VOD site vod.pl. It leverages the Onet base extractor for common extraction logic.
+
+- Main class
+  - VODPlIE(OnetBaseIE): Inherits generic extraction behavior from OnetBaseIE and specializes it for vod.pl.
+
+- URL pattern
+  - _VALID_URL = r'https?://vod\.pl/(?:[^/]+/)+(?P<id>[0-9a-zA-Z]+)'
+  - Matches vod.pl pages that have at least one subdirectory before a final video id (captured as id). This ensures correct ID extraction from URLs like /filmy/.../3ep3jns.
+
+- Tests
+  - _TESTS contains two test cases:
+    - A real video URL with expected metadata including id, extension, title, description (checked via MD5), timestamp, duration, and upload_date.
+    - A second URL under a different path with only_matching set to True (used to ensure URL matching works even if extraction isn’t fully tested).
+
+- Core extraction flow (_real_extract)
+  - video_id = self._match_id(url): extracts the id from the URL using the _VALID_URL pattern.
+  - webpage = self._download_webpage(url, video_id): downloads the page HTML.
+  - info_dict = self._extract_from_id(self._search_mvp_id(webpage), webpage): 
+    - self._search_mvp_id(webpage) finds the MVP (media/video) id within the page.
+    - self._extract_from_id(mvp_id, webpage) extracts a dictionary with video metadata (title, ext, description, timestamp, duration, etc.) using the MVP id and the page content. This method is provided by the OnetBaseIE family.
+  - info_dict['id'] = video_id: overrides/sets the final id in the output to match the ID captured from the URL (not the MVP id).
+  - return info_dict: outputs the extracted metadata dictionary.
+
+- Key implementation details
+  - Relies on OnetBaseIE for the heavy lifting (methods like _download_webpage, _search_mvp_id, _extract_from_id).
+  - The final video identifier used in the output is the URL-derived id (video_id), ensuring consistency with the page URL.
+  - The _TESTS show expected fields in the info dict: id, ext (mp4), title (e.g., “Chłopaki nie płaczą”), description (validated via MD5), timestamp, duration, and upload_date.
+
+- Summary
+  - This file defines a concise extractor for vod.pl videos by extending OnetBaseIE, using a URL-based id pattern, locating the MVP id within the page, and delegating the detailed metadata extraction to Onet-based helpers. It then ensures the produced info dict uses the URL-derived id.

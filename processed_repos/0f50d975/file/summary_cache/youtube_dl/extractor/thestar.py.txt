@@ -1,0 +1,32 @@
+- Purpose: TheStarIE is a YouTube-dl extractor for The Star (thestar.com). It does not download the video itself but delegates to Brightcove since The Star uses Brightcove as its video player.
+
+- Class and inheritance:
+  - TheStarIE extends InfoExtractor from youtube_dl.extractor.common.
+
+- URL matching:
+  - _VALID_URL regex: r'https?://(?:www\.)?thestar\.com/(?:[^/]+/)*(?P<id>.+)\.html'
+  - Captures the article-specific ID (the path after the domain up to .html) as the display_id.
+
+- Testing data:
+  - _TEST provides a sample The Star URL and expected metadata, including:
+    - id: 4732393888001
+    - ext: mp4
+    - title, description, uploader_id, timestamp, upload_date
+  - params specifies skip_download: True to avoid downloading the video during tests (m3u8 download is not performed in the test).
+
+- Brightcove integration:
+  - BRIGHTCOVE_URL_TEMPLATE = 'http://players.brightcove.net/794267642001/default_default/index.html?videoId=%s'
+  - The extractor finds the Brightcove video ID from the article page content using a regex:
+    - r'mainartBrightcoveVideoId["\']?\s*:\s*["\']?(\d+)'
+  - After obtaining the Brightcove ID, it constructs the Brightcove URL and returns a URL result linked to the BrightcoveNew extractor.
+
+- Core extraction flow (_real_extract):
+  1. Derive display_id from the URL using _match_id(url).
+  2. Download the article page with _download_webpage(url, display_id).
+  3. Extract the Brightcove video ID with _search_regex.
+  4. Return a URL result pointing to the BrightcoveNew extractor using the constructed URL and brightcove_id as the display_id.
+
+- Implementation notes:
+  - The extractor relies on Brightcove for actual video metadata and download (hence the BrightcoveNew backend).
+  - The approach is lightweight: fetch page, parse a single Brightcove ID, delegate to BrightcoveNew.
+  - Uses Python 2/3 compatibility features (unicode_literals, etc.).

@@ -1,0 +1,37 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/lenta.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for lenta.ru news pages. It can handle videos embedded via EaglePlatform or fall back to a generic page extractor when no EaglePlatform video is found on the page.
+
+- Main class
+  - LentaIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?lenta\.ru/[^/]+/\d+/\d+/\d+/(?P<id>[^/?#&]+)'
+  - Targets lenta.ru article/news URLs with a date path and captures the final slug as id (display_id).
+
+- Tests
+  - _TESTS contains two test cases:
+    1) A page that yields a direct EaglePlatform video (id 964400, mp4, title, thumbnail, duration, view_count). skip_download is True.
+    2) A page with an EaglePlatform iframe embed (id 227304, mp4, title, description md5, thumbnail, duration, view_count, age_limit). skip_download is True.
+
+- Core extraction logic (_real_extract)
+  - Extract display_id from the URL using _match_id(url).
+  - Download the page HTML with _download_webpage(url, display_id).
+  - Attempt to find an EaglePlatform video id inside the page using:
+    - video_id = self._search_regex(r'vid\s*:\s*["\']?(\d+)', webpage, 'eagleplatform id', default=None)
+  - If a video_id is found:
+    - Return a delegated result to the EaglePlatform extractor:
+      - self.url_result('eagleplatform:lentaru.media.eagleplatform.com:%s' % video_id, ie='EaglePlatform', video_id=video_id)
+  - If no video_id is found:
+    - Fallback to the Generic extractor for the original URL:
+      - return self.url_result(url, ie='Generic')
+
+- Implementation details
+  - Uses standard InfoExtractor helpers: _download_webpage, _match_id, _search_regex, and url_result.
+  - Delegates to EaglePlatform when an EaglePlatform video id is present in the page (even for direct embeds).
+  - If no identifiable video is found, relies on the Generic extractor to handle the page (possible other video formats or metadata).
+  - Tests demonstrate both a direct EaglePlatform case and an iframe/embed case.
+
+- Behavior observed
+  - The extractor does not parse exact video metadata itself; instead it detects an EaglePlatform video id on the page and delegates to the EaglePlatform extractor. If absent, it does not try to extract video metadata itself and forwards to Generic.

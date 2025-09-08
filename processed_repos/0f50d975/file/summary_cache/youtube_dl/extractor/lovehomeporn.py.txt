@@ -1,0 +1,37 @@
+This file defines a YouTube-DL extractor for the LoveHomePorn site using the Nuevo backend.
+
+Main functionality
+- Purpose: Extract video metadata from lovehomeporn.com by leveraging the Nuevo-based extraction flow.
+- Class: LoveHomePornIE(NuevoBaseIE) – a specialized extractor that inherits common Nuevo logic.
+
+Key components
+- _VALID_URL: Regex matching URLs of the form
+  https:// or http://www.lovehomeporn.com/video/{id}/{display_id}
+  where id is digits and display_id is an optional slug.
+- _TEST: Provides a sample URL and the expected information dictionary, including:
+  - id: '48483'
+  - display_id: 'stunning-busty-brunette-girlfriend-sucking-and-riding-a-big-dick'
+  - ext: 'mp4'
+  - title: 'Stunning busty brunette girlfriend sucking and riding a big dick'
+  - age_limit: 18
+  - duration: 238.47
+  - skip_download in params (to test metadata extraction without downloading)
+
+Core logic in _real_extract
+- Parse the input URL with _VALID_URL to obtain:
+  - video_id from the id group
+  - display_id from the display_id group
+- Build a config URL for Nuevo: http://lovehomeporn.com/media/nuevo/config.php?key={video_id}
+- Call self._extract_nuevo(config_url, video_id), which uses the NuevoBaseIE mechanism to fetch and parse video metadata from the given config endpoint. This returns a base info dictionary (id, title, duration, ext, etc.).
+- Enrich the returned info with:
+  - display_id: the slug extracted from the URL
+  - age_limit: 18
+- Return the final info dictionary.
+
+Implementation details
+- Relies on the NuevoBaseIE helper _extract_nuevo to fetch and parse data from the site’s Nuevo config endpoint.
+- Uses a straightforward URL pattern and display_id propagation to preserve a human-readable slug in the output.
+- The code assumes a valid LoveHomePorn URL; if the URL doesn’t match, mobj would be None and accessing groups would raise an error (but in practice, youtube-dl calls _real_extract only with valid URLs).
+
+Summary
+This extractor fetches video metadata from LoveHomePorn by querying the site’s Nuevo config endpoint with the video ID, then augments the resulting data with a display_id slug and a fixed age limit, returning a complete information dictionary suitable for youtube-dl’s output.

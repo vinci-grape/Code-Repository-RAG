@@ -1,0 +1,128 @@
+Summary of ./youtube-dl/youtube_dl/extractor/nbc.py
+
+Overview
+- This module implements multiple extractors for NBC-related video content, covering NBC proper, NBC Sports, NBC News, and NBC Olympics. It includes both direct ThePlatform-based extractions and AdobePass-authenticated flows, as well as a helper for extracting embedded ThePlatform URLs from NBC pages.
+
+Key classes and their main functionality
+
+1) NBCIE (AdobePassIE)
+- Purpose: Extract NBC.com video pages that ultimately resolve to ThePlatform, handling MVPD authentication when needed.
+- URL pattern: _VALID_URL matches NBC video pages under NBC.com (with optional classic-tv path) and captures the video id.
+- Core flow:
+  - Retrieve video_id from URL and fetch metadata via a GraphQL query to https://friendship.nbc.co/v2/graphql.
+  - The query (bonanzaPage) returns VideoPageData-like metadata including mpxAccountId, mpxGuid, description, keywords, series, etc.
+  - If the video is locked, obtain an MVPD resource and an authentication token using _get_mvpd_resource and _extract_mvpd_auth.
+  - Build a ThePlatform URL using the mpxAccountId and video_id, and wrap it with query parameters via update_url_query and smuggle_url.
+  - Return a url_transparent entry with:
+    - _type: 'url_transparent'
+    - id, title, url (ThePlatform), description, tags, season/episode numbers, series
+    - ie_key: 'ThePlatform'
+- Important details:
+  - Delegates actual media extraction to ThePlatformIE via the returned url_transparent.
+  - Uses a GraphQL bonanzaPage query to retrieve rich metadata, including access control data for MVPD-protected content.
+
+2) NBCSportsVPlayerIE (InfoExtractor)
+- Purpose: Extract video info from vplayer.nbcsports.com embedded players.
+- URL pattern: _VALID_URL_BASE + path capturing an id; tests include an example embed URL.
+- Core flow:
+  - _extract_url(webpage) searches for an iframe/div data-mpx-like URL matching the valid ThePlatform base.
+  - In _real_extract, parse video_id from URL, fetch the page, and obtain the ThePlatform URL via the page’s OpenGraph video URL, then replace the host with player.theplatform.com.
+  - Return the ThePlatform URL via url_result, using ie_key 'ThePlatform'.
+- Important details:
+  - Serves as a bridge: NBCSportsVPlayerIE extracts the embedded ThePlatform URL which NBCSportsIE then uses.
+
+3) NBCSportsIE (InfoExtractor)
+- Purpose: Extract NBC Sports article pages that embed NBCSportsVPlayer content.
+- URL pattern: _VALID_URL matches NBCSports article paths (excluding vplayer) and captures an id.
+- Core flow:
+  - Extract video_id, download the article page, and locate an embedded ThePlatform URL by inspecting iframes or data attributes (data-mpx-src, data-src) using _extract_url.
+  - Return a url_result pointing to NBCSportsVPlayerIE to resolve the actual video formats.
+- Important details:
+  - Centralizes NBC Sports content extraction by delegating to NBCSportsVPlayerIE for ThePlatform content.
+
+4) NBCSportsStreamIE (AdobePassIE)
+- Purpose: Extract live/streaming NBC Sports content that requires Adobe Pass authentication.
+- URL pattern: stream.nbcsports.com with pid as a capture group.
+- Core flow:
+  - Fetch live source metadata from http://stream.nbcsports.com/data/live_sources_<pid>.json.
+  - Choose a primary video source URL from a set of fields (source, msl4source, iossource, hlsv4, falling back to ottStreamUrl).
+  - Determine whether the source is live.
+  - Obtain MVPD resource and an authentication token via _extract_mvpd_auth.
+  - Request a tokenized URL from https://token.playmakerservices.com/cdn by posting a JSON payload including the video URL, tokens, and encoded resource.
+  - Build formats from the tokenized URL via _extract_m3u8_formats and sort.
+  - Return a dict with id, title (live titles are possibly adjusted via _live_title), description, formats, and is_live flag.
+- Important details:
+  - Demonstrates a full AdobePass flow for secure streaming and token-based CDN access.
+  - Uses a dedicated tokenization service to obtain a playable m3u8 URL.
+
+5) NBCNewsIE (ThePlatformIE)
+- Purpose: Extract NBC News, Today, MSNBC articles that host NBC News video assets, driven by ThePlatform.
+- URL pattern: Wide NBC News family domain, capturing an id-like slug.
+- Core flow:
+  - Fetch the page and parse the bootstrapped state from __NEXT_DATA__ to obtain initial data structures.
+  - Locate video data via either video.current or article.content[0].primaryMedia.video.
+  - Build a list of formats from videoAssets:
+    - For each asset, use publicUrl; fix ThePlatform redirect URLs by appending or updating format query when necessary.
+    - If format is M3U, use _extract_m3u8_formats to pull formats.
+    - Otherwise, assemble format entries with bitrate (tbr), width/height, extension mp4, etc.
+  - Handle subtitles from closedCaptioning if provided.
+  - Return a dict with id, title, description, thumbnail, duration, timestamp, formats, and subtitles.
+- Important details:
+  - Pure ThePlatform-based extraction, working with pre-embedded JSON data in the page.
+  - Supports multiple assets and quality levels, including m3u8 and mp4 variants.
+
+6) NBCOlympicsIE (InfoExtractor)
+- Purpose: Extract NBC Olympics video pages that embed ThePlatform content.
+- URL pattern: nbcolympics.com/video/<id>
+- Core flow:
+  - Download the page, parse Drupal settings to obtain vod.iframe_url.
+  - Build ThePlatform URL by replacing vplayer.nbcolympics.com with player.theplatform.com.
+  - Return a url_transparent dict with:
+    - url pointing to ThePlatform
+    - ie_key set to ThePlatformIE.ie_key()
+    - display_id for better traceability
+- Important details:
+  - Uses ThePlatform as the final extractor, enabling standard ThePlatform handling for Olympics videos.
+  - Geo-restricted to the US (as indicated by tests).
+
+7) NBCOlympicsStreamIE (AdobePassIE)
+- Purpose: Extract NBC Olympics live/stream content via AdobePass.
+- URL pattern: stream.nbcolympics.com with an id.
+- Core flow:
+  - Download page, extract pid and resource identifiers from the page.
+  - Retrieve event_config (from event_config pid) and live_sources (from live_sources pid) JSON endpoints.
+  - Build title from event_config['eventTitle'] (with live-title enhancement via _live_title).
+  - Acquire the primary source URL from live_sources.
+  - Obtain an MVPD token/resource with _extract_mvpd_auth.
+  - Request a sign-in token via sp.auth.adobe.com with a signed request (mediaToken and resource base64-encoded).
+  - Use the returned sign URL to fetch m3u8 formats and sort them via _extract_m3u8_formats.
+  - Return a dict with id, display_id, title, formats, and is_live set to True.
+- Important details:
+  - Full AdobePass flow for Olympics streams; uses a dedicated Adobe sign endpoint for secure streaming.
+
+Shared implementation details and patterns
+- The module heavily uses:
+  - ThePlatformIE integration for NBC content that is served via ThePlatform (NBC, NBC Olympics, NBC News variants).
+  - AdobePassIE flows (_extract_mvpd_auth, _get_mvpd_resource) for geo/protected content and streaming.
+  - GraphQL and bootstrapped page data to obtain metadata, especially in NBC (bonanzaPage) and NBC News variants.
+- Helper utilities used:
+  - compat_urllib_parse_unquote for decoding permalinks.
+  - smuggle_url and update_url_query to construct ThePlatform URLs with necessary query parameters (e.g., authentication tokens, manifest types).
+  - try_get, int_or_none, parse_duration, unified_timestamp to normalize extracted data.
+  - _download_json, _download_webpage, _extract_m3u8_formats, _extract_mvpd_auth, and _get_mvpd_resource are used to handle network requests and format extraction, typically provided by the base extractors (InfoExtractor, ThePlatformIE, AdobePassIE).
+- Output structure:
+  - Some extractors return a standard video dict with formats, subtitles, duration, timestamp, etc.
+  - Others return url_transparent referencing ThePlatform (_ie_key: 'ThePlatform') so that ThePlatformIE handles the actual media extraction.
+- Geo-restrictions and access control:
+  - Several NBC properties are geo-restricted or require MVPD authentication, clearly indicated in tests (e.g., “Only works from US,” “Requires Adobe Pass Authentication”).
+  - The code handles these by integrating MVPD tokens and the platform’s tokenization services.
+
+Tests
+- Each extractor includes _TESTS (or _TEST) with representative URLs and expected info_dicts, including IDs, titles, descriptions, timestamps, and hints about streaming formats (e.g., m3u8, mp4) and geo restrictions.
+
+In short
+- The file defines multiple NBC-related extractors (NBC, NBC Sports, NBC News, NBC Olympics) with complementary strategies:
+  - Direct ThePlatform-based extraction for some pages (NBC, NBC Olympics, NBC News) using platform metadata and tokens as needed.
+  - Embedded ThePlatform URL extraction for NBC Sports video pages.
+  - AdobePass-protected streaming flows for live content.
+- It combines GraphQL/bootstrapped data, ThePlatform URL construction, and token-based access to produce playable formats or transparent ThePlatform references across NBC properties.

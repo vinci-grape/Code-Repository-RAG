@@ -1,0 +1,54 @@
+Here’s a concise, comprehensive summary of the Medialaan extractor:
+
+- Purpose
+  - Implemented as MedialaanIE, a YouTube-dl extractor for Medialaan/MyChannels video content. It fetches video metadata and formats from Medialaan’s embed system and exposes them in the standard youtube-dl InfoExtractor format.
+
+- URL matching and tests
+  - _VALID_URL is a verbose regex that matches a variety of Medialaan embedding/production URLs, including:
+    - https://embed.mychannels.video/.../production/{id}
+    - https://mychannels.video/embed/{id}
+    - Various Be/NL media sites that redirect to the same underlying production
+  - _TESTS contains samples:
+    - A real video URL with expected id, title, timestamp, duration, and mp4 extension
+    - Several “only_matching” entries to validate URL recognition
+
+- URL extraction helper
+  - _extract_urls(webpage): static method that scans a webpage for divs with data-mychannels-type="video" and reads data-mychannels-id. If found, it constructs and returns the embed URL https://mychannels.video/embed/{id}.
+  - This enables extraction from pages that contain embedded Medialaan videos.
+
+- Core extraction logic
+  - _real_extract(url):
+    - production_id = extracted id from URL using _match_id.
+    - Retrieves production data from https://embed.mychannels.video/sdk/production/{production_id} with query options=UUUU_default.
+    - The response’s productions array is used; the first production entry is taken.
+    - title = production['title'].
+
+  - Formats construction:
+    - Iterates over production.get('sources') (defaulting to empty list if missing).
+    - For each source with a 'src':
+      - ext = mimetype2ext(source.get('type')) to determine file extension.
+      - If ext == 'm3u8':
+        - Uses _extract_m3u8_formats(src, production_id, 'mp4', 'm3u8_native', m3u8_id='hls', fatal=False) to parse HLS formats and extend the formats list.
+      - Else:
+        - Append a simple format dict {'ext': ext, 'url': src}.
+    - self._sort_formats(formats) to order formats by preference/quality.
+
+  - Return structure:
+    - id: production_id
+    - title: as fetched
+    - formats: list of formats built above
+    - thumbnail: posterUrl from production
+    - timestamp: parsed via parse_iso8601(production.get('publicationDate'), ' ')
+    - duration: int_or_none(production.get('duration')) or None
+
+- Important implementation details
+  - Uses utility helpers:
+    - extract_attributes to parse HTML tag attributes.
+    - mimetype2ext to map MIME types to file extensions.
+    - parse_iso8601 to convert publicationDate strings to Unix timestamps.
+    - int_or_none to safely convert duration to int.
+  - Supports both direct video URLs (e.g., mp4) and HLS (m3u8) streams.
+  - The duration and timestamp are optional-safe: duration may be None if not provided; timestamp is parsed if publicationDate exists.
+  - The _extract_urls function enables discovering embedded Medialaan videos from pages that include data-mychannels attributes.
+
+In short, MedialaanIE fetches a production’s data from MyChannels SDK, collects all available video sources (direct URLs and HLS), normalizes formats, and returns a standard info dictionary with id, title, formats, thumbnail, timestamp, and duration.

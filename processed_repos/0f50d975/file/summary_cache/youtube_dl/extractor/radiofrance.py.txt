@@ -1,0 +1,45 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/radiofrance.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for Radio France’s Radiovisions pages on maison.radiofrance.fr.
+
+- Class and integration
+  - Class RadioFranceIE inherits from InfoExtractor.
+  - Defines _VALID_URL to match Radiovisions pages and an IE_NAME of 'radiofrance'.
+  - Provides a _TEST with a sample URL and expected metadata (id, ext, title, description, uploader) to verify behavior.
+
+- Main functionality (_real_extract)
+  - Extracts the media information from a Radiovisions page.
+  - Steps:
+    1. Match the URL with _VALID_URL and capture the video_id from the path.
+    2. Download the webpage.
+    3. Parse the title from an <h1> element.
+    4. Optionally parse description and uploader from specific HTML blocks (fatal=False so they aren’t required).
+    5. Locate the audio formats using a element with class "jp-jplayer" and a data-source attribute, extracting the URL.
+    6. Build a list of format dictionaries by parsing a string containing multiple key:value pairs (formats_str) into (format_id, url) entries. Each entry includes:
+       - format_id: the key from the pair
+       - url: the value from the pair
+       - vcodec: 'none' (audio-only)
+       - preference: determined by the order (index) of the pair
+    7. Sort formats via _sort_formats to choose the best order.
+    8. Return a dict with: id, title, formats, description, uploader.
+
+- Key implementation details
+  - URL parsing: _VALID_URL uses a regex to capture the id portion after /radiovisions/.
+  - Title extraction: _html_search_regex looking for <h1>(.*?)</h1>.
+  - Description and uploader: optional extractions using specific HTML patterns with fatal=False to avoid failing if missing.
+  - Formats extraction:
+    - formats_str is obtained from a data-source attribute in an element with class "jp-jplayer".
+    - The code expects a string of multiple "key: 'value'" pairs (e.g., "mp3: 'http...', ogg: 'http...'"), parsed with re.findall(r"([a-z0-9]+)\s*:\s*'([^']+)'", ...).
+    - Each pair becomes a format dictionary with:
+      - format_id set to the key
+      - url set to the value
+      - vcodec set to 'none'
+      - a numeric 'preference' set by the pair’s position (used for sorting)
+  - The returned metadata includes: id, title, formats, description, uploader.
+
+- Assumptions and constraints
+  - Relies on the page structure: the title in an <h1>, description/uploader in specific blocks, and audio sources embedded in an element with class "jp-jplayer" and a data-source attribute.
+  - The formats parsing expects a specific "key: 'value'" format within the formats_str.
+
+Overall, this extractor targets Radio France Radiovisions pages, pulls the primary audio source(s) from embedded data attributes, constructs audio-only formats, and returns standard metadata (id, title, description, uploader) along with the available formats.

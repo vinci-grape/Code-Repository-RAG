@@ -1,0 +1,43 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/ctsnews.py
+
+- Purpose
+  - Implement an InfoExtractor for CTS News (華視新聞) web pages.
+  - Extract video content either from CTSPlayer’s mp4 feed or, if not CTSPlayer, from an embedded YouTube video.
+
+- Class and URL handling
+  - Class: CtsNewsIE(InfoExtractor)
+  - Description: IE_DESC = '華視新聞'
+  - _VALID_URL: Matches CTS News pages with path pattern news.cts.com.tw/.../<id>.html and extracts the numeric id.
+  - _TESTS: Provides three test scenarios
+    - Regular CTSPlayer mp4 video with metadata (title, description, timestamp)
+    - CTS News entry where a “News count” doesn’t appear (still accessible)
+    - Page with embedded YouTube video; expects to delegate to Youtube extractor (add_ie: ['Youtube'])
+
+- Main extraction flow (_real_extract)
+  - Derive initial news_id from URL via _match_id(url)
+  - Download the page HTML with _download_webpage(url, news_id)
+  - Try to obtain a CTS internal id via hidden input: news_id = self._hidden_inputs(page).get('get_id')
+  - If a hidden get_id exists:
+    - Fetch mp4 feed JSON from http://news.cts.com.tw/action/test_mp4feed.php with query news_id
+    - Use the returned source_url as the video URL (video_url)
+  - If no hidden get_id:
+    - Fallback: log a message and attempt to extract a YouTube URL from the page using YoutubeIE._extract_url(page)
+    - Return a Youtube URL result: self.url_result(youtube_url, ie='Youtube')
+  - Metadata extraction (for CTSPlayer path)
+    - description: _html_search_meta('description', page)
+    - title: _html_search_meta('title', page, fatal=True)
+    - thumbnail: _html_search_meta('image', page)
+    - date/time: look for pattern (\d{4}/\d{2}/\d{2} \d{2}:\d{2}) in the page; if found, convert with unified_timestamp and adjust by -8 hours (likely timezone handling)
+  - Result dict includes:
+    - id: the hidden get_id if present (otherwise the original URL id)
+    - url: video_url (from CTS mp4 feed)
+    - title, description, thumbnail, timestamp (if available)
+
+- Key implementation details
+  - CTS mp4 feed retrieval: uses _download_json with note='Fetching feed' and query={'news_id': news_id}, expecting source_url in the response.
+  - Fallback to YouTube: uses YoutubeIE._extract_url(page) to locate a YouTube URL on the page, then returns a Youtube extractor result.
+  - Metadata extraction relies on HTML meta tags and a date-time regex; timestamp normalization applies a fixed -8 hour offset.
+  - Tests demonstrate handling of both CTSPlayer and YouTube scenarios, including metadata presence and MD5 verification for downloaded content.
+
+- Overall behavior
+  - The extractor primarily pulls CTS News videos via CTS’s own mp4 feed when available; if not, it gracefully defers to YouTube content if present on the page; it always attempts to gather basic metadata (title, description, thumbnail, timestamp) when CTSPlayer content is used.

@@ -1,0 +1,40 @@
+- Purpose: A YouTube-DL extractor for Blerp sound bites. It fetches bite metadata and the MP3 URL using Blerp's GraphQL API and returns a standard InfoExtractor dictionary.
+
+- Key class:
+  - BlerpIE(InfoExtractor)
+    - IE_NAME: 'blerp'
+    - _VALID_URL: Validates URLs like https://blerp.com/soundbites/{id}
+    - _TESTS: Two test cases verifying id, title, uploader, uploader_id, ext (mp3), and tags
+
+- Main functionality (core method):
+  - _real_extract(self, url)
+    - Extracts the bite id from the URL via _match_id.
+    - Builds a GraphQL request payload containing:
+      - operationName: "webBitePageGetBite"
+      - query: a long GraphQL query (_GRAPHQL_QUERY) with a fragment bitePageFrag that fetches many bite fields
+      - variables: { "_id": audio_id }
+    - Sends a POST request to https://api.blerp.com/graphql with:
+      - JSON body (data serialized as JSON and encoded to UTF-8)
+      - Header: Content-Type: application/json
+    - Parses the JSON response and navigates to data.web.biteById
+    - Constructs and returns an info_dict with:
+      - id: bite_json['_id']
+      - url: bite_json['audio']['mp3']['url']
+      - title: bite_json['title']
+      - uploader: ownerObject.username (safely extracted with traverse_obj and strip_or_none)
+      - uploader_id: ownerObject._id (safely extracted)
+      - ext: 'mp3'
+      - tags: a cleaned list derived from userKeywords, stripping nulls/text, or None if empty
+
+- Important implementation details:
+  - Uses utils.traverse_obj and utils.strip_or_none to safely extract nested fields (including uploader and uploader_id) without raising if some fields are missing.
+  - Tags extraction pulls from userKeywords, coerces to a list when present, strips each value, filters out empties, and returns None if there are no tags.
+  - The GraphQL query is defined as a constant (_GRAPHQL_QUERY) and executed with a simple variables payload, enabling precise retrieval of light-weight bite data.
+  - The MP3 URL is taken from bite_json['audio']['mp3']['url'], ensuring direct media access.
+  - Tests expect specific fields (id, title, uploader, uploader_id, ext mp3, tags) to confirm correct extraction.
+
+- What it does not do:
+  - Does not extract or expose all possible fields from the GraphQL response; focuses on id, media URL, title, uploader info, and tags.
+  - Does not handle non-MP3 audio formats (ext is fixed to 'mp3' in info_dict).
+
+In short, this extractor queries Blerp’s GraphQL API for a bite by ID, parses the response to obtain the MP3 URL and metadata, cleans and returns a concise info_dict suitable for youtube-dl's downstream processing.

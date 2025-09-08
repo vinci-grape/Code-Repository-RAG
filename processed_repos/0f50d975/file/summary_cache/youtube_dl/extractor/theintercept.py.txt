@@ -1,0 +1,50 @@
+Summary of TheInterceptIE (theintercept.py)
+
+Purpose
+- Extracts video information from The Intercept’s Field of Vision pages and delegates actual video extraction to JWPlatform.
+
+Main functionality
+- Given a Field of Vision article URL, locate the corresponding post data embedded in the page, identify the JWPlatform video id, and return a url_transparent result that points to the JWPlatform extractor with the correct metadata.
+
+Key components
+- Class: TheInterceptIE(InfoExtractor)
+  - _VALID_URL: Regex matching The Intercept Field of Vision URLs and capturing the slug as id.
+  - _TESTS: Includes a test URL with expected metadata (id, ext, title, description, timestamp, upload_date, comment_count).
+
+- _real_extract(self, url)
+  - display_id = self._match_id(url): extracts the slug portion of the URL.
+  - webpage = self._download_webpage(url, display_id): fetches the page content.
+  - json_data = self._parse_json(self._search_regex(r'initialStoreTree\s*=\s*(?P<json_data>{.+})', webpage, 'initialStoreTree'), display_id):
+    - Locates a JavaScript variable initialStoreTree containing JSON data embedded in the page and parses it.
+  - Iterates over json_data['resources']['posts'].values():
+    - Finds the post where post['slug'] == display_id (matching the slug from the URL).
+    - On match, returns a url_transparent dict:
+      - '_type': 'url_transparent'
+      - 'url': 'jwplatform:%s' % post['fov_videoid'] → defers to JWPlatform extractor using the video id
+      - 'id': compat_str(post['ID']) → numeric ID as string
+      - 'display_id': display_id → original slug
+      - 'title': post['title']
+      - 'description': post.get('excerpt')
+      - 'timestamp': parse_iso8601(post.get('date')) → epoch timestamp
+      - 'comment_count': int_or_none(post.get('comments_number'))
+  - If no matching post is found, raises ExtractorError('Unable to find the current post').
+
+Important implementation details
+- Data source: The video metadata is embedded in the page as a JSON object assigned to initialStoreTree, which is extracted via a regex and parsed.
+- Video extraction flow: Returns a url_transparent entry that points to JWPlatform (using the field fov_videoid). This means the actual video URL, formats, and streaming behavior are handled by the JWPlatform extractor.
+- Metadata handling:
+  - Uses parse_iso8601 to convert the post date to a timestamp.
+  - Uses int_or_none to safely convert the number of comments to an int (or None if unavailable).
+  - Uses compat_str to ensure the ID is a string.
+- Error handling: If the intended post slug cannot be found in the JSON, an ExtractorError is raised to indicate the post isn’t found.
+
+Data fields used from the JSON
+- post['slug'] → slug used to match display_id
+- post['fov_videoid'] → JWPlatform video id
+- post['ID'] → numeric post ID
+- post['title'] → video title
+- post.get('excerpt') → description
+- post.get('date') → date for timestamp
+- post.get('comments_number') → comment count
+
+Overall, the extractor is designed to locate the correct Field of Vision post within the page’s embedded JSON, package its metadata, and hand off the actual video retrieval to JWPlatform via a transparent URL.

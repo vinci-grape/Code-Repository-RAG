@@ -1,0 +1,61 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/hitbox.py
+
+Overview
+- Implements YouTube-DL extractors for Hitbox/ Smashcast video pages and live streams.
+- Two main extractors: HitboxIE (video/archive pages) and HitboxLiveIE (live pages). The live extractor inherits from the video extractor but routes differently and uses live-specific endpoints.
+
+Key classes and main functionality
+- HitboxIE (InfoExtractor)
+  - Purpose: Extract metadata and formats for Hitbox/ Smashcast video pages (including archived videos and livestream recordings).
+  - URL matching: _VALID_URL targets video pages with numeric IDs, e.g. /videos/12345 or /video/12345.
+  - _real_extract(url):
+    - Fetches video configuration from https://www.smashcast.tv/api/player/config/video/{video_id}.
+    - Builds a list of formats from clip.bitrates:
+      - Skips entries labeled "Auto".
+      - If the URL ends with m3u8 (or ext is m3u8), adds a format with protocol 'm3u8_native' and ext 'mp4'.
+      - Otherwise adds a direct format with available URL and bitrate.
+    - Sorts formats with _sort_formats.
+    - Fetches metadata via _extract_metadata using https://www.smashcast.tv/api/media/video and attaches the constructed formats.
+- HitboxLiveIE (HitboxIE)
+  - Purpose: Extract metadata and formats for live Hitbox/ Smashcast streams.
+  - URL matching: _VALID_URL targets live pages like /<username>, e.g. /dimak.
+  - suitable(cls, url): Ensures this extractor is used only when HitboxIE is not suitable; avoids conflicting with video URLs.
+  - _real_extract(url):
+    - Fetches live player config from https://www.smashcast.tv/api/player/config/live/{video_id}.
+    - Builds formats from the configured CDNs:
+      - Skips CDNs that require RTMP subscribing.
+      - Tracks unique base URLs (netConnectionUrl) to avoid duplicates.
+      - For each stream in cdn.bitrates:
+        - Skip 'Auto' label.
+        - If provider is 'hls' or url indicates m3u8, validates URL and adds format with ext 'mp4' and protocol 'rtmp_live'.
+        - Otherwise constructs a direct RTMP-like URL as base_url/stream_url, marks as 'rtmp_live', and adds host-derived format_note and extra fields (page_url, player_url) for fallback/player context.
+    - Sorts formats with _sort_formats.
+    - Fetches live metadata via _extract_metadata using https://www.smashcast.tv/api/media/live, attaches formats, sets is_live = True, and applies a live title normalization via _live_title.
+- Shared helper: _extract_metadata(self, url, video_id)
+  - Fetches metadata JSON from either the video or live metadata endpoint.
+  - Determines media_type ('livestream' or 'video') based on metadata['media_type']; uses 'media_live_since' for livestreames and 'media_date_added' for videos.
+  - Extracts a single video_meta from the appropriate list (metadata[media_type][0]).
+  - Pulls title, alt_title, description (cleaned HTML), duration, uploader, view count, timestamp, and categories.
+  - Builds two thumbnails using edge.sf.hitbox.tv base URL.
+  - Returns a dict with id, title, alt_title, description, ext='mp4', thumbnails, duration, uploader, view_count, timestamp, categories.
+- Endpoints used
+  - Video: https://www.smashcast.tv/api/player/config/video/{video_id}
+  - Video metadata: https://www.smashcast.tv/api/media/video
+  - Live: https://www.smashcast.tv/api/player/config/live/{video_id}
+  - Live metadata: https://www.smashcast.tv/api/media/live
+- Metadata and formats handling
+  - Thumbnails: constructed from media_thumbnail and media_thumbnail_large with base https://edge.sf.hitbox.tv.
+  - Formats: 
+    - Video: handle m3u8 via protocol 'm3u8_native' and ext 'mp4'; otherwise direct URLs with 'tbr' (bitrate) and 'format_note'.
+    - Live: support multiple CDNs; for HLS/m3u8 use 'rtmp_live' and 'ext' 'mp4', else construct RTMP-like URLs and annotate with host name; include is_live flag and live title normalization.
+- Important implementation details
+  - _VALID_URL patterns distinguish video pages vs live pages.
+  - _extract_metadata centralizes common metadata extraction for both extractors.
+  - For live streams, the extractor deduplicates CDNs by base URL and skips RTMP subscribe entries.
+  - Live extractor uses _live_title to normalize titles for live content.
+  - Uses utility helpers: clean_html, parse_iso8601, float_or_none, int_or_none, compat_str, determine_ext for robust type handling and URL/type decisions.
+- Tests
+  - HitboxIE _TESTS include a sample video page with expected fields (id, title, alt_title, description, ext, thumbnails, duration, uploader, view_count, timestamp, upload_date, categories) and specify skip_download for m3u8 scenarios.
+  - HitboxLiveIE _TESTS verify live page handling and that the extractor is only chosen for non-video URLs.
+
+In short, this file provides two extractors to fetch and normalize metadata and formats for Hitbox/ Smashcast videos and live streams, using the platform’s API endpoints, handling HLS and non-HLS formats, thumbnails, and various metadata fields.

@@ -1,0 +1,21 @@
+- Purpose: A test data file used by youtube-dl to exercise cookie parsing from Netscape-format cookie files.
+
+- Format: Netscape HTTP Cookie File with standard header comments:
+  - # Netscape HTTP Cookie File
+  - # http://curl.haxx.se/rfc/cookie_spec.html
+  - # This is a generated file!  Do not edit.
+
+- Content:
+  - The first cookie line is a note/example for HttpOnly cookies, but it is commented out:
+    - #HttpOnly_www.foobar.foobar  FALSE  /  TRUE  2147483647  HTTPONLY_COOKIE  HTTPONLY_COOKIE_VALUE
+    - This demonstrates how an HttpOnly cookie would appear (domain prefixed with HttpOnly_), but due to the leading '#', it is not parsed as an active cookie in this file.
+  - The second line is an active cookie entry:
+    - www.foobar.foobar  FALSE  /  TRUE  2147483647  JS_ACCESSIBLE_COOKIE  JS_ACCESSIBLE_COOKIE_VALUE
+    - Fields (in order): domain, include_subdomains (FALSE), path ("/"), secure (TRUE), expiration (2147483647, i.e., 2038-01-19 03:14:07 UTC), name, value.
+
+- Key details:
+  - Expiration 2147483647 corresponds to the far-future Unix timestamp (commonly used in test data).
+  - The cookie is marked as secure (TRUE) and valid for the root path ("/") for the domain www.foobar.foobar, without subdomain inheritance.
+  - The HttpOnly line is present as a commented example to illustrate HttpOnly cookies, but is not active in this file as-is.
+
+- Summary: A generated Netscape cookie file containing one active test cookie (JS_ACCESSIBLE_COOKIE) and a commented HttpOnly cookie example, intended to validate cookie parsing behavior in tests.

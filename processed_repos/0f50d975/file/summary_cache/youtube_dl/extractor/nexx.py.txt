@@ -1,0 +1,86 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/nexx.py
+
+Purpose
+- Implement two extractors for the Nexx video platform:
+  - NexxIE: extracts video information and formats from Nexx videos (regular and embedded) served by Nexx CDN services.
+  - NexxEmbedIE: extracts video URLs from Nexx embed pages and delegates to NexxIE.
+
+Key classes
+- NexxIE(InfoExtractor)
+  - Primary extractor handling Nexx videos.
+- NexxEmbedIE(InfoExtractor)
+  - Handles embed URLs and re-routes to NexxIE for actual extraction.
+
+Main functionality and flow
+- URL matching (_VALID_URL)
+  - Supports multiple Nexx URL patterns:
+    - API v3 endpoints like https://api.nexx.cloud/v3/{domain_id}/videos/byid/{id}
+    - Shorthand nexx:(domain_id:)?id
+    - Arc-based endpoints like https://arc.nexx.cloud/api/video/{id}.json
+- Video discovery
+  - _extract_domain_id(webpage): parses a domain_id from a script URL in the page (sdk/arc resources).
+  - _extract_urls(webpage): collects potential video URLs by:
+    - Finding video IDs from onPLAYReady events in the page and constructing API URLs using the domain_id.
+  - _extract_url(webpage): convenience to get the first URL from _extract_urls.
+- API interaction and error handling
+  - _handle_error(response): checks response.metadata.status; raises ExtractorError with response.metadata.errorhint if not 2xx.
+  - _call_api(domain_id, path, video_id, data=None, headers={}):
+    - POST to https://api.nexx.cloud/v3/{domain_id}/{path} with URL-encoded data.
+    - Sets Content-Type header and validates with _handle_error.
+    - Returns result['result'].
+- Video retrieval logic
+  - _real_extract(url)
+    - Tries arc.nexx.cloud API first to fetch video data. If that fails, falls back to a session/init flow:
+      - Generates a pseudo device_id and calls session/init to obtain cid.
+      - Derives a request_token using a reversible secret-based algorithm (md5 of operation + domain_id + secret, where secret is derived from device_id and the server-provided clienttoken).
+      - Calls videos/byid/{video_id} with additional fields and tokens (X-Request-CID, X-Request-Token).
+      - Picks the target video from the result.
+- Formats extraction
+  - cdnType handling:
+    - 'azure' → _extract_azure_formats(video, video_id)
+    - 'free' → _extract_free_formats(video, video_id)
+    - other values are asserted as not implemented
+  - _extract_azure_formats(video, video_id)
+    - Builds azure_manifest_url based on azureLocator and language considerations.
+    - May append a protection token if present.
+    - Extracts formats via:
+      - HLS: _extract_m3u8_formats (format_id like azure-hls)
+      - DASH: _extract_mpd_formats (format_id like azure-dash)
+      - ISM: _extract_ism_formats (ISM-based formats)
+    - Progressive MP4s from azureFileDistribution are added as explicit HTTP URLs with potential width/height metadata.
+  - _extract_free_formats(video, video_id)
+    - Handles stream data with cdnType 'free' and two providers:
+      - ak (akit: Akamai)
+        - Builds a base URL, iterates over file distributions, and constructs a master playlist URL (mp4.csmil/master...).
+      - ce (ContentExchange/CE)
+        - Constructs an HTTP base and asset.ism manifest with dash/hls specifics.
+        - Produces explicit formats for each distribution item (with width/height when available) and builds corresponding dash/hls entries.
+    - Also pulls MPD/HLS formats depending on the provider:
+      - ce: adds DASH via _extract_mpd_formats and HLS via _extract_m3u8_formats
+      - Always adds HLS via _extract_m3u8_formats (mp4)
+- Metadata mapping
+  - Returns a dict with:
+    - id, title, alt_title, description
+    - release_year, creator, thumbnail
+    - duration (parsed with parse_duration)
+    - timestamp (upload time)
+    - episode_number, season_number
+    - formats (list of all extracted formats)
+- Additional notes
+  - Uses helper utilities: compat_str, int_or_none, parse_duration, try_get, urlencode_postdata.
+  - Ensures formats are sorted with _sort_formats before returning.
+  - Tests in _TESTS cover various scenarios (movie, episode, embed URL, and arc-based URLs).
+
+NexxEmbedIE
+- Purpose: extract URLs from Nexx embed pages and delegate to NexxIE.
+- _extract_urls(webpage): finds iframe embeds pointing to Nexx embed URLs and returns them.
+- _real_extract(url): loads the embed page and resolves to a NexxIE URL via NexxIE._extract_url(webpage), then delegates using url_result with NexxIE as the extractor.
+
+Important implementation details
+- The code includes a multi-step extraction path to cope with pages that don’t expose video data via arc endpoints (arc may fail for some videos).
+- Token generation for API calls uses a specific reversing/derivation method to mimic the client-side logic (secret extraction from device_id and clienttoken, then MD5 hash for request_token).
+- Handles two distinct free CDN providers (ak and ce) with different URL composition rules, including support for DASH/HLS and explicit progressive URLs.
+- Supports multiple format types (HLS, DASH, ISM, and progressive HTTP MP4s) and returns a comprehensive formats list after sorting.
+- Regex-based domain_id extraction supports both numeric domain ids in API URLs and legacy/nexx shorthand syntax.
+
+This module provides robust Nexx video extraction, including embedded pages, CDN-specific format generation, and fallback strategies to maximize success across Nexx-hosted content.

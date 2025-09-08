@@ -1,0 +1,43 @@
+Overview:
+- This is a Veoh video extractor for youtube-dl (VeohIE), subclassing InfoExtractor.
+- It parses Veoh video pages and builds a standardized video info dictionary including video formats.
+
+Key components:
+- _VALID_URL: Regex that matches Veoh video URLs for watch, embed, or iphone views. Captures the video id which starts with v, e, or yapi-.
+- _TESTS: A set of tests verifying extraction from typical Veoh URLs, including:
+  - Regular watch page with expected id, title, uploader, description, and mp4 format.
+  - Embed page (matching only).
+  - Another watch URL with duration, uploader, and description; includes a skip note for deleted videos.
+  - Embedded ooyala case (note present in tests).
+
+Main functionality:
+- _real_extract(self, url):
+  - Extracts video_id via _match_id(url).
+  - Fetches video metadata from Veoh API: GET https://www.veoh.com/watch/getVideo/{video_id}, then selects the 'video' object.
+  - Retrieves title from video['title'].
+  - Builds a list of formats from video['src']:
+    - Iterates through each key-value pair; skip if URL is empty.
+    - If the key is 'poster', uses it as the thumbnail URL.
+    - Otherwise, adds a format dict with format_id (the key), a quality score via qualities(['HQ', 'Regular']), and the URL.
+  - Sorts formats using _sort_formats(formats).
+  - Returns a dictionary with:
+    - id, title, description, thumbnail (poster if present), uploader (author.nickname when available),
+    - duration: prefers lengthBySec (int), otherwise parses length string with parse_duration,
+    - view_count, formats, average_rating (rating), and comment_count (numOfComments).
+
+- _extract_video(self, source):
+  - Helper that converts a source dictionary (from Veoh API) into a standardized video dict.
+  - Maps fields: id, title, description, thumbnail (highResImage or medResImage), uploader, duration (length or lengthBySec), view_count (views),
+    age_limit: 18 if isMature or isSexy is 'true', else 0,
+    formats via self._extract_formats(source) (delegates to the common format extraction logic).
+  - This function is defined but not used directly in _real_extract; it appears to be an auxiliary conversion helper for alternative flows or future use.
+
+Implementation details:
+- Uses int_or_none and parse_duration for robust numeric handling.
+- Uses qualities(['HQ', 'Regular']) to rank formats by quality, with _sort_formats to order them.
+- Handles thumbnail from the 'poster' src entry; other src entries contribute to video formats.
+- Age restriction logic: 18 if either isMature or isSexy flags are true.
+- The formats list is built from video['src'] entries, excluding empty URLs and treating 'poster' specially as thumbnail.
+
+Summary of data flow:
+- URL -> video_id -> Veoh API getVideo(video_id) -> video metadata -> extract formats from video.src -> assemble final video info dict with metadata and media formats.

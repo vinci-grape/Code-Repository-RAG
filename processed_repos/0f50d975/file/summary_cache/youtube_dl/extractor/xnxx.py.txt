@@ -1,0 +1,59 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/xnxx.py
+
+Goal
+- Implement a YouTube-DL extractor for xnxx.com video pages to obtain video metadata and available formats.
+
+Key components
+- Class: XNXXIE(InfoExtractor)
+  - Inherits common extraction helpers from youtube-dl’s framework.
+
+URL matching
+- _VALID_URL = r'https?://(?:video|www)\.xnxx\.com/video-?(?P<id>[0-9a-z]+)/'
+- Extracts video_id from the URL using _match_id.
+- Includes _TESTS with example URLs and expected output/behavior.
+
+Main extraction flow (_real_extract)
+- Download the webpage for the given URL.
+- Helper function get(meta, default=NO_DEFAULT, fatal=True)
+  - Extracts values embedded in the page via patterns like setVideoTitle("...") or setVideo<Meta>("...") using a regex that reads a quoted string following set<Meta>.
+- Title
+  - First tries OpenGraph title via _og_search_title(webpage). If not found, falls back to get('VideoTitle').
+- Formats
+  - Scans the page for video URLs with patterns:
+    - setVideoUrlLow("..."), setVideoUrlHigh("..."), or setVideoHLS("...")
+    - Each match yields a format entry.
+  - If found URL ends with .m3u8 (detected by determine_ext(format_url) == 'm3u8'):
+    - Use _extract_m3u8_formats(format_url, video_id, 'mp4', entry_protocol='m3u8_native', preference=1, m3u8_id='hls', fatal=False)
+    - This handles HLS streaming formats.
+  - Otherwise (direct video URLs):
+    - Extract format_id from the match (Low/High) and lowercase it if present.
+    - Build a format dict: {'url': format_url, 'format_id': format_id, 'quality': -1 if format_id == 'low' else 0}
+  - After collecting, _sort_formats(formats) is called to order by quality/preference.
+- Thumbnail
+  - Try OpenGraph thumbnail via _og_search_thumbnail(webpage, default=None).
+  - If not found, fallback to get('ThumbUrl', fatal=False) or get('ThumbUrl169', fatal=False).
+- Duration
+  - Retrieved via OpenGraph duration property: int_or_none(self._og_search_property('duration', webpage)).
+- View count
+  - Extracted with a regex targeting an element with id or class containing nb-views-number: r'id=["\']nb-views-number[^>]+>([\d,.]+)'
+  - Converted to int using str_to_int.
+- Age limit
+  - Hardcoded to 18 (adult content restriction typical for xnxx).
+- Return dictionary
+  - Fields: id, title, thumbnail, duration, view_count, age_limit, formats
+
+Important implementation details
+- get() helper uses a regex to parse values from the page content where the site stores metadata in JavaScript-like setXxx("value") calls.
+- HLS handling
+  - For m3u8 URLs, the extractor uses _extract_m3u8_formats with m3u8_native and a dedicated id 'hls', and fatal=False to continue extraction even if HLS parsing fails.
+- Format prioritization
+  - Non-HLS formats use a simple format_id of 'low' or 'high' and a corresponding quality value (-1 for low, 0 otherwise).
+- Metadata extraction
+  - Title and thumbnail leverage OpenGraph when available, with fallbacks to page-embedded metadata.
+  - Duration uses OpenGraph property, while view counts come from a specific DOM node pattern.
+- The _TESTS section defines realistic checks for the extractor, including:
+  - A typical video page with expected metadata (id, ext, title, thumbnail, duration, view_count, age_limit).
+  - Two “only_matching” tests to ensure URL patterns are recognized without full extraction.
+
+Overall
+- The extractor targets xnxx.com video pages, builds a list of available video formats (including HLS when present), and returns a structured metadata dictionary suitable for youtube-dl consumption (id, title, thumbnail, duration, view_count, age_limit, formats).

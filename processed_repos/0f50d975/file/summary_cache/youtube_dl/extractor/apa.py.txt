@@ -1,0 +1,61 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/apa.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor (APAIE) for embedded APA videos hosted on apa.at domains. It supports both direct APA embedded URLs and JWPlatform-backed videos, extracting metadata and video formats.
+
+- Key class
+  - APAIE(InfoExtractor)
+    - _VALID_URL: Regex to recognize APA embed URLs and capture:
+      - base_url: the domain matching *.apa.at
+      - id: a UUID-style video identifier
+    - _TESTS: Example test cases validating extraction behavior, including:
+      - A standard APA embed URL with expected mp4 format and metadata (title, thumbnail, etc.)
+      - Other URLs marked only_matching (used to verify URL pattern recognition).
+
+- Main methods
+  - _extract_urls(webpage) (static)
+    - Scans a webpage for iframes whose src matches APA embed URLs.
+    - Returns a list of matched embed URLs to extract.
+
+  - _real_extract(self, url)
+    - Parses the given APA embed URL to extract video_id and base_url.
+    - Downloads the APA player page using base_url/player/{video_id}.
+    - If a JWPlatform id is present on the page (searched via mediaid or similar), returns a JWPlatform result:
+      - video_id passed as the id
+      - ie='JWPlatform'
+      - Redirects extraction to JWPlatform extractor.
+    - If no JWPlatform id is found, falls back to direct extraction:
+      - Helpers:
+        - extract(field, name=None): a utility to pull string values for fields from the webpage using a robust regex. It handles both single and double quotes and avoids crossing quote boundaries.
+      - Metadata:
+        - title: extract('title') or video_id (fallback)
+        - description: extract('description')
+        - thumbnail: extract('poster', 'thumbnail')
+      - Formats:
+        - Iterates over two potential sources: 'hls' and 'progressive'
+        - For each, sources = extract(format_id); skip if missing
+        - ext = determine_ext(source_url)
+        - If ext == 'm3u8':
+          - Use _extract_m3u8_formats(source_url, video_id, 'mp4', entry_protocol='m3u8_native', m3u8_id='hls', fatal=False) to fetch multiple HLS variants.
+        - Else (non-m3u8, e.g., mp4):
+          - height = int_or_none(self._search_regex(r'(\d+)\.mp4', source_url, 'height', default=None))
+          - Append a simple format dict: {'url': source_url, 'format_id': format_id, 'height': height}
+      - self._sort_formats(formats): sorts the formats for stable selection.
+      - Returns a video info dict:
+        - id: video_id
+        - title
+        - description
+        - thumbnail
+        - formats
+
+- Important implementation details
+  - JWPlatform handling: If a JWPlatform id is found on the APA page, the extractor delegates to JWPlatform by returning a url_result instead of parsing APA-provided formats.
+  - Flexible field extraction: The inner extract function uses a regex to grab string values for specific fields (title, description, poster/thumbnail) in a resilient way from the page content.
+  - Format extraction:
+    - Supports both HLS (m3u8) and progressive MP4 sources.
+    - For HLS, uses the extractor’s existing m3u8 handling with native protocol and a dedicated id ('hls').
+    - For MP4-like sources, derives the video height from the filename pattern (e.g., "720.mp4") when possible.
+  - Metadata fallbacks: Title falls back to the video_id if not present; other metadata gracefully handle missing values.
+  - URL discovery: _extract_urls helps locate APA embed URLs inside other pages by parsing iframe src attributes, enabling broad crawling of embedded APA content.
+
+Overall, APAIE is a robust extractor for APA-hosted embeds, capable of handling both direct APA video sources and JWPlatform-backed videos, while extracting standard metadata (title, description, thumbnail) and multiple video formats (HLS and progressive MP4).

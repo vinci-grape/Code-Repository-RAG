@@ -1,0 +1,64 @@
+Concise, high-level summary of the code in youtube-dl/youtube_dl/extractor/patreon.py
+
+What it is
+- A Patreon extractor (PatreonIE) for youtube-dl, implementing logic to retrieve media and metadata from Patreon posts/creations via Patreon’s API.
+- Inherits from InfoExtractor and defines its own URL matching, test cases, and extraction flow.
+
+Key class and methods
+- PatreonIE(InfoExtractor)
+  - _VALID_URL: Regex that matches Patreon creation pages (creation?hid=...) and posts URLs, capturing the post/video id.
+  - _TESTS: Several test cases verifying extraction for:
+    - A creation with an MP3 media file (including title, description, uploader, thumbnail, timestamp, upload_date, uploader_id).
+    - A patron-only content case (skips).
+    - A video page with MP4 media (title, uploader, thumbnail, upload_date, description, uploader_id).
+    - Two “only_matching” tests for posts URLs to ensure proper URL matching logic.
+  - Login-related code is present but commented out. It describes a potential login flow and a (currently disabled) _real_initialize hook to perform login prior to extraction.
+  - _real_extract(self, url): Core extraction logic.
+    - Identifies the resource id from the URL with _match_id.
+    - Fetches post data via Patreon API:
+      - Endpoint: https://www.patreon.com/api/posts/{video_id}
+      - Query params to fetch fields for media, post, user and to disable default includes, requesting include=media,user.
+    - Builds a basic info dict from post attributes:
+      - id, title, description (cleaned HTML), thumbnail (image.large_url or image.url), timestamp (parsed from published_at), like_count, comment_count.
+    - Processes included resources:
+      - If type == 'media':
+        - Use download_url and mimetype to determine extension via mimetype2ext.
+        - If a download URL exists and the extension is known, set:
+          - ext, filesize (int), url (download URL).
+      - If type == 'user':
+        - Populate uploader, uploader_id, uploader_url from user attributes.
+    - Fallbacks when no direct media URL is found:
+      - Try to get an embed URL from attributes.embed.url; if present, set _type to 'url' and provide the url.
+      - If still no url, fall back to post_file information:
+        - Determine ext from post_file.name (using determine_ext) and, if known, set ext and url from post_file.url.
+    - Returns the assembled info dict.
+
+Important implementation details
+- Data sources and parsing:
+  - Uses Patreon’s API to fetch post data with fields explicitly requested:
+    - fields[media]: download_url, mimetype, size_bytes
+    - fields[post]: comment_count, content, embed, image, like_count, post_file, published_at, title
+    - fields[user]: full_name, url
+  - Uses include=media,user to pull related items in a single request.
+- Media handling:
+  - For media items, ext is derived from MIME type via mimetype2ext and only kept if the extension is in KNOWN_EXTENSIONS.
+  - Supports both direct media download (download_url) and a fallback via embed URL.
+  - Filesize is parsed via size_bytes when available.
+- Metadata extraction:
+  - Title is taken from post attributes and stripped.
+  - Description is cleaned HTML from attributes.content.
+  - Thumbnail uses image.large_url if present, otherwise image.url.
+  - Timestamp parsed from published_at (ISO8601) via parse_iso8601.
+  - Like and comment counts are coerced to integers via int_or_none.
+  - Uploader information populated from included user object (full_name, url, id).
+- Fallback logic:
+  - If no direct URL is found in media and there is an embed URL, the extractor converts the result to a URL-type item.
+  - If still no URL, it uses post_file data to derive URL and extension when possible.
+- Validation and safety:
+  - Uses try_get for safe deep access to nested dicts.
+  - Ensures extensions are among KNOWN_EXTENSIONS to avoid unsupported formats.
+- Login flow (disabled):
+  - There is a ready-to-use but commented-out code path for performing Patreon login via processLogin, with a placeholder _real_initialize invoking _login. This is left as a note for future changes when Patreon requires login to access hidden content.
+
+In short
+- The PatreonIE extracts downloadable media and related metadata from Patreon posts by querying Patreon’s API, assembling a unified info dict with id, title, description, uploader info, thumbnail, timestamps, media URL, file size, and extension. It handles direct media, embed fallbacks, and post-file fallbacks, and includes robust fallbacks and safety checks to adapt to various Patreon post structures.

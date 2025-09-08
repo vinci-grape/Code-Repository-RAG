@@ -1,0 +1,36 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/normalboots.py
+
+What it does
+- Implements a YouTube-dl extractor for NormalBoots video pages. The actual video is hosted on JW Platform, and this extractor delegates to JWPlatformIE to fetch the real video URL while collecting metadata from the NormalBoots page.
+
+Key components
+- NormalbootsIE (inherits InfoExtractor)
+  - _VALID_URL: RegEx matching NormalBoots video pages at /video/<id> with an optional trailing slash.
+  - _TEST: Provides a sample URL and expected metadata to verify extraction (title, description, uploader, upload_date, etc.). Uses skip_download and adds JWPlatform as the inner extractor.
+  - _real_extract(url):
+    - video_id: extracted from URL via _match_id.
+    - webpage: downloaded HTML of the page.
+    - video_uploader: parsed from page using regex on a “Posted by” anchor. Optional (fatal=False).
+    - video_upload_date: parsed from a specific uppercase-styled span; converted to ISO-like date via unified_strdate. Optional (fatal=False).
+    - jwplatform_url: extracted from the page with JWPlatformIE._extract_url(webpage).
+    - Returns a dict for a transparent wrapper:
+      - _type: 'url_transparent' (delegate to inner extractor)
+      - id: video_id
+      - url: jwplatform_url
+      - ie_key: JWPlatformIE.ie_key() (inner extractor)
+      - title: og:title from page via _og_search_title
+      - description: og:description from page via _og_search_description
+      - thumbnail: og:image from page via _og_search_thumbnail
+      - uploader: extracted uploader (if available)
+      - upload_date: converted date (if available)
+
+Implementation details
+- Delegation pattern: The page embeds a JW Platform video; NormalbootsIE simply finds the JW Platform URL and defers to JWPlatformIE for actual video extraction.
+- Metadata extraction:
+  - Uses OpenGraph helpers (_og_search_title/description/thumbnail) for robust title/description/thumbnail data.
+  - Attempts to extract uploader and upload_date with fallbacks (fatal=False) to avoid hard failures if the page markup changes.
+  - upload_date is normalized with unified_strdate to YYYYMMDD format.
+- JW Platform integration: Relies on JWPlatformIE._extract_url to locate the video URL on the NormalBoots page and JWPlatformIE.ie_key() to indicate the inner extractor to use.
+- Testing and behavior: _TEST demonstrates expected fields and confirms the integration with JWPlatformIE. skip_download: True is used in tests since only metadata and URL extraction are needed.
+
+In short, NormalbootsIE serves as a thin wrapper that parses NormalBoots video pages, pulls basic metadata, locates the underlying JW Platform video URL, and delegates the rest of the extraction to JWPlatformIE while preserving the page-derived metadata.

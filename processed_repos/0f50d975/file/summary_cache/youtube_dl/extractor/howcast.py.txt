@@ -1,0 +1,41 @@
+Summary:
+
+- Purpose
+  - HowcastIE extracts Howcast videos by delegating to the Ooyala extractor. It locates the Ooyala embed code on a Howcast page and returns a transparent URL to the Ooyala backend.
+
+- Class and inheritance
+  - HowcastIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?howcast\.com/videos/(?P<id>\d+)'
+  - Matches Howcast video pages like http(s)://www.howcast.com/videos/390161
+
+- Test data
+  - _TEST includes a sample Howcast URL, expected md5, and an info_dict with:
+    - id, ext (mp4), title, description (md5), timestamp, upload_date, duration
+    - skip_download: True
+    - add_ie: ['Ooyala'] to indicate delegation to the Ooyala extractor
+
+- Core functionality (_real_extract)
+  - Extracts video_id from the URL using _match_id.
+  - Downloads the webpage with _download_webpage.
+  - Finds the Ooyala embed code by searching for an iframe src containing embed_code via:
+    r'<iframe[^>]+src="[^"]+\bembed_code=([^\b]+)\b'
+    using _search_regex.
+  - Constructs a transparent URL to the Ooyala extractor: url = 'ooyala:%s' % embed_code.
+  - Returns a dictionary with:
+    - _type: 'url_transparent' (delegate to another extractor)
+    - ie_key: 'Ooyala'
+    - url: the constructed Ooyala URL
+    - id: video_id
+    - timestamp: parsed via parse_iso8601 from the article:published_time meta tag (found using _html_search_meta on the page)
+
+- Important implementation details
+  - Uses a transparent wrapper (_type: 'url_transparent') so the actual video metadata is retrieved by the Ooyala extractor.
+  - The embed_code is extracted from the iframe/src query parameter, which is how Howcast provides the actual video asset via Ooyala.
+  - The timestamp is derived from the page’s article:published_time meta tag and converted to a Unix timestamp with parse_iso8601.
+  - The code relies on the Ooyala extractor (added in _TEST via add_ie) to fetch the final video information (title, duration, etc.).
+
+- Dependencies
+  - Depends on Ooyala extractor for the final media retrieval.
+  - Uses utilities: parse_iso8601 and common InfoExtractor base class.

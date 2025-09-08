@@ -1,0 +1,68 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/adultswim.py
+
+Overview
+- This module implements a YouTube-DL extractor for Adult Swim videos, handling both individual episodes and show playlists.
+- Class: AdultSwimIE extends TurnerBaseIE and uses a GraphQL-based API to fetch metadata and streaming assets.
+
+URL matching
+- _VALID_URL captures two parts:
+  - show_path: the show slug
+  - episode_path: optional episode slug
+- If episode_path is present, it extracts a single video; otherwise it builds a playlist of episodes for the show.
+
+Core extraction flow (_real_extract)
+- Determine show_path and episode_path from the URL. display_id is episode_path if present, otherwise show_path.
+- Build a GraphQL query to fetch data from the Adult Swim API:
+  - Base: getShowBySlug(slug: "show_path") { ...fields... }
+  - If episode_path provided, request getVideoBySlug(slug: "episode_path") with detailed video fields.
+  - If episode_path not provided, request metaDescription, title, and a list of videos (first:1000) with slug/IDs.
+- Post the GraphQL query to https://www.adultswim.com/api/search as JSON and parse the response to show_data.
+
+Episode-specific extraction (episode_path present)
+- video_id = video_data['_id']; episode_title = title; series = show_data.get('title').
+- Build info dict with:
+  - id, title (optionally prefixed with series), description, duration, thumbnail, timestamp (launchDate), series, season_number, episode, episode_number.
+  - formats: [] and subtitles: {}. age_limit from tvRating.
+- Streaming access:
+  - If video_data contains 'mediaID', call _extract_ngtv_info(media_id, ...) to obtain formats (authenticated ngtv path). Pass an appId JWT (constant from code comments) and include url, site_name, and auth_required flag based on 'auth'.
+  - If not auth, fetch assets via https://www.adultswim.com/api/shows/v1/videos/{video_id}?fields=stream. Extract assets and for each asset:
+    - Determine extension via asset URL or mime type; handle as:
+      - m3u8: add formats via _extract_m3u8_formats(asset_url, video_id, 'mp4', m3u8_id='hls', fatal=False)
+      - f4m: skip (not supported)
+      - scc/ttml/vtt: add as English subtitles
+  - Sort formats with _sort_formats.
+- Return info dict.
+- Notes:
+  - If auth is provided, the code uses the ngtv path; otherwise it tries to fetch explicit stream assets.
+  - The description, timestamp, and other metadata come directly from the GraphQL response.
+
+Playlist extraction (episode_path absent)
+- Build entries by iterating over show_data['videos']['edges']:
+  - For each edge, get slug and create a URL for the episode: http://adultswim.com/videos/show_path/slug
+  - Use url_result with the “AdultSwim” extractor and the video’s _id as the video id for the playlist item.
+- Return a playlist_result with:
+  - list of entries, id = show_path, title = show_data.get('title'), description = show_data.get('metaDescription').
+
+Key implementation details
+- GraphQL query construction:
+  - The code builds a flexible query string that requests either episode details or show metadata and a list of episodes depending on the presence of episode_path.
+- Data sources:
+  - Primary data via GraphQL at /api/search.
+  - For unauthenticated episodes, additional assets are fetched from /api/shows/v1/videos/{video_id} with fields=stream.
+  - If mediaID is present, uses _extract_ngtv_info to obtain streaming formats (ngtv path) with a hardcoded CDN appId as described in the comments.
+- Formats and subtitles:
+  - HLS (m3u8) assets are supported via _extract_m3u8_formats.
+  - HDS (f4m) assets are ignored (not supported here).
+  - Subtitles are supported from scc/ttml/vtt assets under the en language.
+- Metadata handling:
+  - Title formatting includes series and episode when available: “Series - Episode”.
+  - Description is stripped and pushed through as-is; in some tests it’s a fixed hash (md5) indicating raw description content from the API.
+  - Timestamps use parse_iso8601 on launchDate; upload_date in tests is derived from that where applicable.
+  - Age rating parsed from tvRating via parse_age_limit.
+  - Additional metadata: poster as thumbnail, season_number and episode_number as integers, episode as episode_title, and series as show title.
+- Tests reflect behavior:
+  - Several example URLs show per-episode extraction with expected IDs, titles, and times.
+  - One test exercises a playlist with 12 items (playlist_mincount: 12).
+  - Some tests expect to skip downloads (skip_download: True) and tolerate missing m3u8 manifests with a warning.
+
+In short, AdultSwimIE fetches data via GraphQL, supports both single-episode extraction (with ngtv or asset-based formats) and show-based playlists, and aggregates formats and subtitles accordingly. It handles authentication differences and gracefully degrades when certain assets (like f4m) are unavailable.

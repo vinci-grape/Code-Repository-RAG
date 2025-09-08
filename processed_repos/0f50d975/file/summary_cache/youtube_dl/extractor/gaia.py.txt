@@ -1,0 +1,89 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/gaia.py
+
+Purpose
+- Implements a GaiaIE extractor for youtube-dl to fetch Gaia video metadata and formats (including HLS m3u8) from gaia.com.
+- Supports two video types via the fullplayer parameter: feature and preview.
+
+Key classes and main flow
+- GaiaIE(InfoExtractor)
+  - _VALID_URL: Regex to identify Gaia video pages and capture:
+    - id: the display path segment after /video/
+    - type: either feature or preview (from fullplayer query param)
+  - _TESTS: Two tests for feature and preview modes, both returning mp4 formats with descriptions and timestamps; both set skip_download to True (expect m3u8 handling).
+  - _NETRC_MACHINE = 'gaia'
+  - _jwt = None: class attribute to store JWT after login (if available)
+
+Initialization and authentication
+- _real_initialize(self):
+  - Tries to read auth from Gaia cookies on https://www.gaia.com/ (cookie name 'auth').
+  - If present, attempts to parse JSON payload from the cookie value.
+  - If not present, prompts for login using _get_login_info(); if credentials supplied, posts to https://auth.gaia.com/v1/login with username and password and stores the returned auth JSON.
+  - If auth indicates failure, raises ExtractorError with messages.
+  - If authentication succeeds, stores JWT token from auth.get('jwt') in self._jwt.
+
+Extraction logic
+- _real_extract(self, url):
+  - Extracts display_id and vtype (feature|preview) from the URL using _VALID_URL.
+  - Queries https://brooklyn.gaia.com/pathinfo with path=video/<display_id> to obtain a node ID.
+  - Fetches node data from https://brooklyn.gaia.com/node/<node_id>.
+  - Selects vdata = node[vtype] and derives:
+    - media_id from vdata['nid']
+    - title from node['title']
+  - If JWT is available, prepares headers with Authorization: Bearer <jwt>.
+  - Retrieves media details from https://brooklyn.gaia.com/media/<media_id> with optional headers.
+  - Formats:
+    - Extracts HLS formats via _extract_m3u8_formats(media['mediaUrls']['bcHLS'], media_id, 'mp4').
+    - Sorts formats with _sort_formats.
+  - Subtitles:
+    - Collects text tracks from media.get('textTracks', {}) for keys 'captions' and 'subtitles'.
+    - Builds a dict of language -> list of {'url': sub_url} entries.
+  - Metadata helpers:
+    - fivestar = node.get('fivestar', {})
+    - fields = node.get('fields', {})
+    - get_field_value(key, value_key='value') helper to safely read nested fields via try_get(fields, lambda x: x[key][0][value_key])
+  - Returns a dict with the following fields:
+    - id: media_id
+    - display_id: display_id
+    - title: title
+    - formats: list of extracted formats
+    - description: strip_or_none(get_field_value('body') or get_field_value('teaser'))
+    - timestamp: int_or_none(node.get('created'))
+    - subtitles: dict built earlier
+    - duration: int_or_none(vdata.get('duration'))
+    - like_count: int_or_none(try_get(fivestar, lambda x: x['up_count']['value']))
+    - dislike_count: int_or_none(try_get(fivestar, lambda x: x['down_count']['value']))
+    - comment_count: int_or_none(node.get('comment_count'))
+    - series: try_get(node, lambda x: x['series']['title'], compat_str)
+    - season_number: int_or_none(get_field_value('season'))
+    - season_id: str_or_none(get_field_value('series_nid', 'nid'))
+    - episode_number: int_or_none(get_field_value('episode'))
+
+Important implementation details
+- Data sources and routing:
+  - Uses Gaia’s Brooklyn API endpoints:
+    - /pathinfo to map display_id to a node_id
+    - /node/<id> to get node and vtype data
+    - /media/<nid> to obtain media URLs and text tracks
+- Video types:
+  - vtype is derived from the fullplayer parameter (feature or preview) and used to pick the correct video data block from the node.
+- Authentication:
+  - Maintains a JWT for API requests after initial login or cookie-based auth.
+  - If available, sends Authorization: Bearer <jwt> header for media requests.
+- Formats:
+  - Extracts HLS-based mp4 formats from bcHLS URL via _extract_m3u8_formats.
+  - Uses _sort_formats to order formats by quality/priority.
+- Subtitles:
+  - Aggregates subtitles and captions from textTracks in media payload.
+  - Produces a standard subtitles dict keyed by language.
+- Robust field access:
+  - Uses helper functions int_or_none, str_or_none, strip_or_none, try_get to safely access nested and optional fields.
+  - get_field_value helper abstracts nested field access to reduce errors when keys are missing.
+- Error handling:
+  - If login via GAIA auth API fails, raises ExtractorError with server-provided messages.
+- Compatibility:
+  - Uses compatibility helpers (compat_str, compat_urllib_parse_unquote) to support multiple Python versions.
+- Behavior notes:
+  - The tests indicate m3u8 download is intended (skip_download=True in tests).
+  - The code stores the JWT in a class attribute (_jwt) so multiple extractions in a session may reuse the token.
+
+In short, GaiaIE fetches video metadata and HLS formats from Gaia’s Brooklyn API, supports authentication via cookies or login, and returns a structured info dict with formats, subtitles, and rich metadata like title, description, timestamps, and episode/series information.

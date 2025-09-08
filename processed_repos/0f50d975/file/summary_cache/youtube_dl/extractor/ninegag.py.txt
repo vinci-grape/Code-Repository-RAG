@@ -1,0 +1,73 @@
+Summary of file: ./youtube-dl/youtube_dl/extractor/ninegag.py
+
+Purpose
+- Implements a YouTube-DL extractor for 9GAG gag pages that contain videos (Animated posts).
+- Fetches post data via 9GAG API, validates content type, and builds a rich metadata dictionary including video formats, thumbnails, and statistical data.
+
+Key components
+- NineGagIE class (inherits InfoExtractor)
+  - IE_NAME: '9gag'
+  - _VALID_URL: regex to extract the post id from URLs like https://9gag.com/gag/{id}
+  - _TESTS: two tests
+    - First test exercises full metadata extraction for a known animated post (expects id, ext, title, timestamp, duration, categories, tags, like/dislike/comment counts, etc.)
+    - Second test checks handling of an HTML-escaped title (only_matching)
+
+Main workflow in _real_extract(self, url)
+- Extract post_id from URL using _match_id.
+- Retrieve post data from 9GAG API: GET https://9gag.com/v1/post?id={post_id}; navigate to data.post in the response.
+- Validate content type: raise ExtractorError if post['type'] != 'Animated' (only video posts supported).
+
+Metadata extraction
+- Title: unescapeHTML(post['title']).
+- Duration: initialized to None; set from first image entry that provides duration.
+- Formats and thumbnails: built by iterating over post.get('images', {}).
+  - For each image:
+    - image_url = url_or_none(image.get('url')); skip if missing.
+    - ext = determine_ext(image_url).
+    - image_id = key.strip('image') to normalize an identifier.
+    - common dict includes: url, width, height (as integers when possible).
+    - If ext is 'jpg' or 'png':
+      - If image has webpUrl, add a thumbnail variant using the webp URL (id suffixed with '-webp').
+      - Add a thumbnail with id=image_id and ext=ext.
+    - If ext is 'webm' or 'mp4':
+      - Capture duration if not already set.
+      - acodec = 'none' if image.hasAudio == 0 else None (indicates video without audio).
+      - For codecs in vp8, vp9, h265:
+        - If corresponding Url exists, create a format dict copying common, set:
+          - format_id: image_id + '-' + vcodec
+          - url: codec-specific URL
+          - vcodec: vcodec
+        - Append to formats.
+      - Also append a base video format with ext and format_id=image_id.
+- Sort formats with _sort_formats(formats).
+
+Additional metadata
+- section: try_get(post, lambda x: x['postSection']['name']) to obtain a category-like section name.
+- tags: If post['tags'] exists, collect all tag['key'] values (skip missing keys); otherwise None.
+- get_count helper: int_or_none(post.get(x + 'Count')) to extract like/upvotes, dislike/downvotes, and comments.
+
+Response structure
+- id: post_id
+- title: parsed title
+- timestamp: int_or_none(post.get('creationTs'))
+- duration: duration (seconds) if available
+- formats: list of video formats (with multiple codecs if provided)
+- thumbnails: list of image thumbnails (including possible webp variants)
+- like_count: upVoteCount
+- dislike_count: downVoteCount
+- comment_count: commentsCount
+- age_limit: 18 if post['nsfw'] == 1 else None
+- categories: [section] if section is present, else None
+- tags: list of tag keys or None
+
+Implementation details and nuances
+- Uses 9GAG API at /v1/post with id query parameter; post is expected under data.post.
+- Only processes posts with type 'Animated' (videos); others raise an ExtractorError with expected=True.
+- Thumbnails include both static image formats (jpg/png) and optional webp variants if available.
+- Video formats are generated for each available codec (vp8, vp9, h265) with appropriate format_id naming (image_id + '-' + vcodec).
+- For video formats, acodec handling accounts for audio absence (acodec set to 'none' when hasAudio == 0).
+- Duration is derived from image data when available; subsequent video formats inherit the duration.
+- Handles HTML-escaped titles robustly via unescapeHTML.
+- Uses helper utilities: int_or_none, url_or_none, try_get, determine_ext, and unescapeHTML from youtube-dl’s utilities.
+
+In short: The extractor queries 9GAG’s API for a post, verifies it’s a video, builds a comprehensive list of video formats (with multiple codecs), collects thumbnails and metadata (title, duration, counts, tags, categories, NSFW flag), and returns a structured dictionary compatible with youtube-dl’s extraction results.

@@ -1,0 +1,78 @@
+Summary of ./youtube-dl/youtube_dl/extractor/teachable.py
+
+Purpose
+- Implements YouTube-DL extractors for Teachable-based sites. Supports:
+  - TeachableIE: extracting individual lecture videos (often via Wistia) from a Teachable course page, including login when required and handling locked content.
+  - TeachableCourseIE: building a playlist of all lectures in a Teachable course by parsing sections/lectures and delegating video extraction to TeachableIE.
+- Includes shared login logic in TeachableBaseIE used by both extractors.
+- Handles multiple Teachable subdomains via a site map and a common prefixed URL mechanism.
+
+Key classes and main functionality
+- TeachableBaseIE (InfoExtractor)
+  - Central login handling:
+    - _NETRC_MACHINE and _SITES map hostnames to a site key used for credentials.
+    - _real_initialize initializes login flag (_logged_in = False).
+    - _login(site) performs login if not already done:
+      - Loads sign-in page, checks if already logged in via several patterns (user-signout, sign_out link, “Log Out” text).
+      - If not logged in, fills a login form using _hidden_inputs, sets user[email] and user[password], and discovers the form action URL.
+      - Submits the login form with proper headers; checks for privacy policy prompt and raises a helpful ExtractorError if present.
+      - Confirms login success and sets _logged_in = True, otherwise raises an error with any provided alert message.
+  - Purpose: provide shared login capability and state for Teachable extractors.
+
+- TeachableIE (TeachableBaseIE)
+  - _VALID_URL: matches individual Teachable lecture URLs across multiple subdomains (via _VALID_URL_SUB_TUPLE) and captures site and lecture id.
+  - _TESTS: includes a sample from gns3.teachable.com with expected video metadata (id, ext, title, description, duration, timestamps, chapter info), plus tests for other sites and prefixed URLs.
+  - _is_teachable(webpage): detects if a page is a Teachable page that can contain a video (checks for teachableTracker linker and assets CDN links).
+  - _extract_url(webpage, source_url): if the page is Teachable, and source_url appears to be a course or page URL, returns a prefixed URL (teachable:<source_url>) for later processing.
+  - _real_extract(url):
+    - Determine site and lecture id, perform login if required.
+    - Retrieve the lecture page, extract Wistia video URLs via WistiaIE._extract_urls.
+    - If no video URLs found and the page indicates content is locked, raise a login_required error.
+    - If no video URLs and no lock, raise a generic ExtractorError.
+    - Extract title via open graph tag.
+    - Attempt to determine chapter and chapter_number by locating the section item for the given lecture_id and parsing data-ss-position and section titles.
+    - Build a list of entries, one per Wistia URL, as url_transparent entries pointing to WistiaIE with video_id, title, chapter, and chapter_number.
+    - Return a playlist_result with these entries, using video_id as playlist id and title as playlist title.
+  - Notes:
+    - Uses WistiaIE as the inner extractor for actual video playback.
+    - Chapter extraction relies on parsing a section-item structure and section-title blocks.
+
+- TeachableCourseIE (TeachableBaseIE)
+  - _VALID_URL: matches course pages (including enrolled paths) on Teachable subdomains; captures site and course id.
+  - _TESTS: includes a sample from v1.upskillcourses.com with expected course id and title, and a high playlist_count (indicating many lectures).
+  - suitable(cls, url): overrides to exclude URLs already handled by TeachableIE. Returns False if TeachableIE.suitable(url) is True, otherwise defers to the parent suitable().
+  - _real_extract(url):
+    - Extract site and course_id, ensure login with site, handle prefixed URLs (teachable: prefix) if present.
+    - Download the course page and parse it to build a list of lecture entries:
+      - Iterates over section-item list entries that look like lecture items. Filters to include items with YouTube-y icons or time markers (e.g., 1:23) indicating playable lectures.
+      - For each item, extract lecture_url, lecture_id, and title (lecture-name).
+      - Build full entry_url and, if the original URL was prefixed, prepend the teachable: prefix.
+      - Create a url_result entry for each lecture that uses TeachableIE as the inner extractor, with video_id and video_title.
+    - Extract course_title via two possible patterns (course-image with a title, or course-title header).
+    - Return a playlist_result with all lecture entries, using course_id as the playlist id and course_title as the playlist title.
+  - Notes:
+    - This extractor creates a playlist of individual lecture pages that themselves get resolved by TeachableIE.
+    - The suitable() override ensures there’s no conflict with TeachableIE by letting the lecture extractor handle lecture URLs first.
+
+Important implementation details and edge cases
+- Site handling and authentication
+  - TeachableBaseIE maintains a site-to-credential mapping and uses the netrc for credentials where available.
+  - Login process handles normal login flow and explicit privacy policy prompts, with clear errors when login fails or policy needs acceptance.
+- Video URL extraction
+  - Teachable lecture pages are scanned for Wistia video URLs via WistiaIE._extract_urls.
+  - If no direct video URLs found and content is locked, the code reports that login is required; otherwise raises a generic extraction error.
+- Teachable CDN logic
+  - _is_teachable and _extract_url help the extractor recognize pages that actually host Teachable content and, when possible, provide a prefixed URL to direct the inner extraction (using Wistia for video data).
+- Chapters and sections
+  - For individual lectures, chapter and chapter_number extraction is supported by parsing specific data attributes (data-lecture-id and data-ss-position) and collecting section titles from section-title blocks.
+- Playlist construction
+  - TeachableIE results are built as a list of url_transparent entries that delegate to WistiaIE, preserving titles and chapter information.
+  - TeachableCourseIE aggregates multiple lecture entries into a single playlist, with each entry pointing to a Teachable lecture page that TeachableIE will resolve.
+- Prefix URL mechanism
+  - The code supports a prefixed URL scheme (teachable:) to allow downstream processing to pass through a pre-resolved or redirected URL that TeachableIE can handle.
+- Tests
+  - The module includes _TESTS for sample lecture pages and courses, including login-required and only_matching scenarios, reflecting real-world Teachable usage.
+
+Overall, the file provides a cohesive pair of extractors for Teachable:
+- TeachableIE fetches and resolves individual lecture videos via Wistia, with robust login handling and chapter metadata.
+- TeachableCourseIE builds comprehensive lecture playlists by parsing course pages and delegating video extraction to TeachableIE.

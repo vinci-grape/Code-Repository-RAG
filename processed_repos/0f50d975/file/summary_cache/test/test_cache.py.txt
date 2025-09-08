@@ -1,0 +1,45 @@
+Concise but comprehensive summary of youtube-dl/test/test_cache.py
+
+What this file is
+- A set of unit tests for the Cache class in youtube_dl.cache, using a FakeYDL helper to simulate a downloader object.
+
+Main components
+- Helper functions:
+  - _is_empty(d): returns True if the directory d has no entries.
+  - _mkdir(d): creates directory d if it does not exist.
+- TestCache(unittest.TestCase):
+  - setUp: prepares a test directory under test/testdata/cache_test and ensures a clean slate by calling tearDown first.
+  - tearDown: recursively removes the test cache directory if it exists.
+  - test_cache: tests basic store/load/remove behavior and cache isolation by cache name and key.
+  - test_cache_validation: tests version-based invalidation via min_ver parameter.
+  - test_cache_clear: tests clearing a specific key within a named cache without affecting other keys.
+- External/test dependencies:
+  - Cache from youtube_dl.cache
+  - FakeYDL from test.helper
+  - version_tuple and __version__ from youtube_dl.version
+
+Key functionality covered
+- Storing and loading:
+  - Cache(store) with a cache name and key, then load returns the original object.
+  - Non-existent keys return None.
+  - Loading with a different key or different cache name returns None (isolation).
+- Removal semantics:
+  - Cache.remove() deletes the cache directory; subsequent loads return None.
+- Version-based validation (min_ver):
+  - Loading with min_ver less than or equal to the current version returns the stored object.
+  - Loading with a higher min_ver than the current version returns None (cache invalidation when the software version increases).
+  - Constructs a higher version string by incrementing the major version component and formatting components, then asserts load(..., min_ver=new_version) is None.
+- Clearing specific keys:
+  - Cache.clear(cache_name, key) removes only the specified key; other keys remain accessible.
+- Data handling:
+  - Ensures proper handling of Unicode/strings (e.g., y list containing characters like “ä” and backslashes).
+
+Implementation details and behaviors tested
+- Cache is instantiated with a FakeYDL object whose cachedir points to a test directory.
+- Stored objects can be complex Python structures (e.g., dicts with lists and Unicode).
+- After store, the test asserts that the directory is not empty, indicating that data is actually persisted.
+- Test for invalid key access and cross-cache isolation ensures correctness of keying and scoping.
+- Version handling uses version_tuple(__version__) to generate a deterministic new_version value for invalidation testing.
+
+Overall purpose
+- To verify that the Cache class correctly implements storing, loading, removing, clearing, and version-based invalidation, including proper handling of non-existent entries and Unicode data, with clean per-test filesystem setup/teardown.

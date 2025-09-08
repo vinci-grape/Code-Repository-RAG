@@ -1,0 +1,63 @@
+- Purpose
+  - This file implements two YouTube-DL extractors for Webcaster:
+    - WebcasterIE: extracts video information from direct Webcaster video pages.
+    - WebcasterFeedIE: extracts the actual Webcaster video page URL from a feed page and delegates to WebcasterIE.
+
+- WebcasterIE (direct video pages)
+  - URL pattern: https?://bl.webcaster.pro/(quote|media)/start/free_(id)
+  - Main flow (in _real_extract):
+    - Derives video_id from the URL.
+    - Downloads the page XML via _download_xml(url, video_id).
+    - Extracts title from the XML path .//event_name (fatal if missing).
+    - Builds potential track tags for two formats: None and 'noise'.
+      - track_tag is created as 'track' or 'track_noise'.
+      - Iterates over all matching tracks under .//iphone/<track_tag>.
+      - For each track URL:
+        - Skips if missing.
+        - If URL ends with .m3u8, extracts formats using _extract_m3u8_formats with:
+          - video_id as id, 'mp4' as extension, m3u8_native protocol.
+          - m3u8_id set to 'hls' or 'hls-noise' depending on format_id.
+          - fatal=False to tolerate missing playlists.
+        - For each extracted format:
+          - Sets source_preference to 0 for noise, otherwise 1 (noise preferred lower number).
+          - Attaches format_note from the track element's title.
+      - Aggregates all formats and sorts them with _sort_formats.
+    - Extracts thumbnail from .//image.
+    - Returns a dict with id, title, thumbnail, and formats.
+  - Key implementation details:
+    - Supports two track variants: a default track and a “noise” track to access different qualities.
+    - Uses m3u8 formats extraction to build playable HLS streams.
+    - Uses helper make_id to consistently build track and HLS identifiers.
+
+- WebcasterFeedIE (feed pages)
+  - URL pattern: https?://bl.webcaster.pro/feed/start/free_(id)
+  - _TEST demonstrates only_matching behavior.
+  - Static method _extract_url(ie, webpage):
+    - Tries a regex to find a data-config or data attribute on an object or an anchor with class "webcaster-player", extracting a config URL that contains a feed URL (https://bl.webcaster.pro/feed/start/free_...).
+    - If not found, tries to extract a video URL from OpenGraph via ie._og_search_video_url (both secure and non-secure).
+      - If found, looks for a config URL inside that video URL using another regex and returns it.
+  - _real_extract:
+    - Extracts video_id from URL.
+    - Downloads the feed XML via _download_xml(url, video_id).
+    - Extracts the video URL from the feed at path (video_hd, video) using xpath_text (fatal if missing).
+    - Returns a URL result pointing to the extracted video URL but delegates processing to WebcasterIE (via WebcasterIE.ie_key()).
+
+- Important behaviors and details
+  - The code uses:
+    - determine_ext to check if a track URL is an m3u8 playlist.
+    - _extract_m3u8_formats to obtain playable HLS streams, with entry_protocol set to 'm3u8_native' and appropriate m3u8_id identifiers.
+    - xpath_text to fetch text from XML with meaningful fallbacks and error handling (fatal=True for required fields like title and video URL).
+  - Metadata:
+    - Title is required (fatal if missing) and sourced from event_name in the XML.
+    - Thumbnail is optional (from image tag).
+  - Formats:
+    - Supports two potential formats (default track and noise track) and tags each format with a format_note from the track element’s title.
+    - Sorts the final list of formats for proper playback ordering.
+  - Feed extraction workflow:
+    - The feed extractor’s goal is to locate the actual video page URL behind the feed and then reuse WebcasterIE to fetch formats.
+    - It attempts multiple strategies to locate the nested URL, including parsing object/anchor tags and OpenGraph video URLs.
+
+- Summary
+  - This module provides two extractors to handle Webcaster videos:
+    - WebcasterIE processes the direct video page XML to obtain HLS formats from iPhone tracks and returns video metadata.
+    - WebcasterFeedIE parses feed pages to find the embedded video URL and delegates to WebcasterIE for actual extraction.

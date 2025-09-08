@@ -1,0 +1,42 @@
+Concise summary of the code in ./youtube-dl/devscripts/prepare_manpage.py
+
+Purpose
+- Generate a manpage-like Markdown file for youtube-dl by extracting and reformatting sections from the repository’s README.md. It prepends a standard header and converts the OPTIONS section into Pandoc-friendly definition list format.
+
+Main components
+- PREFIX constant
+  - A multi-line string containing the standard manpage header, NAME, SYNOPSIS sections that will be prepended to the processed README content.
+
+- main() function
+  - Parses a single output filename argument using optparse.
+  - Reads README.md from the repository root (computed relative to this script).
+  - Trims the README content to start at the DESCRIPTION section (removing everything before it).
+  - Removes a specific usage line that appears in the README.
+  - Prepends the PREFIX header.
+  - Processes options via filter_options().
+  - Writes the resulting content to the specified output file.
+
+- filter_options(readme) function
+  - Converts the OPTIONS section into a Pandoc-friendly format (definition list).
+  - Logic:
+    - Tracks whether the current section is the OPTIONS block by monitoring lines that start with “# ”. When a line after “# ” starts with OPTIONS, in_options is set; otherwise it’s disabled.
+    - Within the OPTIONS block, it looks for option lines that start with '-' (after left-stripping). It splits such lines on two or more whitespace to separate option and description.
+    - If a valid option-descriptions pair is found (more than one piece after splitting), it:
+      - Splits the option portion into tokens. If the last token is not a metavar (doesn’t start with '-'), it is treated as a metavar and wrapped with asterisks to italicize (e.g., *METAVAR*).
+      - Appends a Pandoc definition list entry: “option” followed by a newline and “:   description”.
+    - If a line is not an option descriptor, or the line isn’t in the OPTIONS block, it is included as-is (trimmed on the left where appropriate).
+  - Returns the transformed content.
+
+Supporting details
+- IO handling relies on read_file and write_file from a utils module.
+- ROOT_DIR is determined from the script location to locate README.md reliably.
+- Regular expressions:
+  - Trims content before the first DESCRIPTION header: r'(?s)^.*?(?=# DESCRIPTION)'
+  - Removes the standard OPTIONS usage line: r'\s+youtube-dl \[OPTIONS\] URL \[URL\.\.\.\]'
+
+Usage
+- Run as a script with a single argument specifying the output Markdown filename:
+  python prepare_manpage.py output.md
+
+Output
+- A Markdown file containing a formatted manpage-like document, including a standard header (PREFIX) and a Pandoc-formatted OPTIONS section.

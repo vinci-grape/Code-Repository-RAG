@@ -1,0 +1,80 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/viewlift.py
+
+Overview
+- Provides extraction logic for ViewLift-powered sites (snagfilms, snagxtreme, hoopla variants, marquee, etc.) and their embed players.
+- Two main extractors:
+  - ViewLiftBaseIE: shared API access layer with token management.
+  - ViewLiftEmbedIE: extracts video info from embed player URLs.
+  - ViewLiftIE: handles standard pages and delegates to the embed extractor via a transparent URL.
+
+Key classes and functionality
+- ViewLiftBaseIE (InfoExtractor)
+  - _API_BASE: Base URL for ViewLift API.
+  - _DOMAINS_REGEX: Regex listing domains handled by this extractor.
+  - _SITE_MAP: Maps domain tokens to internal site identifiers used by the API.
+  - _TOKENS: Per-site cache of authorization tokens.
+  - _call_api(site, path, video_id, query): Core method to call API endpoints.
+    - Retrieves and caches an authorization token for the given site.
+      - If login info is available (via _get_login_info), logs in with identity/signin and stores authorizationToken.
+      - Otherwise fetches an anonymous token via identity/anonymous-token.
+    - Performs the actual API call to _API_BASE + path with Authorization header and provided query.
+    - Returns parsed JSON response.
+
+- ViewLiftEmbedIE (ViewLiftBaseIE)
+  - IE_NAME: 'viewlift:embed'
+  - _VALID_URL: Matches embed URLs across the supported domains, capturing domain and filmId.
+  - _TESTS: Several embed URLs with expected outputs (formats, titles, durations, etc).
+  - _extract_url(webpage): Static helper to pull an embed URL from a page’s iframe tag.
+  - _real_extract(url):
+    - Parses domain and film_id, then maps domain to internal site code via _SITE_MAP.
+    - Calls API: entitlement/video/status with id=film_id to obtain content_data.
+    - Handles HTTP 403:
+      - If error indicates missing subscription, raises login required (self.raise_login_required()).
+      - Otherwise raises ExtractorError with the provided error message.
+    - Extracts gist (title, description, thumbnail, runtime, publishDate) and streamingInfo.videoAssets.
+    - Formats extraction:
+      - For MPEG assets: builds formats with url, format_id (including bitrate), tbr, height (derived from renditionValue like "720p"), and vcodec.
+      - Adds HLS formats from videoAssets.hls if available via _extract_m3u8_formats.
+      - Sorts formats by height, tbr, format_id.
+    - Builds info dict with id, title, description, thumbnail, duration, age_limit, timestamp, and formats.
+    - Adds categories and tags if present (extracts titles from content_data).
+
+- ViewLiftIE (ViewLiftBaseIE)
+  - IE_NAME: 'viewlift'
+  - _VALID_URL: Matches standard content pages across the same domains, extracting domain, path, and id/display_id.
+  - _TESTS: Examples of full-page URLs with expected outputs (id, display_id, title, description, duration, timestamp, age_limit, etc). Includes samples for several sites (snagfilms, losers, winners, monumentalsportsnetwork, marquee, etc).
+  - suitable(cls, url): Ensures it does not clash with the embed extractor; returns False if ViewLiftEmbedIE.suitable(url) holds, else defers to parent suitability.
+  - _real_extract(url):
+    - Parses domain, path, display_id; maps site via _SITE_MAP if necessary.
+    - Calls API: content/pages with includeContent=true, moduleOffset=1, path=path, site=site.
+    - Extracts modules and finds the first VideoDetailModule to obtain film_id from its contentData.gist.id.
+    - Returns a url_transparent that points to the embed player URL: http://<domain>/embed/player?filmId=<film_id>, with:
+      - id: film_id
+      - display_id: display_id
+      - ie_key: 'ViewLiftEmbed'
+    - This delegates actual video extraction to ViewLiftEmbedIE.
+
+Important implementation details
+- Token handling and authentication:
+  - Tokens are cached per site in _TOKENS to minimize re-authentication.
+  - If local credentials exist (via _get_login_info), logs in using identity/signin and uses the returned authorizationToken.
+  - If no credentials, fetches an anonymous token via identity/anonymous-token.
+  - All subsequent API calls include the token in the Authorization header.
+- Error handling:
+  - When a 403 from the API indicates no valid subscription, the embed extractor triggers login prompt (raise_login_required) to request authentication.
+  - Other API errors are propagated as ExtractorError with the server-provided message.
+- Video formats:
+  - MPEG assets are parsed into individual formats with bitrate, height (derived from renditionValue like "720p"), and codec.
+  - HLS (m3u8) formats are also supported and added if available.
+  - Formats are sorted by height, then tbr, then format_id for a sensible order.
+- Site mapping:
+  - _SITE_MAP translates various domain tokens to internal site identifiers used by the API (e.g., snagfilms variants, lax, lnp, marquee, etc.).
+- URL handling and delegation:
+  - The main page extractor (ViewLiftIE) delegates actual video extraction to the embed extractor by returning a url_transparent pointing to the embed URL with filmId.
+  - _extract_url helps parse embed URLs from pages, supporting some cases where the page contains an iframe to the embed player.
+
+In short, this file implements a robust ViewLift integration with:
+- token-based API access and optional user login,
+- support for both embed-based and page-based video extraction,
+- comprehensive format extraction including MPEG and HLS,
+- careful handling of access restrictions and site-wide mappings.

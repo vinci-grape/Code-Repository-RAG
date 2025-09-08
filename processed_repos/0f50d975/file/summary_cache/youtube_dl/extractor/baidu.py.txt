@@ -1,0 +1,55 @@
+Concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/baidu.py
+
+- Purpose
+  - Implement a YouTube-dl extractor for Baidu Video (Baidu Video) playlists and episodes, exposing them as a single playlist with individual video entries.
+
+- Main class
+  - BaiduVideoIE inherits from InfoExtractor.
+
+- URL matching and tests
+  - _VALID_URL: Matches URLs like http://v.baidu.com/<type>/<id>.htm
+    - Captures:
+      - type: category of the content (e.g., comic, show, etc.)
+      - id: numeric playlist/collection id
+  - _TESTS: Provides two examples with expected results:
+    - A comic playlist with title and md5-checked description, plus a playlist_count (52).
+    - A show playlist with a title pattern and a minimum playlist count (12).
+
+- API interaction
+  - _call_api(self, path, category, playlist_id, note):
+    - Builds a request to http://app.video.baidu.com/<path>/?worktype=adnative<category>&id=<playlist_id>
+    - Uses _download_json to fetch and parse JSON metadata, with a human-readable note.
+  - _real_extract(self, url):
+    - Parses category and playlist_id from the URL using _VALID_URL.
+    - Normalizes certain categories:
+      - if category == 'show', map to 'tvshow'
+      - if category == 'tv', map to 'tvplay'
+    - Fetches playlist metadata via xqinfo (category, playlist_id).
+      - playlist_title = playlist_detail['title']
+      - playlist_description = unescapeHTML(playlist_detail.get('intro'))
+    - Fetches episodes metadata via xqsingle (category, playlist_id).
+    - Builds entry list by creating a video URL result for each episode:
+      - Each entry uses episode['url'] as the video URL
+      - Sets video_title to episode['title']
+    - Returns a playlist_result containing:
+      - entries: list of per-episode video entries
+      - playlist_id as the playlist_id
+      - playlist_title
+      - playlist_description
+
+- Key implementation details
+  - The extractor does not parse individual Baidu video pages directly; it relies on Baidu’s API endpoints (xqinfo and xqsingle) to obtain JSON metadata for the playlist and its episodes.
+  - Description handling uses unescapeHTML to clean HTML entities in the intro/description.
+  - The entries are created with url_result using per-episode URLs and titles, then assembled into a playlist_result.
+  - Category normalization ensures the API endpoints receive expected category strings (tvshow, tvplay) derived from the URL’s type.
+
+- What it outputs
+  - A playlist with:
+    - Playlist ID (from URL)
+    - Title (from playlist metadata)
+    - Description (HTML-unescaped intro)
+    - A list of video entries, each pointing to an episode URL with its own title
+
+- Notes
+  - The code includes comprehensive test cases to verify playlist metadata and episode counting expectations.
+  - The implementation emphasizes a clean separation between URL parsing, API data retrieval, and building the final playlist structure for youtube-dl.

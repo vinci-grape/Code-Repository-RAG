@@ -1,0 +1,68 @@
+Here is a concise, feature-focused summary of the code in youtube-dl/youtube_dl/extractor/threeqsdn.py:
+
+- Purpose
+  - Implement a YouTube-DL extractor for 3Q SDN playout videos hosted at playout.3qsdn.com.
+  - Fetch video metadata and available formats (DASH, HLS, and progressive HTTP) from a config endpoint and expose them via YouTube-DL’s standard InfoExtractor interface.
+
+- Key class
+  - ThreeQSDNIE(InfoExtractor)
+    - IE_NAME = '3qsdn'
+    - IE_DESC = '3Q SDN'
+    - _VALID_URL matches URLs like https://playout.3qsdn.com/<video-id> where video-id is a UUID-like hex pattern.
+
+- Static URL extraction helper
+  - _extract_url(webpage): parses an iframe in a page to extract a nested video URL that matches the same _VALID_URL pattern. This helps locate the actual video URL from embed pages.
+
+- Core extraction flow (_real_extract)
+  - video_id = extracted from the URL.
+  - Config fetch:
+    - Downloads JSON from the config endpoint by replacing the host path with /config/ (e.g., https://playout.3qsdn.com/config/<video-id>).
+    - If the HTTP error is 401, raises geo-restriction (self.raise_geo_restricted()).
+  - Video properties from config:
+    - live mode: config.get('streamContent') == 'live'
+    - aspect ratio: float_or_none(config.get('aspect'))
+    - title: config.get('title') or video_id
+    - poster/description/upload_date/vlength/subtitles, etc.
+  - Formats construction:
+    - Iterates over config.get('sources') which can include:
+      - 'dash': uses self._extract_mpd_formats(source, video_id, mpd_id='mpd', fatal=False)
+      - 'hls': uses self._extract_m3u8_formats(source, video_id, 'mp4', either 'm3u8' if live else 'm3u8_native', m3u8_id='hls', fatal=False)
+      - 'progressive': iterates items with a 'src'
+        - Validates URL, builds a format entry per source URL
+        - Determines ext via determine_ext(src)
+        - Builds a format_id like "http-<ext>-<height>p" when height is available
+        - Computes width from height and aspect if available
+        - Sets vcodec to 'none' when height == 0 (video absent) else None; width accordingly
+        - Keeps source_preference for ordering
+    - After collecting formats, assigns low preferences to audio-only or video-only variants:
+      - acodec == 'none' → preference = -40
+      - vcodec == 'none' → preference = -50
+    - Sort formats with priority: ('preference', 'width', 'height', 'source_preference', 'tbr', 'vbr', 'abr', 'ext', 'format_id')
+  - Subtitles
+    - config.get('subtitles') is iterated; each subtitle with a 'src' is added to a dict keyed by label (default 'eng')
+  - Title handling
+    - If live, uses self._live_title(title) to allow live titles; otherwise uses the static title.
+  - Return fields
+    - id: video_id
+    - title: possibly live-formatted title
+    - is_live: live
+    - formats: list of gathered formats
+    - subtitles: dict of subtitle tracks
+    - thumbnail: config.get('poster')
+    - description: config.get('description')
+    - timestamp: parse_iso8601(config.get('upload_date'))
+    - duration: float_or_none(config.get('vlength')) or None
+
+- Important implementation details
+  - Uses a dedicated config endpoint to retrieve video metadata and available streams.
+  - Supports DASH, HLS, and progressive HTTP sources; progressive sources are explicitly reconstructed into format entries.
+  - Live streams influence HLS handling and title formatting.
+  - Returns geo-restricted errors if the server responds with HTTP 401.
+  - Subtitles are gathered from config['subtitles'] with URL sources and labeled with the provided label or 'eng'.
+  - Ext and resolution handling enriches format_id and width information when available.
+  - Uses several utility helpers: determine_ext, float_or_none, int_or_none, parse_iso8601, and _is_valid_url/_match_id methods from base class.
+
+- Tests
+  - _TESTS include cases for on-demand video (with md5 and subtitles), live video (with skip_download), and several “only_matching” cases to verify URL matching and extraction behavior. Also checks geo-restricted and unusual 404-like scenarios.
+
+In short, this extractor identifies 3Q SDN video URLs, fetches a central config for each video, and builds a comprehensive set of formats (DASH, HLS, progressive HTTP) plus metadata and subtitles, with careful handling of live content and geo restrictions.

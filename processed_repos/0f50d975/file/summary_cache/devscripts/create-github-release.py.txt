@@ -1,0 +1,52 @@
+Concise but comprehensive summary
+
+Purpose
+- A Python script to automate creating a GitHub release for youtube-dl and uploading build assets to that release.
+
+Main functionality
+- Connects to GitHub API, creates a release, and uploads assets from a given build directory to that release.
+- Reads release notes/body from a provided CHANGELOG file based on the specified version.
+
+Key classes and functions
+- GitHubReleaser (main class)
+  - _API_URL, _UPLOADS_URL, _NETRC_MACHINE: API endpoints and machine name for .netrc lookups.
+  - __init__(debuglevel=0): Sets up credentials and an HTTPS opener.
+  - _init_github_account(): Attempts to read a GitHub token from ~/.netrc for github.com; if not found, prompts user for a Personal Access Token (PAT) via password prompt.
+  - _call(req): Sends an HTTP request with Authorization header using the stored token; returns parsed JSON response.
+  - list_releases(): Retrieves the list of releases from GitHub.
+  - create_release(tag_name, name=None, body='', draft=False, prerelease=False): Creates a new release with the given metadata.
+  - create_asset(release_id, asset): Uploads a local file as an asset to the specified release; infers MIME type and sets Content-Type accordingly.
+- main(): Command-line entry point.
+  - Parses CLI args: CHANGELOG, VERSION, BUILDPATH.
+  - Reads the changelog, extracts release body for the given version using a regex.
+  - Creates a GitHubReleaser and makes a new release with tag_name=VERSION and name "youtube-dl VERSION", including the extracted body.
+  - Iterates over files in BUILDPATH and uploads each as an asset to the newly created release.
+
+Important implementation details
+- Credentials handling:
+  - Tries to read GitHub credentials from ~/.netrc for the machine github.com. If found, uses the token from there.
+  - If not found or unreadable, prompts for a GitHub Personal Access Token (PAT) securely via compat_getpass.
+- API interaction:
+  - Uses a custom HTTPS handler and urllib opener (via make_HTTPS_handler and build_opener) to perform requests.
+  - All requests include an Authorization header: "token <token>".
+  - create_release posts JSON data to GitHub releases API endpoint.
+  - create_asset uploads the file to the GitHub uploads URL for the specific release, setting Content-Type based on MIME type guess (fallback to application/octet-stream).
+- Release body extraction:
+  - Reads CHANGELOG and uses a regex to extract the changelog section corresponding to the given version:
+    - Pattern: version <VERSION>\n\n(.+?)\n\n\n (DOTALL mode)
+  - If not found, body defaults to an empty string.
+- Asset handling:
+  - Assets are loaded entirely into memory before upload (suitable for small to moderate files).
+  - Assets are uploaded by name (basename) to the release’s assets endpoint.
+- CLI interface:
+  - Usage: script CHANGELOG VERSION BUILDPATH
+  - Builds release with tag_name=VERSION and name "youtube-dl VERSION" and attaches extracted body.
+  - Uploads every file found in BUILDPATH as an asset.
+
+Assumptions and behavior
+- The script assumes build assets are small enough to fit in memory for upload.
+- Uses the master branch as the target_commitish for the release.
+- Relies on the changelog format matching the regex to populate the release body; otherwise, the body is empty.
+- Requires either .netrc credentials or user-provided PAT for authentication.
+
+Overall, this script automates the GitHub release process for youtube-dl: authenticates, creates a release with version metadata and changelog body, and uploads all build artifacts as release assets.

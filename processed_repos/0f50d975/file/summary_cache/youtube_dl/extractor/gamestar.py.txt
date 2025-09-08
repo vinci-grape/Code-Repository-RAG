@@ -1,0 +1,45 @@
+- Purpose
+  - A YouTube-DL extractor for GameStar/GamePro video pages. It retrieves metadata (title, description, thumbnail, timestamps, duration) and the direct MP4 video URL.
+
+- Class and inheritance
+  - GameStarIE(InfoExtractor): inherits common extraction helpers from youtube_dl.extractor.common.
+
+- URL matching
+  - _VALID_URL = r'https?://(?:www\.)?game(?P<site>pro|star)\.de/videos/.*,(?P<id>[0-9]+)\.html'
+  - This matches both gamestar.de and gamepro.de video pages and extracts:
+    - site: 'pro' or 'star'
+    - id: numeric video id
+
+- Tests
+  - _TESTS includes:
+    - A real example from gamestar.de with expected metadata (id, ext, title, description, thumbnail, timestamp, upload_date, duration, etc.) and a specific MD5 for the downloaded MP4.
+    - Two tests with only_matching for other domains (gamepro.de and gamestar.de) to ensure URL pattern matches but are not executed.
+
+- Extraction workflow (_real_extract)
+  1. Parse URL to obtain site and video_id.
+  2. Download the page HTML (webpage).
+  3. Locate a JSON-LD script containing a VideoObject using a regex:
+     - Looks for a script tag of type "application/ld+json" and a JSON object that contains VideoObject.
+     - Note: there can be multiple ld+json objects on the page; the first matching one is used.
+  4. Parse the JSON-LD blob with _parse_json and convert to a standard info dict via _json_ld(json_ld, video_id).
+  5. Normalize the title by removing a trailing " - GamePro" or " - GameStar" segment, depending on the site:
+     - title = remove_end(info_dict['title'], ' - Game%s' % site.title())
+  6. Extract additional fields:
+     - view_count: int from json_ld['interactionCount'] (via int_or_none)
+     - comment_count: parsed from the HTML using a regex that finds the kommentare count
+  7. Assemble final info_dict with:
+     - id: video_id
+     - url: direct video URL endpoint 'http://gamestar.de/_misc/videos/portal/getVideoUrl.cfm?premium=0&videoId=' + video_id
+     - ext: 'mp4'
+     - view_count, comment_count (as parsed)
+     - Other fields populated by _json_ld (e.g., title, description, thumbnail, timestamp/upload_date, duration)
+  8. Return the info_dict for downstream processing (download, metadata display, etc.).
+
+- Implementation details and notes
+  - The JSON-LD extraction relies on a specific ld+json block that contains VideoObject. The code warns that there may be multiple ld+json blocks, and _search_json_ld is used to fetch the first relevant one.
+  - The final video URL is not the MP4 itself but a portal endpoint that presumably serves the MP4 given a videoId.
+  - The title cleanup uses the site suffix to strip " - GamePro" or " - GameStar" from the title to present a clean title.
+  - The descriptor fields (description, thumbnail, timestamp, upload_date, duration) come from the JSON-LD VideoObject.
+  - The extractor supports both gamestar.de and gamepro.de video pages, but the concrete test only validates gamestar.de data retrieval.
+
+Overall, GameStarIE fetches a page, extracts a VideoObject from JSON-LD, normalizes metadata, fetches the direct video URL, and returns a unified info dict compatible with youtube-dl’s standard format.

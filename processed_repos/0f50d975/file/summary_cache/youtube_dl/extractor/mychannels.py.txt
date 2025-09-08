@@ -1,0 +1,41 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/mychannels.py
+
+- Purpose
+  - Implement an information extractor (IE) for the MyChannels site that locates video data on a page and delegates to the Minoto video provider via a transparent URL.
+
+- Key class
+  - MyChannelsIE(InfoExtractor)
+
+- URL pattern and test
+  - _VALID_URL: Matches MyChannels URLs that include either a video_id or a production_id in the query, capturing id_type (video or production_id) and id (digits).
+  - _TEST: Provides a sample URL and expected metadata, used for unit testing.
+
+- Core functionality (_real_extract)
+  - Extracts id_type and url_id from the URL using the _VALID_URL regex.
+  - Downloads the page content with _download_webpage(url, url_id).
+  - Locates the video data block by searching for a div tag that contains data-{id_type}-id="{url_id}". The inner attributes string of that div is captured as video_data.
+  - Helper: extract_data_val(attr, fatal=False)
+    - Fetches data-{attr}="..." from the video_data block.
+  - Determines the Minoto video ID (minoto_id) by:
+    - Trying data-minoto-id directly.
+    - If missing, extracting an ID from data-video-src using a fallback regex /id/([A-Za-z0-9]+).
+  - Returns a dictionary with:
+    - _type: "url_transparent" (indicating a secondary URL to be resolved by youtube-dl)
+    - url: "minoto:<minoto_id>"
+    - id: url_id (the numeric id from the MyChannels URL)
+    - title: the value of data-title (required via fatal=True)
+    - description: the value of data-description
+    - thumbnail: the value of data-image
+    - uploader: the value of data-channel
+
+- Implementation details and nuances
+  - The extractor does not fetch the final video itself; instead it constructs a Minoto URL and relies on youtube-dl’s Minoto extractor to handle the actual video retrieval.
+  - Data extraction relies on HTML attributes embedded in a div, specifically attributes named data-<attr> (e.g., data-minoto-id, data-video-src, data-title, data-description, data-image, data-channel).
+  - The code supports two ways of obtaining the Minoto ID:
+    - Directly from data-minoto-id.
+    - Or by parsing an ID from data-video-src if the former is not present.
+  - Fatal handling: title is mandatory (fatal=True); other fields are optional.
+  - The _TEST example expects the downstream Minoto video to be used, with the initial MyChannels ID preserved in the output as id, and metadata populated from the data attributes.
+
+- Overall behavior
+  - When given a MyChannels URL, the extractor identifies the embedded video data, derives the Minoto video ID, and returns a transparent URL to Minoto with accompanying metadata (title, description, thumbnail, uploader) for downstream processing.

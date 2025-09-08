@@ -1,0 +1,51 @@
+- Purpose
+  - Implements two extractors for Hungama content in youtube-dl:
+    - HungamaIE: extracts video/movie and TV show episode streams
+    - HungamaSongIE: extracts song audio streams
+
+- Key classes
+  - HungamaIE (InfoExtractor)
+  - HungamaSongIE (InfoExtractor)
+
+- URL patterns (_VALID_URL)
+  - HungamaIE: matches Hungama video pages, movie pages, or TV-show episode pages and captures an id at the end
+  - HungamaSongIE: matches Hungama song pages and captures the numeric id
+
+- Main functionality (how extraction works)
+  - HungamaIE
+    - Extracts video_id from the URL
+    - Downloads the page and reads JSON-LD metadata
+    - Retrieves the actual video stream URL by POSTing to https://www.hungama.com/index.php with:
+      - content_id = video_id
+      - headers: Content-Type: application/x-www-form-urlencoded; charset=UTF-8, X-Requested-With: XMLHttpRequest
+      - query parameters: c=common, m=get_video_mdn_url
+    - The response contains stream_url (m3u8 URL)
+    - Derives formats using _extract_m3u8_formats with:
+      - ext='mp4', entry_protocol='m3u8_native', m3u8_id='hls'
+    - Sorts formats and returns an info dict updated with id and formats (plus any metadata found in JSON-LD)
+  - HungamaSongIE
+    - Extracts audio_id from the URL
+    - Fetches track data from https://www.hungama.com/audio-player-data/track/{audio_id} with country query _country=IN
+    - Reads track name and singer (artist)
+    - Determines m3u8 URL from data['file'] or data['preview_link'], by fetching its JSON and reading response.media_url
+    - Derives formats via _extract_m3u8_formats with the same m3u8 options as above
+    - Builds a title as "artist - track" if artist exists, otherwise just track
+    - Chooses thumbnail from data['img_src'] or data['album_image']
+    - Returns an info dict with id, title, thumbnail, track, artist, album, release_year (int if present), and formats
+
+- Important implementation details
+  - Uses _search_json_ld to obtain initial metadata, then enriches/overwrites with formats and IDs
+  - Uses urlencode_postdata for the POST payload when fetching the MDN URL
+  - Uses specific headers for the MDN URL request to mimic an AJAX request
+  - Formats extraction relies on HLS (m3u8) and uses entry_protocol='m3u8_native'
+  - Release year conversion uses int_or_none to safely parse numeric values
+  - Tests:
+    - HungamaIE includes a real video example with md5 and expected info_dict
+    - Tests also include only_matching for URLs that should be matched but not fully extracted in some cases
+
+- Return values
+  - HungamaIE: info dict containing id and formats (plus any metadata from JSON-LD like title, artist, album, release_year, etc.)
+  - HungamaSongIE: info dict containing id, title, thumbnail, track, artist, album, release_year, and formats
+
+- Overall
+  - The file provides concrete extractors to fetch streaming data from Hungama’s video and song pages, handling metadata extraction, MDN URL retrieval, and HLS-based format parsing.

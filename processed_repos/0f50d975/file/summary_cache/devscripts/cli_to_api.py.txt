@@ -1,0 +1,32 @@
+concise summary
+
+- Purpose
+  - Given a youtube-dl command line, this script outputs the corresponding API/options dictionary that youtube-dl would use internally. It shows only the options that differ from the defaults.
+
+- Key functionality
+  - Patches youtube-dl’s YoutubeDL constructor to intercept the parsed options without executing a real download.
+  - Uses a custom exception to return the parsed options from the patched constructor.
+  - Invokes youtube_dl._real_main with the provided argv to trigger internal parsing, then captures the resulting ydl_opts.
+  - Computes the difference between the parsed options and the default options, returning only the changed ones.
+  - Special handling for postprocessors to show only those not in the default set.
+  - Provides a nicely formatted printout, with custom formatting for special DateRange objects.
+
+- Important implementation details
+  - sys.path is temporarily adjusted to import youtube_dl from the repository location.
+  - Replaces YoutubeDL.__init__ with a bound function (ytdl_init) that calls the original constructor and then raises a ParseYTDLResult exception carrying the parsed options.
+  - The ParseYTDLResult exception is used solely to return the parsed options from the control flow.
+  - default = parsed_options([]) captures the baseline (default) options for comparison.
+  - neq_opt(a, b) defines inequality logic, including a quirky DateRange-related check, and is used to filter out unchanged options.
+  - If 'postprocessors' is present in the diff, it’s trimmed to exclude default postprocessors.
+  - main() uses Python’s PrettyPrinter with a custom format function to improve rendering of DateRange objects, then prints the result of cli_to_api(*sys.argv).
+
+- API/usage
+  - Example: ./cli_to_api.py -f best
+  - Returns a dictionary like {u'format': 'best'} showing only the changed option(s) from defaults.
+
+- Structure
+  - cli_to_api(*opts): core function performing patching, parsing, diffing, and postprocessor filtering; returns the diff dictionary.
+  - main(): pretty-prints the diff produced by cli_to_api using a customized PrettyPrinter format.
+
+- Guard
+  - if __name__ == '__main__': main() to allow direct execution.

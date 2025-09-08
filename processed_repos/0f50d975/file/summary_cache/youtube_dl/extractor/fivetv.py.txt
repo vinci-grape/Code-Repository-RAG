@@ -1,0 +1,51 @@
+Summary of code in ./youtube-dl/youtube_dl/extractor/fivetv.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for FiveTV (5-tv.ru) videos. It fetches the page, locates the actual video URL and metadata, and returns a standard info dictionary.
+
+- Key class
+  - FiveTVIE(InfoExtractor)
+
+- URL matching
+  - _VALID_URL regex matches:
+    - http(s)://5-tv.ru/ with or without www
+    - Two shapes:
+      - Segments ending with a numeric id: .../news/96814/ (captures id)
+      - Generic path segment with an optional trailing slash or query: captures path as video_id
+  - It uses named groups: id or path. video_id is taken from id if present, otherwise path.
+
+- Tests
+  - _TESTS includes multiple cases:
+    - Direct video pages (e.g., /news/96814/, /video/1021729/) with expected id, ext, title, description, thumbnail, duration, and md5 of the video.
+    - A redirect case to a project page (skip reason provided).
+    - Several non-video or non-matching URLs marked only_matching or skip to ensure proper URL filtering.
+
+- Core extraction flow (_real_extract)
+  - Determine video_id from either the id or path captured by the URL regex.
+  - Download the page content via _download_webpage(url, video_id).
+  - Locate the direct video URL using _search_regex with two patterns:
+    - <div ... class="flowplayer" or "player" ... data-href="URL"> capture the data-href attribute
+    - <a ... class="videoplayer" href="URL"> capture the href attribute
+  - Title extraction:
+    - Try OpenGraph title via _og_search_title(webpage, default=None)
+    - If not found, fall back to extracting from <title> tag with a regex.
+  - Duration extraction:
+    - Use _og_search_property(webpage, 'video:duration', default=None) and convert to int via int_or_none.
+  - Metadata extraction:
+    - description via _og_search_description(webpage, default=None)
+    - thumbnail via _og_search_thumbnail(webpage, default=None)
+  - Return a dict with:
+    - id: video_id
+    - url: video_url (direct video URL found)
+    - title: extracted title
+    - description: extracted description (may be None)
+    - thumbnail: extracted thumbnail (may be None)
+    - duration: duration in seconds (may be None)
+
+- Important implementation details
+  - Uses int_or_none to robustly convert duration to an integer or None.
+  - Metadata extraction leverages OpenGraph helpers (_og_search_title/description/thumbnail) with fallbacks to ensure data is captured when available.
+  - The two-pronged video URL search increases robustness to different page HTML structures (div-based player vs. anchor-based link).
+  - The tests include a redirect scenario, illustrating that some FiveTV pages redirect to a project page; such cases are accounted for with skip notes in tests.
+
+In short, FiveTVIE detects FiveTV video pages, grabs the embedded video URL from the page HTML, and collects common metadata (title, description, thumbnail, duration) to return a consistent info dictionary for youtube-dl.

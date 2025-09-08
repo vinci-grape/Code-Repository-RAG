@@ -1,0 +1,58 @@
+- Purpose
+  - A YouTube-dl extractor for Libsyn-hosted podcast episodes. It fetches metadata and available media formats from Libsyn’s embed page and the embedded JSON data.
+
+- Class and inheritance
+  - LibsynIE(InfoExtractor): Implements _real_extract to parse Libsyn embed pages and produce standard YouTube-dl info dictionary.
+
+- URL pattern (_VALID_URL)
+  - Matches Libsyn HTML5 player embed URLs of the form:
+    http(s)://html5-player.libsyn.com/embed/episode/id/<id>
+  - Captures main URL and numeric id for use in processing.
+
+- Tests (_TESTS)
+  - Two sample URLs with expected MD5s and basic info_dict entries:
+    - id, ext (mp3), title, upload_date, thumbnail (and note on description fetched via secondary request)
+    - Covers both libsyn and direct main/download format sources
+
+- Main workflow in _real_extract
+  1. Normalize URL and id
+     - Extracts URL and video_id from the matched pattern.
+     - Downloads the embed webpage.
+
+  2. Retrieve JSON data block
+     - Locates a JavaScript JSON block via: var playlistItem = ({...});
+     - Parses it with _parse_json to get a data dictionary (data).
+
+  3. Episode and podcast title extraction
+     - episode_title: prefers data['item_title']; if missing, tries to get it from the HTML element with class 'episode-title'. If still missing, tries regexes for data-title attribute or <title> tag, then strips whitespace.
+     - podcast_title: from the <h3> tag or element with class 'podcast-title', cleaned via clean_html/strip_or_none.
+     - Final title: "Podcast Title - Episode Title" if podcast_title exists; otherwise just the episode_title.
+
+  4. Formats extraction
+     - Builds a formats list from up to three potential sources present in the data:
+       - data['media_url_libsyn'] → format_id 'libsyn'
+       - data['media_url'] → format_id 'main'
+       - data['download_link'] → format_id 'download'
+     - Each entry includes url and the corresponding format_id. Skips missing keys.
+
+  5. Description handling
+     - Attempts to extract a description from the HTML: a paragraph with id="info_text_body".
+     - If found, normalizes spaces and non-breaking spaces.
+
+  6. Release date and duration
+     - release_date: tries to extract text from <div class="release_date">Released: ...< and uses unified_strdate; if not found, falls back to data['release_date'].
+     - duration: parsed via parse_duration(data['duration']) if present.
+
+  7. Thumbnail and final payload
+     - thumbnail comes from data['thumbnail_url'] if available.
+     - Returns a dictionary with keys: id, title, description, thumbnail, upload_date, duration, formats.
+
+- Important implementation details
+  - Relies on a specific Libsyn embed JSON block (playlistItem) embedded in the page to obtain most metadata and URLs.
+  - Uses multiple fallbacks for episode/title extraction to robustly handle pages with varying HTML structures.
+  - Cleans description by removing non-breaking spaces and trimming.
+  - Handles potential absence of fields gracefully by skipping or defaulting.
+  - The returned formats use short format_ids ('libsyn', 'main', 'download') to indicate the source of the media URL.
+
+- Summary of data flow
+  - Webpage -> extract playlistItem JSON -> derive id, title, podcast title, media URLs, thumbnail, duration, release date, and description -> assemble formats list -> return consolidated info dictionary.

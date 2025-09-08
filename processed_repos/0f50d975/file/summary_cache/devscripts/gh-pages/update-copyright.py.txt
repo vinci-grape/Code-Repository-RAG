@@ -1,0 +1,37 @@
+Concise but comprehensive summary of the file
+
+Purpose
+- A small maintenance script used in the YouTube-DL repository to update the copyright year in HTML files on the gh-pages branch.
+
+Main functionality
+- For every HTML-like file in the current directory (matching *.html*), it updates a copyright line that starts with “Copyright © 2011-” followed by a 4-digit year to extend the range up to the current year.
+
+Key components
+- Imports and environment
+  - Uses Python 2/3 compatibility helpers via __future__.
+  - Reads the current year with datetime.datetime.now().year and converts it to a string using compat_str.
+  - Adjusts sys.path to find devscripts.utils and other project modules.
+
+- Core operations
+  - glob.glob('*.html*') to list target files in the current directory.
+  - read_file(fn) to read file contents.
+  - re.sub with pattern (?P<copyright>Copyright © 2011-)(?P<year>[0-9]{4}) to replace the year portion with the current year.
+  - If the file’s content changes, writes the updated content to a temporary file named fn + '.part' using write_file, then atomically renames it over the original file with os.rename.
+
+- Regex details
+  - Pattern looks specifically for “Copyright © 2011-” followed by exactly four digits.
+  - Replaces with “Copyright © 2011-<current_year>”.
+  - Uses named groups in the regex, though only the replacement string is used.
+
+- Safety/robustness
+  - Only writes back if changes occurred (content != newc).
+  - Writes to a temporary file and then renames to minimize partial writes.
+
+Important implementation details
+- File discovery is non-recursive and limited to the current working directory.
+- The year is derived from the system clock at runtime.
+- The replacement is strict: it only updates the suffix that matches the 2011-YYYY pattern; other copyright formats are left untouched.
+- Writes rely on project-provided read_file and write_file utilities, which likely handle encoding concerns.
+- The script prints no progress or logs; it performs silently unless run with error output.
+
+Overall, a focused utility to keep HTML page copyrights up-to-date through a simple in-place update mechanism.

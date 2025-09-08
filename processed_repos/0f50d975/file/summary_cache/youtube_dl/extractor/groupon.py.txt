@@ -1,0 +1,46 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/groupon.py
+
+- Purpose
+  - Implement GrouponIE, an information extractor for Groupon deal pages that contain embedded videos.
+  - Produces a playlist of videos from supported providers (YouTube and Ooyala) found on a Groupon deal page.
+
+- Key components
+  - GrouponIE class, subclass of InfoExtractor
+  - _VALID_URL: Regex to match Groupon deal URLs, capturing the deal id
+  - _PROVIDERS: Mapping of supported providers to (url_pattern, extractor_key)
+    - 'ooyala': ('ooyala:%s', 'Ooyala')
+    - 'youtube': ('%s', 'Youtube')
+  - _TEST: Embedded test case illustrating expected output for a sample Groupon deal page, including a YouTube entry and its metadata
+
+- Main functionality (_real_extract)
+  1. Extract playlist_id from the URL using _match_id.
+  2. Download the deal page HTML with _download_webpage.
+  3. Locate and parse an embedded JSON payload from JavaScript:
+     - Uses _search_regex with pattern (?:var\s+|window\.)payload\s*=\s*(.*?);\n to find the JSON string
+     - Parses it via _parse_json
+  4. Read videos from payload['carousel'].get('dealVideos', []).
+  5. For each video entry:
+     - Retrieve provider (v.get('provider')) and a video identifier (video_id) from v.get('media') or v.get('id') or v.get('baseURL').
+     - If either is missing, skip the entry.
+     - Look up the provider in _PROVIDERS (case-insensitive via provider.lower()) to obtain (url_pattern, ie_key).
+     - If the provider is unsupported, log a warning and skip.
+     - Create a playlist item with self.url_result(url_pattern % video_id, ie_key) and append to entries.
+  6. Return a playlist dictionary with:
+     - '_type': 'playlist'
+     - 'id': playlist_id
+     - 'entries': list of video entries built above
+     - 'title': taken from OpenGraph title via _og_search_title(webpage)
+     - 'description': OpenGraph description via _og_search_description(webpage)
+
+- Important implementation details
+  - The extractor relies on a JSON payload embedded in the page (payload variable) containing carousel.dealVideos data.
+  - Video entries must have a provider and a valid video identifier; otherwise they are skipped.
+  - Only providers defined in _PROVIDERS are supported; others trigger a warning and are skipped.
+  - The final output is a playlist, not a single video, aggregating all discovered videos on the deal page.
+  - OpenGraph helpers are used to populate the playlist title and description.
+
+- Behavior notes from tests
+  - The _TEST demonstrates extracting a deal with id 'bikram-yoga-huntington-beach-2' and a YouTube video entry with specific metadata, confirming correct parsing and integration with the YouTube extractor.
+  - The test also shows that the downloader can be configured to skip actual downloads (skip_download = True).
+
+In short, GrouponIE parses the deal page for a JSON payload containing carousels of videos, maps each video to a supported provider, builds a playlist of those videos, and returns it with title/description parsed from the page metadata.

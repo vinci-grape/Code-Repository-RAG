@@ -1,0 +1,31 @@
+Concise summary:
+
+- Purpose
+  - Implement a YouTube-DL extractor for Cinemax video pages by leveraging the HBO family extraction logic.
+
+- Key class
+  - CinemaxIE(HBOBaseIE): Subclass of HBOBaseIE that specializes in Cinemax URLs and XML metadata endpoints.
+
+- URL matching and routing
+  - _VALID_URL: Regular expression that matches Cinemax video pages and captures:
+    - path: the portion before the final -<id> (e.g., warrior/video/s1-ep-1-recap)
+    - id: the numeric video id at the end of the URL
+  - Also accommodates an .embed variant used for matching only (only_matching: True in tests).
+
+- Core functionality
+  - _real_extract(url):
+    - Extracts path and video_id from the URL using the _VALID_URL regex.
+    - Builds the XML metadata endpoint: https://www.cinemax.com/<path>.xml
+    - Calls self._extract_info(xml_url, video_id) to obtain a metadata dictionary (inherited from HBOBaseIE).
+    - Assigns info['id'] = video_id to ensure the ID matches the numeric identifier from the URL.
+    - Returns the info dictionary containing fields like id, ext, title, etc., as provided by the base extractor.
+
+- Implementation details
+  - Relies on the HBOBaseIE infrastructure to fetch and parse metadata from the constructed XML endpoint.
+  - The test suite includes:
+    - A real Cinemax video test with expected id, extension, title, and an MD5 for the video file.
+    - An embed URL test marked as only_matching to ensure the pattern recognition works without triggering extraction.
+
+- Notes
+  - The code is concise, delegating most of the heavy lifting to the shared HBO extraction logic, with only the URL routing and endpoint construction being Cinemax-specific.
+  - Warnings in tests indicate handling of non-standard DASH manifests (e.g., unknown MIME type), which is tolerated by the extractor.

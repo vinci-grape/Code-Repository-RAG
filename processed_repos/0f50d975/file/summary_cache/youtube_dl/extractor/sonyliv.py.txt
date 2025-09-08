@@ -1,0 +1,93 @@
+Here is a concise, comprehensive summary of the code in youtube-dl/youtube_dl/extractor/sonyliv.py.
+
+Overview
+- Implements a SonyLIV extractor (class SonyLIVIE) for youtube-dl.
+- Supports extracting video information and streaming formats from SonyLIV shows, movies, clips, trailers, and music videos.
+- Uses SonyLIV cloud APIs to obtain a security token, content URL, and metadata.
+- Builds both MPD (DASH) and HLS formats with appropriate headers, handles DRM and geoblocking.
+
+Key components
+
+- SonyLIVIE(InfoExtractor)
+  - _VALID_URL: Regex that matches SonyLIV URLs in categories such as shows, movies, clips, trailers, music-videos and captures the video id at the end of the URL.
+  - _GEO_COUNTRIES: ['IN'] indicating geo-restriction for India.
+  - _TOKEN: Class attribute to store the security token retrieved from the API.
+
+- _call_api(self, version, path, video_id)
+  - Central method to call SonyLIV APIs.
+  - Builds URL: https://apiv2.sonyliv.com/AGL/{version}/A/ENG/WEB/{path}
+  - Adds security_token header if _TOKEN is set.
+  - Returns the 'resultObj' from the API response.
+  - Error handling:
+    - If an ExtractorError caused by HTTP 403 occurs, reads the JSON error message.
+    - If message is 'Geoblocked Country', raises a geo-restricted error for IN.
+    - Otherwise re-raises the ExtractorError.
+
+- _real_initialize(self)
+  - Fetches and stores the security token via _call_api('1.4', 'ALL/GETTOKEN', None).
+  - Token is used for subsequent API calls.
+
+- _real_extract(self, url)
+  - Extracts the video_id from the URL using self._match_id(url).
+  - Retrieves content information via _call_api('1.5', 'IN/CONTENT/VIDEOURL/VOD/' + video_id, video_id).
+  - DRM check: if content.get('isEncrypted') is True, raises ExtractorError with DRM message.
+  - dash_url = content['videoURL'] (DASH MPD URL).
+  - Builds a per-request header:
+    - x-playback-session-id: a unique ID combining a UUID and a timestamp in ms.
+  - Formats extraction:
+    - formats = _extract_mpd_formats(dash_url, video_id, mpd_id='dash', headers=headers, fatal=False)
+    - Adds HLS formats by converting DASH URL to HLS path: dash_url.replace('.mpd', '.m3u8').replace('/DASH/', '/HLS/')
+      - formats.extend(_extract_m3u8_formats(..., m3u8_id='hls', headers=headers, fatal=False))
+    - Attaches http_headers to each format with the same headers.
+    - _sort_formats(formats)
+  - Metadata retrieval:
+    - metadata = _call_api('1.6', 'IN/DETAIL/' + video_id, video_id)['containers'][0]['metadata']
+    - title = metadata['title']; episode = metadata.get('episodeTitle')
+    - If episode exists and title != episode, append " - " + episode to title.
+  - Return dictionary with:
+    - id: video_id
+    - title: constructed title
+    - formats: list of parsed formats
+    - thumbnail: content.get('posterURL')
+    - description: metadata.get('longDescription') or metadata.get('shortDescription')
+    - timestamp: int_or_none(metadata.get('creationDate'), 1000)
+    - duration: int_or_none(metadata.get('duration'))
+    - season_number: int_or_none(metadata.get('season'))
+    - episode: episode
+    - episode_number: int_or_none(metadata.get('episodeNumber'))
+    - release_year: int_or_none(metadata.get('year'))
+
+Implementation details and behavior
+
+- Token-based API access
+  - Token retrieved in _real_initialize via ALL/GETTOKEN endpoint (version 1.4) and stored in self._TOKEN.
+  - All subsequent API calls include security_token header when available.
+
+- Content retrieval and DRM handling
+  - Uses IN/CONTENT/VIDEOURL/VOD/{video_id} (version 1.5) to obtain the direct video URL.
+  - If content is encrypted (isEncrypted), raises an ExtractorError signaling DRM protection.
+
+- Formats extraction
+  - Dash (MPD) formats are derived with _extract_mpd_formats using the dash_url and the custom headers.
+  - HLS formats are derived by transforming the dash URL to an HLS URL (replace '.mpd' with '.m3u8' and adjust path from /DASH/ to /HLS/).
+  - Headers (x-playback-session-id) are included in all formats to maintain session context.
+  - fatal=False is used so that the extractor can proceed if one format type is unavailable.
+  - Formats are sorted for quality order via _sort_formats.
+
+- Metadata and presentation
+  - Metadata is retrieved from IN/DETAIL/{video_id} (version 1.6) and used to populate title, description, timestamp, etc.
+  - If there is an episodeTitle, it is appended to the main title unless it already matches.
+  - Timestamp is converted from creationDate (likely in milliseconds) to Unix timestamp using int_or_none(..., 1000).
+
+- Geoblocking handling
+  - If API returns a 403 with message 'Geoblocked Country', the extractor raises a geo-restriction error for IN.
+
+Tests and URL coverage
+- _TESTS includes multiple cases:
+  - A sample show URL with full metadata expectations, including download skip.
+  - Additional cases for matching-only URLs (movies, clip, trailer, sports, music videos) to ensure URL matching works even if not fully exercised in tests.
+
+Notes
+- Uses compat_HTTPError to handle HTTP-related errors in a backward-compatible way.
+- The code uses Python 2/3 compatible syntax (unicode_literals, etc.).
+- The extraction flow is designed to gracefully degrade if certain data (like HLS/DASH formats) is unavailable, due to fatal=False on format extraction.

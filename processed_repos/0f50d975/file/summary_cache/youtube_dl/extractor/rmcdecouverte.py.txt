@@ -1,0 +1,41 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/rmcdecouverte.py
+
+Overview
+- Implements an extractor for the RMC Découverte site (BFMTV group) that delegates to Brightcove to fetch the actual video.
+- Supports two page types: program pages (e.g. /program_12345/) and a live player page (mediaplayer-direct).
+- Applies FR geo restriction via smuggling geo_countries into the Brightcove URL.
+
+Main class and key methods
+- Class: RMCDecouverteIE(InfoExtractor)
+  - _VALID_URL: Matches either:
+    - https://rmcdecouverte.bfmtv.com/.../program_<id>/ (captures id)
+    - https://rmcdecouverte.bfmtv.com/mediaplayer-direct/ (captures live_id)
+  - _TESTS: Includes a program page test (expects video info such as id, ext mp4, title, description hash, uploader_id, upload_date, timestamp) and a live page test (only_matching).
+  - BRIGHTCOVE_URL_TEMPLATE: Template for the Brightcove player URL using videoId.
+  - _real_extract(self, url): Core extraction flow
+    1. Match URL with _VALID_URL to obtain display_id (prefer program id, fall back to live_id).
+    2. Download the page HTML.
+    3. Try to extract a Brightcove URL using BrightcoveLegacyIE._extract_brightcove_url(webpage).
+       - If found, parse the query string to get the @videoPlayer value as brightcove_id.
+       - If not, fall back to extracting a data-video-id attribute from the page (regex: data-video-id="...").
+    4. Build the final Brightcove URL using BRIGHTCOVE_URL_TEMPLATE % brightcove_id.
+    5. Return a URL result pointing to BrightcoveNew with the brightcove_id, and smuggle geo_countries: ['FR'] into the URL (via smuggle_url) to enforce FR geo restriction.
+
+Important implementation details
+- Brightcove integration:
+  - The extractor does not fetch media directly. Instead, it locates the Brightcove video ID and hands off to the BrightcoveNew extractor.
+  - Brightcove video ID retrieval:
+    - Prefer legacy embedding route: BrightcoveLegacyIE._extract_brightcove_url(webpage) + parse the @videoPlayer parameter from its query string.
+    - If legacy URL isn’t present, parse the page for a data-video-id attribute.
+- Geo restriction:
+  - Uses smuggle_url to attach geo_countries: ['FR'] to the Brightcove URL, ensuring the BRFR geoblock context is applied for the Brightcove extractor.
+- Output:
+  - Returns a URL result with type 'BrightcoveNew' and the extracted brightcove_id. The final video information (title, description, uploader_id, upload_date, timestamp, etc.) is retrieved by Brightcove’s extractor.
+- Robust URL handling:
+  - The _VALID_URL pattern supports both program pages and live player pages, enabling both to be processed by a single extractor.
+- Imports and helpers:
+  - Relies on InfoExtractor base class, BrightcoveLegacyIE for legacy embedding detection, compat_parse_qs and compat_urlparse for robust URL/query parsing, and smuggle_url for geo-tagging.
+
+Summary of purpose and behavior
+- Purpose: Fetch video information from RMC Découverte pages by locating the embedded Brightcove video and delegating extraction to BrightcoveNew, while applying FR geo restrictions.
+- Behavior: Given a page URL, identify the Brightcove video ID (via legacy embed or data-video-id), construct the Brightcove URL, apply FR geo restrictions, and delegate to BrightcoveNew for metadata and media extraction.

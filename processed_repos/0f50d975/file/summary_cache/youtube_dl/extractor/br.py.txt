@@ -1,0 +1,105 @@
+Overview
+- This file defines two YouTube-DL extractors for Bayerischer Rundfunk (BR):
+  - BRIE: extracts BR’s online video assets via an XML data feed referenced from the BR site pages.
+  - BRMediathekIE: extracts BR Mediathek entries via a GraphQL API (Mango Express proxy) and returns standard BR media formats, thumbnails, and subtitles.
+
+Key classes
+- BRIE (InfoExtractor)
+  - Purpose: extract BR.tv video/audio entries from BR web pages that contain an embedded avPlayer with an XML data feed.
+  - Core flow: parse page, locate XML data URL, download XML, iterate over media entries, build a uniform info dict, and return the first media item.
+  - Important behavior:
+    - Warns if multiple media entries are found and returns the first one anyway.
+    - If no media entries are found, raises an ExtractorError.
+- BRMediathekIE (InfoExtractor)
+  - Purpose: extract BR Mediathek items identified by a specific av: GUID and fetch detailed formats via a GraphQL endpoint.
+  - Core flow: match id from URL, fetch clip data via a GraphQL query, parse formats, subtitles, and thumbnails, and return a complete info dict.
+
+Main functions and implementation details
+
+BRIE
+- _VALID_URL
+  - Regex to match BR pages with a path structure and capture base URL and a short id. Typical formats include br.de (and subdomains like br-klassik.de).
+- _real_extract(url)
+  - Extracts base_url and display_id from the URL using the _VALID_URL regex.
+  - Downloads the HTML page.
+  - Locates the XML data URL via a specific BR avPlayer setup JavaScript pattern inside the page.
+  - Downloads the XML (base_url + xml_url).
+  - Iterates over XML <video> and <audio> nodes:
+    - media_id: externalId attribute.
+    - Builds a media dict with:
+      - id, title, duration, formats, thumbnails, description, webpage_url, uploader.
+      - upload_date derived from broadcastDate (reversed YYYY.MM.DD to YYYYMMDD).
+  - If more than one media entry is found, emits a warning via _downloader.report_warning.
+  - If no media entries found, raises ExtractorError.
+  - Returns the first media item.
+- _extract_formats(assets, media_id)
+  - Iterates over <asset> nodes under assets.
+  - Reads format_url from either downloadUrl or url.
+  - Asset type determines handling:
+    - HDS: append formats from _extract_f4m_formats with hdcore=3.2.0.
+    - HLS: append formats from _extract_m3u8_formats with m3u8_native; hds as m3u8_id.
+    - Other: construct a standard HTTP/RTMP-like format:
+      - Gathered fields: ext (mediaType), width/height, tbr, abr, vcodec, acodec, container, filesize.
+      - Compute a concrete URL via _proto_relative_url and set format_id to "http-<asset_type>".
+      - If a serverPrefix exists, also add an RTMP-like format with play_path and format_id "rtmp-<asset_type>".
+  - Calls _sort_formats(formats) before returning.
+- _extract_thumbnails(variants, base_url)
+  - Builds a list of thumbnails from <variant> nodes under teaserImage/variants:
+    - url = base_url + variant.url
+    - width and height from respective fields
+  - Sorts thumbnails by area (width*height) descending.
+  - Returns the list.
+
+BRMediathekIE
+- _VALID_URL
+  - Regex for BR De Mediathek BR site: matches URLs under br.de/mediathek/video/... with an id of the form av:<24 hex chars>.
+- _TESTS
+  - Example test with a sample Mediathek URL and expected mp4 extension, timestamp, etc.
+- _real_extract(url)
+  - Extracts clip_id via _match_id.
+  - Performs a GraphQL query against https://proxy-base.master.mango.express/graphql, using the clip_id to fetch:
+    - title, description, duration, createdAt, ageRestriction
+    - videoFiles (edges -> node: publicLocation, fileSize, videoProfile { width, height, bitrate, encoding })
+    - captionFiles (edges -> node: publicLocation)
+    - teaserImages and their imageFiles (publicLocation, width, height)
+  - Builds formats from clip['videoFiles']['edges']:
+    - For each node with publicLocation:
+      - ext = determine_ext(publicLocation)
+      - If ext is m3u8: use _extract_m3u8_formats with m3u8_native (id 'hls').
+      - Otherwise, construct an HTTP format:
+        - width/height from videoProfile
+        - tbr from bitrate
+        - filesize from fileSize
+        - format_id 'http' or 'http-<bitrate>' if bitrate is available
+  - Sorts formats with _sort_formats(formats).
+  - Subtitles:
+    - Collects de subtitles from captionFiles edges; uses n_url as the subtitle URL.
+  - Thumbnails:
+    - Collects from teaserImages' imageFiles edges; builds dicts with url, width, height.
+  - Returns a dict with:
+    - id, title, description, duration, timestamp (parse_iso8601(createdAt)), age_limit
+    - formats, subtitles, thumbnails
+- Notes on data extraction:
+  - Uses helper utilities: determine_ext, int_or_none, parse_iso8601, parse_duration, xpath-based helpers (xpath_text, xpath_element), and _proto_relative_url for BRIE.
+  - For BRMediathekIE, relies on a GraphQL proxy service to obtain structured media data and then parses both video and image resources into the standard YouTube-DL format dictionary.
+
+Common utilities and patterns
+- Both extractors produce a dictionary compatible with YouTube-DL’s InfoExtractor schema:
+  - Fields commonly populated: id, title, description, duration, timestamp/upload_date, uploader, webpage_url, formats, thumbnails, subtitles, etc.
+- Helper functions used:
+  - xpath_text, xpath_element: XML/XML-like path extraction helpers.
+  - int_or_none: safe integer extraction.
+  - parse_duration, parse_iso8601: duration and timestamp parsing.
+  - determine_ext: infer extension from a URL.
+  - _proto_relative_url: convert potential relative URLs to absolute ones.
+  - _download_xml, _download_json: network fetch helpers.
+  - _extract_f4m_formats, _extract_m3u8_formats: built-in extractors for HDS/HLS streams.
+  - _sort_formats: standardizes and orders formats by quality.
+- Error handling:
+  - BRIE raises ExtractorError when no media entries are found.
+  - BRIE warns about multiple medias but returns the first one.
+  - BRMediathekIE relies on the GraphQL response; if data is missing, it would typically fail gracefully via missing fields.
+
+Summary of main functionality
+- BRIE: Given a BR page, locate the embedded avPlayer data URL, fetch an XML/BR data feed, and assemble a single media entry with all available video/audio formats, thumbnails, and metadata.
+- BRMediathekIE: Given a BR Mediathek URL, query a GraphQL proxy for detailed clip data, compile a set of video formats (including HLS via m3u8 and HTTP/RTMP-like formats), collect subtitles and thumbnails, and return a complete media info dict with timestamp and duration.

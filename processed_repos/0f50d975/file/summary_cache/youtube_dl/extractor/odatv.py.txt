@@ -1,0 +1,47 @@
+Concise summary of the code in youtube-dl/youtube_dl/extractor/odatv.py
+
+What it does:
+- Implements an extraction class for OdaTV video pages, enabling youtube-dl to fetch video URLs and metadata from OdaTV.
+
+Key components:
+- Class OdaTVIE(InfoExtractor)
+  - _VALID_URL: Regex that matches OdaTV video pages for both desktop (mob/vid_video.php) URLs and captures the video id as group "id".
+  - _TESTS: Contains three tests:
+    - A standard desktop URL with expected video id, MD5, and info dict (id, ext mp4, title).
+    - A mobile URL (mob_video.php) marked as only_matching.
+    - A mobile URL with no video (also only_matching).
+
+Main extraction flow (_real_extract):
+- video_id = self._match_id(url):
+  - Extracts the id from the URL using the _VALID_URL pattern.
+- webpage = self._download_webpage(url, video_id):
+  - Downloads the page HTML for parsing.
+- no_video = 'NO VIDEO!' in webpage:
+  - Detects a “no video” condition by checking for the literal string NO VIDEO! in the page.
+- video_url = self._search_regex(..., default=None if no_video else NO_DEFAULT, group='url'):
+  - Attempts to extract the MP4 URL from the page using a regex that looks for a pattern like mp4: "http...".
+  - If a video is present (not no_video), raising NO_DEFAULT on failure will propagate as an extraction failure.
+  - If no video is detected (no_video), the search returns None (due to default=None).
+- if no_video:
+  - Raises ExtractorError('Video %s does not exist' % video_id, expected=True):
+    - Signals a non-existent video in a user-visible, non-fatal way to the extractor framework.
+- Return value (dict) with:
+  - id: video_id
+  - url: video_url (the direct MP4 URL found)
+  - title: remove_start(self._og_search_title(webpage), 'Video: '):
+    - Fetches the OpenGraph title from the page and strips a leading 'Video: ' prefix if present.
+  - thumbnail: self._og_search_thumbnail(webpage):
+    - Fetches the OpenGraph thumbnail URL from the page.
+
+Implementation details:
+- Uses standard InfoExtractor utilities:
+  - _og_search_title and _og_search_thumbnail to obtain title and thumbnail from OpenGraph metadata.
+  - remove_start to clean up the title.
+  - _search_regex for extracting the video URL with a dedicated group name 'url'.
+  - NO_DEFAULT to indicate that the regex should fail if a video is expected; otherwise None is allowed when no video is present.
+- Behavior distinguishes between existing videos and no-video cases:
+  - If the page explicitly indicates no video via the NO VIDEO! marker, an ExtractorError is raised with expected=True to reflect a non-recoverable, user-visible error for missing content.
+  - If a video is present, the extractor returns a standard info dict with id, direct video URL, title, and thumbnail.
+
+Overall purpose:
+- Provide a concise extractor for OdaTV video pages to obtain the direct MP4 URL along with metadata (title and thumbnail) while gracefully handling missing videos.

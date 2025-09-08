@@ -1,0 +1,80 @@
+Concise summary of BIQLEIE extractor (file: youtube-dl/youtube_dl/extractor/biqle.py)
+
+Purpose
+- Implement an InfoExtractor for BIQLE watch pages. It handles both direct BIQLE embedded videos and VK-hosted content embedded via BIQLE, returning standard video information (formats, metadata, thumbnails, etc.).
+
+Main functionality
+- The extractor targets URLs of the form https://biqle.{com|org|ru}/watch/{id}, where id is a negative/positive numeric pair like -115995369_456239081.
+- It first loads the watch page and locates an iframe embedding a video player.
+- If the embedded URL is a VK player, it delegates extraction to the VK extractor (VKIE).
+- Otherwise, it fetches the embed page, obtains a video_ext token either from a cookie or from the embed page (base64-encoded string in the page), and uses it to query the VK API for the actual video details and file URLs.
+- From the VK API response, it builds the available video formats, handles thumbnails, and returns a dict with video metadata.
+
+Key classes and functions
+- BIQLEIE(InfoExtractor): Main extractor class for BIQLE watch pages.
+- _VALID_URL: Regular expression to recognize BIQLE watch URLs and capture the internal id.
+- _real_extract(self, url): Core method implementing the extraction flow.
+- VKIE: Imported extractor used for delegating VK-based embeds when detected.
+- Utility functions and imports:
+  - compat_b64decode, compat_urllib_parse_unquote: for decoding video_ext values.
+  - int_or_none: helper to safely convert values to integers or None.
+  - _download_webpage, _proto_relative_url, _search_regex, _get_cookies, _download_json, _sort_formats: standard youtube-dl helper methods used to fetch and parse data.
+
+Important implementation details
+- Embed discovery:
+  - After loading the watch page, it looks for an iframe with a src matching a VK-like player path (daxab.com, dxb.to, or other /player paths) and converts a protocol-relative URL to an absolute one.
+  - If the embed URL is suitable for VKIE, the extractor returns a VK-based result via url_result(embed_url, VKIE.ie_key(), video_id).
+
+- Embedding against VK API (non-VK-embed case):
+  - Fetch the embed page with the watch URL as Referer.
+  - video_ext handling:
+    - First, try to retrieve a cookie named video_ext from the embed URL; if present, URL-decode it.
+    - If not present, extract a base64-encoded video_ext string from the embed page itself, base64-decode it, then decode to a string.
+    - The decoded video_ext has the form: "<video_id>:<sig>:<ignored>:<access_token>".
+  - Split video_ext into video_id, sig, and access_token.
+  - Call VK API endpoint video.get with:
+    - access_token, sig, v=5.44, and videos=<video_id>
+  - The API response is expected at ['response']['items'][0], containing all video data.
+
+- Format extraction:
+  - If item.get('files') contains a key 'external', this indicates a direct external video URL; the extractor returns that URL as a direct video (self.url_result(f_url)).
+  - Otherwise, for each key f_id, f_url in item['files']:
+    - Keys are of the form "<ext>_<height>": split into ext and height.
+    - Create a format dict with:
+      - format_id: "<height>p"
+      - url: f_url
+      - height: int(height)
+      - ext: ext
+    - If f_id is 'external', handle as above (redirect).
+  - Sort formats with _sort_formats.
+
+- Thumbnails:
+  - Collects thumbnail entries from item fields named like photo_<width>, skipping empty values.
+  - Each thumbnail dict contains id (width), url, and width (int).
+
+- Metadata returned:
+  - id: inner VK video id (overwrites initial BIQLE id during processing, but API call uses the latter), but ultimately returned as the outer video id from video_ext.
+  - title: VK item title
+  - formats: built list of formats
+  - comment_count: from item['comments']
+  - description: item['description']
+  - duration: item['duration']
+  - thumbnails: list of parsed thumbnails
+  - timestamp: item['date']
+  - uploader: item['owner_id']
+  - view_count: item['views']
+
+Tests
+- _TESTS contains two examples:
+  1) BIQLE watch URL with a YouTube embed; expected to resolve to a VK-based video with a specific VK id ('8v4f-avW-VI') and various metadata including title, description, uploader, upload_date, etc.
+  2) Another BIQLE watch URL (biqle.org) with a Russian title, timestamp, uploader, and other fields.
+
+Notable edge cases and behavior
+- If a VK embed is detected, the extractor defers entirely to VKIE, ensuring VK-hosted content is handled by the specialized VK extractor.
+- If the embed provides a cookie video_ext, it is used directly; otherwise the code falls back to extracting the same information from the embed page and decoding it.
+- The video_ext data is a critical piece, and its split yields the necessary credentials for a VK API call to retrieve actual video formats.
+- The code gracefully handles external video URLs within the VK data by returning a direct URL result.
+- Uses VK API version 5.44 and a specific User-Agent string for compatibility.
+
+In short
+- BIQLEIE is a BIQLE watch page extractor that detects VK-based embeds and either delegates to VKIE or uses a VK API call (via a video_ext token) to fetch video metadata and formats, assembling a final info dict with id, title, formats, thumbnails, and other metadata. It includes careful handling of cookies and embedded base64 data to obtain necessary API credentials.

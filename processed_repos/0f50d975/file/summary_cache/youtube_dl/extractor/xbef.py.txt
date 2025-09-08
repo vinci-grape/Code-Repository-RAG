@@ -1,0 +1,29 @@
+- Purpose: Implement a YouTube-DL extractor (XBefIE) for video pages on xbef.com.
+
+- Class and URL pattern:
+  - Class: XBefIE(InfoExtractor)
+  - _VALID_URL: matches http(s)://(www.)?xbef.com/video/<id> where <id> is numeric.
+
+- Test case (_TEST):
+  - Provides a sample URL, expected md5 for the video, and an info_dict with id, ext (mp4), title (md5-hashed), age_limit (18), and a thumbnail pattern.
+
+- Main workflow in _real_extract:
+  1. Extract video_id from the URL using _match_id.
+  2. Download the video page to obtain the title by extracting the first <h1> tag via _html_search_regex.
+  3. Retrieve a config URL:
+     - Request http://xbef.com/Main/GetVideoURLEncoded/<video_id>.
+     - The response is a URL-encoded string; decode it with compat_urllib_parse_unquote to obtain the actual config URL.
+  4. Download the XML config from the decoded URL using _download_xml.
+  5. Parse the XML to obtain:
+     - video URL from <file>…</file>
+     - thumbnail URL from <image>…</image>
+  6. Return an information dictionary with: id, url, title, thumbnail, and age_limit set to 18.
+
+- Implementation details:
+  - Uses unicode_literals for Py2/3 compatibility.
+  - Relies on helper methods from InfoExtractor: _download_webpage, _download_xml, _html_search_regex.
+  - Config URL is obtained indirectly via a URL-encoded string returned by the GetVideoURLEncoded endpoint.
+  - XML parsing uses ElementTree-style API (config.find('./file').text and config.find('./image').text).
+
+- Summary of output:
+  - A dict containing id, direct video URL, title, thumbnail, and age_limit (18). The extractor does not handle multiple formats, subtitles, or further processing beyond this direct mapping.

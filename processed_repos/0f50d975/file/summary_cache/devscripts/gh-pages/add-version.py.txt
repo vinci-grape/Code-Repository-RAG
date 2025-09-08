@@ -1,0 +1,45 @@
+Concise summary:
+
+Purpose
+- A dev script used to publish a new version to the YouTube-DL GitHub Pages data. It updates:
+  - update/LATEST_VERSION with the new version
+  - update/versions.json with download URLs and SHA-256 checksums for the new version
+
+Main functionality
+- Accepts a version string as the first command-line argument.
+- Reads and updates update/versions.json, removing any existing signature field.
+- Builds a new_version map containing:
+  - bin: URL and sha256 for youtube-dl
+  - exe: URL and sha256 for youtube-dl.exe
+  - tar: URL and sha256 for youtube-dl-<version>.tar.gz
+- For each file:
+  - Reads the corresponding build artifact from ../../build/<version>/<filename>
+  - Validates the file is non-empty
+  - Computes SHA-256 checksum
+  - Stores (url, sha256) pair in new_version
+- Updates versions_info:
+  - versions[<version>] = new_version
+  - latest = <version>
+- Writes back the updated versions.json with pretty-printed JSON
+- Also writes the new version into update/LATEST_VERSION
+
+Key implementation details
+- Environment/setup:
+  - Adds parent directories to sys.path to import devscripts.utils and other project modules.
+  - Uses compat_open from youtube_dl.compat for file opening.
+- File handling:
+  - Uses custom read_file and write_file utilities for reading/writing update data.
+  - Build artifacts are read in binary mode to hash their contents.
+- Data structure:
+  - versions.json stores a versions object keyed by version with per-file info as (url, sha256) pairs.
+  - Removes a potential signature field from the existing data before updating.
+- URL scheme:
+  - Download URLs follow https://yt-dl.org/downloads/<version>/<filename>, where filenames are youtube-dl, youtube-dl.exe, and youtube-dl-<version>.tar.gz.
+- Validation:
+  - Ensures each artifact is non-empty; raises ValueError if an artifact is missing or zero-length.
+- Potential bug:
+  - The final write uses json.dumps(versions_info, jsonf, indent=4, sort_keys=True), which is incorrect (dumps returns a string; dump should be used to write to a file). This will raise a TypeError at runtime. The intended call is json.dump(versions_info, jsonf, indent=4, sort_keys=True).
+
+Usage note
+- Run as: python3 add-version.py <version>
+- Exits with a usage message if no version is provided.

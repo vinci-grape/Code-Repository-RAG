@@ -1,0 +1,96 @@
+Here is a concise, structured summary of the code in ./youtube-dl/youtube_dl/extractor/cbsnews.py.
+
+Overview
+- This module implements CBS News extractors for youtube-dl, covering:
+  - CBS News embedded videos (CBSNewsEmbedIE)
+  - CBS News standard pages (CBSNewsIE)
+  - CBS News live videos (CBSNewsLiveVideoIE)
+- All extractors inherit from CBSIE or InfoExtractor and rely on a common CBS video-id workflow (mpxRefId) via the parent extractor.
+
+Key classes and their functionality
+
+1) CBSNewsEmbedIE (embedded CBS News videos)
+- Class: CBSNewsEmbedIE(CBSIE)
+- IE_NAME: 'cbsnews:embed'
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?cbsnews\.com/embed/video[^#]*#(?P<id>.+)'
+- _real_extract(url)
+  - Extracts the encoded payload id from the fragment after the # via _match_id(url).
+  - Process to JSON:
+    - URL-unquote the id, base64-decode, then zlib-decompress (raw deflate, no zlib header) to get a JSON string.
+    - Parse JSON and pick item = json['video']['items'][0].
+  - Retrieve actual video information using item['mpxRefId'] by calling self._extract_video_info(item['mpxRefId'], 'cbsnews').
+- Notes:
+  - Uses zlib.decompress with -zlib.MAX_WBITS and base64 decoding to decode embedded payloads.
+  - Relies on parent CBSIE logic to fetch the real video info from mpxRefId.
+- Tests: Includes a long embed URL with only_matching=True.
+
+2) CBSNewsIE (CBS News main pages and playlists)
+- Class: CBSNewsIE(CBSIE)
+- IE_NAME: 'cbsnews'
+- IE_DESC: 'CBS News'
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?cbsnews\.com/(?:news|video)/(?P<id>[\da-z_-]+)'
+- _real_extract(url)
+  - display_id = _match_id(url)
+  - Downloads the page HTML.
+  - Inline embed discovery:
+    - Finds iframes with data-src pointing to embed/video URLs: 
+      r'<iframe[^>]+data-src="(https?://(?:www\.)?cbsnews\.com/embed/video/[^#]*#[^"]+)"'
+    - For each found embed_url, creates a URL result for CBSNewsEmbedIE (embed extractor) and collects into entries.
+    - If any entries exist, returns a playlist:
+      - playlist_title/description pulled from og:title/twitter:title and og:description/twitter:description/description meta tags.
+  - If no embeds found:
+    - Looks for a JSON payload on the page: CBSNEWS.defaultPayload = ({...})
+    - Parses that JSON to get item = items[0].
+    - Returns video info via self._extract_video_info(item['mpxRefId'], 'cbsnews').
+- Notes:
+  - Handles both embedded videos on a CBS News page and direct CBS News video pages with a JSON payload.
+  - Playlist support when multiple embedded videos are found on a page.
+- Tests:
+  - Test 1: 60 Minutes article; expects RTMP download, with metadata fields (id, ext, title, description, thumbnail, duration, uploader, timestamp, upload_date).
+  - Test 2: Video page; expects MP4, subtitles, and similar metadata.
+  - Test 3: 48 Hours article; expects a playlist with at least 7 items (playlist_mincount=7).
+
+3) CBSNewsLiveVideoIE (CBS News live videos)
+- Class: CBSNewsLiveVideoIE(InfoExtractor)
+- IE_NAME: 'cbsnews:livevideo'
+- IE_DESC: 'CBS News Live Videos'
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?cbsnews\.com/live/video/(?P<id>[^/?#]+)'
+- _TEST: Provides a live video example with id, title, and duration; marked as skip if video is gone.
+- _real_extract(url)
+  - display_id = _match_id(url)
+  - Downloads a JSON feed from:
+    http://feeds.cbsn.cbsnews.com/rundown/story with query params: device=desktop, dvr_slug=display_id
+  - Extracts formats via self._extract_akamai_formats(video_info['url'], display_id) and sorts them with _sort_formats.
+  - Returns a dict with:
+    - id and display_id
+    - title = video_info['headline']
+    - thumbnail: prefer video_info['thumbnail_url_hd'] else thumbnail_url_sd
+    - duration: parse_duration(video_info.get('segmentDur'))
+    - formats: the list of Akamai formats
+- Notes:
+  - Live videos are fetched via an external rundown/story JSON feed.
+  - Handles possible absence by the skip flag in tests when the video is deleted.
+
+Shared implementation details and utilities
+- Inheritance and base helpers:
+  - All CBS-related extractors build on CBSIE for common video info retrieval using mpxRefId.
+  - CBSNewsEmbedIE relies on the parent _extract_video_info to fetch actual video metadata.
+- Decoding embedded payloads:
+  - The embed payloads are encoded inside the URL fragment. The code:
+    - unquotes, base64-decodes, then zlib-decompresses with -zlib.MAX_WBITS (raw deflate) to obtain a JSON string.
+    - Parses JSON and uses mpRefId for the final extraction.
+- Metadata handling:
+  - ID, title, description, duration, and thumbnails are extracted where available.
+  - Duration uses parse_duration from youtube_dl.utils.
+  - Thumbnails prefer hd when available (live), else fallback sd.
+  - Playlists are supported when a page contains multiple embedded CBS News videos.
+- Error handling and edge cases:
+  - CBS News live extractor includes a skip flag example indicating the video may be deleted.
+  - The embed and main-page extractors robustly handle both embed-only pages and pages with a JSON payload.
+
+Summary of main functionality
+- CBSNewsEmbedIE: decodes embedded payloads to obtain mpxRefId and delegates to CBSIE for the actual video metadata.
+- CBSNewsIE: handles CBS News article/video pages by either collecting embedded CBS News videos on the page or parsing a page-level JSON payload to extract video info.
+- CBSNewsLiveVideoIE: fetches live CBS News video metadata from an external rundown feed and builds available Akamai formats for streaming.
+
+This module enables downloading CBS News videos from standard pages, embedded videos, and live streams, with consistent handling of IDs, metadata, and formats.

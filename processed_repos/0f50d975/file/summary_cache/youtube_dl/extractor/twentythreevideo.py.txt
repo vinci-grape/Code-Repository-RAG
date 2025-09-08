@@ -1,0 +1,59 @@
+- Purpose
+  - A youtube-dl extractor for 23video network (23video.twentythree.net) that retrieves video and audio formats, thumbnails, and metadata from the site’s v.ihtml player page.
+
+- Main class
+  - TwentyThreeVideoIE(InfoExtractor)
+    - IE_NAME: '23video'
+    - _VALID_URL: Regex matching domains twentythree.net, 23video.com, or filmweb.no with path v.ihtml/player.html and a query containing photo id. Captures domain, query string, and photo id.
+
+- Key data flow
+  - _real_extract(url)
+    - Parses URL using _VALID_URL to obtain domain, query, and photo_id. Builds base_url as https://<domain>.
+    - Downloads photo data via API: base_url/api/photo/list?{query}, requesting JSON. Uses transform_source to extract a JSON blob from the response (via a regex that captures a JSON object).
+    - Pulls the 'photo' dictionary from the JSON response.
+    - title = photo_data['title'].
+
+- Formats and thumbnails construction
+  - Initializes formats = [].
+  - If there is audio_download in photo_data:
+    - Adds an audio format:
+      - format_id: 'audio'
+      - url: base_url + audio_download
+      - filesize: int_or_none(audio_size)
+      - vcodec: 'none'
+  - Helper: add_common_info_to_list(l, template, id_field, id_value)
+    - Builds a base key using template % id_value, looks for a corresponding download path (f_base + 'download').
+    - If found, appends a dict to list l with:
+      - id_field: id_value
+      - url: base_url + download_path
+      - width: int_or_none(photo_data.get(f_base + 'width'))
+      - height: int_or_none(photo_data.get(f_base + 'height'))
+      - filesize: int_or_none(photo_data.get(f_base + 'size'))
+  - Video formats
+    - For each quality in ['mobile_high', 'medium', 'hd', '1080p', '4k']:
+      - Calls add_common_info_to_list(formats, 'video_%s_', 'format_id', quality)
+      - This maps to photo_data keys like video_mobile_high_download, video_mobile_high_width, etc.
+  - Thumbnails
+    - thumbnails = []
+    - For each thumbnail id in ['quad16', 'quad50', 'quad75', 'quad100', 'small', 'portrait', 'standard', 'medium', 'large', 'original']:
+      - Calls add_common_info_to_list(thumbnails, '%s_', 'id', t)
+      - This maps to fields like quad16_download, quad16_width, quad16_height, quad16_size, etc.
+
+- Returned information
+  - Dict with:
+    - id: photo_id
+    - title
+    - timestamp: int_or_none(photo_data.get('creation_date_epoch'))
+    - duration: int_or_none(photo_data.get('video_length'))
+    - view_count: int_or_none(photo_data.get('view_count'))
+    - comment_count: int_or_none(photo_data.get('number_of_comments'))
+    - uploader_id: photo_data.get('user_id')
+    - uploader: photo_data.get('display_name')
+    - thumbnails: list of thumbnail dicts
+    - formats: list of video and audio formats
+
+- Implementation details worth noting
+  - Uses int_or_none to safely cast numeric fields.
+  - The API response may wrap JSON; transform_source extracts the JSON blob with _search_regex(r'(?s)({.+})', s, 'photo data').
+  - The _TESTS include a concrete example that expects certain metadata (e.g., id '20448876', title, timestamp, uploader, etc.) and marks another URL as only_matching to ensure URL pattern alignment.
+  - Ext is inferred from the actual format URLs (e.g., mp4), as shown in tests where ext is mp4.

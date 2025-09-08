@@ -1,0 +1,78 @@
+Here is a concise yet comprehensive summary of the code in youtube-dl/youtube_dl/extractor/eroprofile.py.
+
+Purpose
+- Implement a YouTube-dl extractor for eroprofile.com video pages under /m/videos/view/<id>.
+- Supports both publicly accessible videos and those that require user login.
+- Handles login via standard form POST, with credentials from netrc or user input.
+
+Key components
+- Class: EroProfileIE(InfoExtractor)
+  - Inherits from youtube-dl’s InfoExtractor.
+  - Provides login support and video metadata extraction.
+
+URL handling and matching
+- _VALID_URL: Regular expression matching URLs like:
+  - http(s)://www.eroprofile.com/m/videos/view/<id>
+  - Captures the video ID part as 'id' for use as display_id.
+- _TESTS: Two test cases
+  - Public video: checks id, display_id, ext, title, thumbnail, age_limit, md5, and skip condition if video not found.
+  - Video requiring login: checks fields but marked to skip unless logged in.
+
+Login flow
+- _LOGIN_URL: Base login URL (http://www.eroprofile.com/auth/auth.php?)
+- _NETRC_MACHINE: 'eroprofile' (credentials can be provided via a netrc file)
+- _real_initialize: Triggers login before extraction by calling _login.
+- _login:
+  - Retrieves credentials via self._get_login_info() (netrc or prompt).
+  - If no credentials, returns early.
+  - Builds a login URL with username, password, and a redirect url to http://www.eroprofile.com/.
+  - Downloads the login page and checks for a failure message: "Your username or password was incorrect." If found, raises ExtractorError with expected=True to signal incorrect login.
+  - On success, calls report_login() to mark successful login.
+  - Extracts a redirect URL from a script tag source in the login page and follows it to complete login.
+- This flow ensures cookies are stored for subsequent extraction attempts.
+
+Video extraction
+- _real_extract(url):
+  - display_id = self._match_id(url) (the id part captured by _VALID_URL)
+  - Downloads the video page HTML.
+  - If page content contains "You must be logged in to view this video.", raises login required error.
+  - video_id extraction:
+    - Tries two patterns via self._search_regex:
+      - glbUpdViews('\d*','(\d+)')
+      - p/report/video/(\d+)
+    - The first match yields the actual numeric video_id; default=None if not found.
+  - Title extraction:
+    - Attempts two HTML patterns via self._html_search_regex:
+      - Title:</th><td>([^<]+)</td>
+      - <h1>...</h1> (captures title text)
+  - info = self._parse_html5_media_entries(url, webpage, video_id)[0]
+    - This uses a helper that parses HTML5 media entries embedded in the page and returns a list of info dicts; the code uses the first one.
+  - Return value: merge_dicts(info, {
+      'id': video_id,
+      'display_id': display_id,
+      'title': title,
+      'age_limit': 18,
+    })
+    - Merges the parsed media info with explicit fields:
+      - id: internal numeric video_id
+      - display_id: the slug from the URL
+      - title: extracted title
+      - age_limit: 18 (adult content)
+
+Important implementation details
+- Dependencies/utilities:
+  - InfoExtractor base class
+  - compat_urllib_parse_urlencode for login query encoding
+  - utils: ExtractorError, merge_dicts
+  - Helpers: _download_webpage, _search_regex, _html_search_regex, _parse_html5_media_entries
+- Encoding compatibility:
+  - Uses from __future__ import unicode_literals for Python 2/3 compatibility.
+- Error handling:
+  - Raises ExtractorError with expected=True when login credentials are incorrect.
+  - Raises login required when attempting to access a video that requires login.
+- Data handling:
+  - Falls back gracefully if certain patterns aren’t found (video_id, title).
+  - The final result includes a mix of parsed media info and explicit fields (id, display_id, title, age_limit).
+
+In short
+- This extractor authenticates with eroprofile when needed, detects and fetches a video’s numeric ID and title from the page, uses the page’s HTML5 media entries to build a metadata dictionary, and outputs a merged dict suitable for youtube-dl’s standard video information flow. It robustly handles both public and login-protected videos and uses netrc-friendly authentication.

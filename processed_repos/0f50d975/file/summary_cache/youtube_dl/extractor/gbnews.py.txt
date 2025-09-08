@@ -1,0 +1,68 @@
+Concise summary of GBNewsIE (GB News extractor)
+
+Purpose
+- Implements an InfoExtractor to fetch GB News video content (clips, features, and live streams) by parsing GB News pages and retrieving streaming data from Simplestream (SSMP).
+
+Key components
+- Class: GBNewsIE(InfoExtractor)
+  - IE_DESC: "GB News clips, features and live stream"
+  - _VALID_URL: Regex matching GB News URLs (gbnews.uk or gbnews.com) with an id at the end of the path. Supports optional word segment before the id.
+  - _PLATFORM: safari (used for Simplestream API requests)
+  - _SSMP_URL: https://mm-v2.simplestream.com/ssmp/api.php (SSMP API endpoint)
+  - _TESTS: Includes three tests for a GB News show, a news item, and the live watch page, validating id/display_id, ext, title, description, and live state.
+
+Main workflow in _real_extract
+1) Determine display_id
+   - display_id is extracted from the URL using the captured id, split on '/' to keep the last segment.
+
+2) Download page
+   - Retrieves the HTML of the target page.
+
+3) Locate Simplestream embed data
+   - Uses a regex to find a div with class "simplestream" and a set of data- attributes (data-id, data-type, data-key, data-token, data-expiry, data-uvid, data-poster, data-env).
+   - Converts the matched HTML tag into a dictionary via extract_attributes, yielding values like data-id, data-type, data-uvid, etc.
+
+4) Validate Simplestream ID
+   - If data-id is missing, raise ExtractorError.
+
+5) Fetch Simplestream metadata (SSMP)
+   - Performs a GET to _SSMP_URL with query parameters id (the data-id) and env (data-env, default "production").
+   - fatal=False to allow gracefully continuing if the metadata isn’t available.
+   - Extracts api_hostname from the JSON response as meta_url.
+
+6) Build and fetch stream data
+   - uvid = data-uvid; dtype = data-type (e.g., vod or live)
+   - Constructs the stream endpoint: meta_url/api/<type>/stream/<uvid> where <type> is "show" if vod, else the value of dtype.
+   - Request with query: key (data-key) and platform (safari)
+   - Headers include: Token, Token-Expiry, Uvid (from data attributes)
+   - fatal=False to tolerate missing stream information
+
+7) Extract stream URL and stream data
+   - stream_url is read from the JSON path: response.stream.<url>
+   - If missing, raise ExtractorError
+   - stream_data = response, and drm = stream_data.get('drm')
+   - If DRM is present, call self.report_drm(uvid) to mark DRM-protected content
+
+8) Formats extraction
+   - Use _extract_m3u8_formats on stream_url with ext='mp4' and entry_protocol='m3u8_native'
+   - fatal=False to allow missing formats
+   - Sort formats with _sort_formats
+
+9) Assemble result
+   - id: uvid
+   - display_id: display_id
+   - title: Prefer stream_data['title'], else og title from page, else a capitalized version of the display_id
+   - description: og description from the page
+   - thumbnail: Prefer data-poster (URL) from video_data, else og thumbnail
+   - formats: the extracted formats
+   - is_live: True if dtype == 'live', else None
+
+Implementation details and noteworthy points
+- HTML attribute parsing: Uses extract_attributes to convert the Simplestream div’s data- attributes into a Python dict for easy access.
+- Robustness: Several steps use fatal=False to proceed gracefully if optional data is unavailable (SSMP metadata, stream data, etc.). Errors are raised when critical pieces are missing (e.g., Simplestream id, metadata host, or stream URL).
+- DRM handling: If the stream data indicates DRM, the extractor calls report_drm(uvid) to mark the content as DRM-protected.
+- Fallbacks for metadata: Title uses multiple fallbacks (stream data, OpenGraph title, or a generated title from the URL). Description and thumbnail also have fallbacks using OpenGraph data.
+- Live content handling: is_live is set when data-type indicates a live stream.
+- Extensibility: The approach relies on a standard Simplestream data block and the SSMP API, making it adaptable to similar pages that embed Simplestream streams.
+
+Overall, the extractor is designed to surface GB News media by resolving a Simplestream embed on GB News pages, fetching the necessary metadata and stream URLs, handling DRM, and producing a standard video info dictionary with formats suitable for playback.

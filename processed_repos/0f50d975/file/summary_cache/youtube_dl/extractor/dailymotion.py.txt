@@ -1,0 +1,114 @@
+Concise yet comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/dailymotion.py
+
+Overview
+- This module implements Dailymotion extraction logic for youtube-dl.
+- Main entry points:
+  - DailymotionIE: extracts individual Dailymotion videos.
+  - DailymotionPlaylistIE: extracts playlists of videos (collection objects).
+  - DailymotionUserIE: extracts a user/channel’s video list (channel objects).
+- It also defines DailymotionBaseInfoExtractor, a foundation class that handles API access, authentication, cookies, and family/age filtering.
+
+Key classes and main responsibilities
+- DailymotionBaseInfoExtractor(InfoExtractor)
+  - Manages Dailymotion cookies and authentication for GraphQL API access.
+  - _FAMILY_FILTER: determines whether to filter explicit content based on cookies or age_limit.
+  - _HEADERS: default request headers for GraphQL, including Content-Type and Origin.
+  - _real_initialize:
+    - Reads the ff cookie from www.dailymotion.com to set _FAMILY_FILTER.
+    - Falls back to age-based filtering if the cookie is not present.
+    - Writes ff cookie back as 'on' or 'off'.
+  - _call_api(object_type, xid, object_fields, note, filter_extra=None):
+    - Obtains an OAuth token if missing (from cookies or by requesting one from the GraphQL OAuth endpoint).
+    - Token acquisition supports two flows:
+      - Password grant (if login info is available).
+      - Client credentials grant (fallback).
+    - Stores the token in cookies (access_token or client_token) and uses Bearer authorization.
+    - Calls the GraphQL endpoint at https://graphql.api.dailymotion.com/ with a query for the requested object_type and fields.
+    - Returns the object data or raises an informative error if the object is not found or API returns errors.
+
+- DailymotionIE (video extractor)
+  - Inherits from DailymotionBaseInfoExtractor.
+  - _VALID_URL: complex regex to match Dailymotion video URLs (and some Lequipe.fr video URLs). Captures video id and optional playlist id.
+  - _extract_urls(webpage): static method to discover embedded Dailymotion URLs:
+    - Looks for embedded players in iframes/embeds or DM.player(...) patterns and collects their URLs.
+  - _real_extract(url):
+    - Parses video_id and optional playlist_id from the URL.
+    - If a playlist_id is present and not disabled by --no-playlist, it redirects to a DailymotionPlaylist; otherwise continues to extract a single video.
+    - Retrieves media metadata via:
+      - _call_api('media', video_id, ...) to fetch basic media data and live status.
+      - metadata from https://www.dailymotion.com/player/metadata/video/{xid} (with app=com.dailymotion.neon) for detailed formats, durations, posters, subtitles, etc.
+    - Handles geo/authorization errors:
+      - If metadata contains an error with code DM007, raises geo-restricted with allowed countries if provided.
+      - Otherwise raises an ExtractorError with the error description.
+    - Builds video information:
+      - title: uses _live_title(title) if live, else title.
+      - description: cleaned media description.
+      - thumbnails: from metadata posters.
+      - duration: from metadata duration.
+      - timestamp: from metadata created_time.
+      - uploader/uploader_id: from owner data or metadata screenname.
+      - age_limit: 18 if explicit content, else 0.
+      - tags: from metadata.
+      - view_count: from media stats or audienceCount fallback.
+      - like_count: from media stats.
+      - formats: assembled from metadata qualities:
+        - HLS (application/x-mpegURL) via _extract_m3u8_formats (with m3u8_id='hls').
+        - Other formats: take direct URLs, infer width/height/fps from URL pattern /H264-<width>x<height>(-60).
+        - Normalize URLs (strip after '#') and default fps if needed (e.g., 60 when ends with @60).
+      - subtitles: built from metadata subtitles data.
+      - is_live: true/false based on media.
+    - Returns a dict with all the composed fields (id, title, description, duration, timestamp, uploader, formats, subtitles, is_live, etc.).
+
+- DailymotionPlaylistBaseIE(DailymotionBaseInfoExtractor)
+  - A shared base for playlist-like pages (both playlist and user/channel).
+  - _PAGE_SIZE = 100
+  - _fetch_page(playlist_id, page):
+    - Uses GraphQL to fetch videos for the object type (self._OBJECT_TYPE) with pagination.
+    - Yields video entries as individual video results by URL and xid, using DailymotionIE.ie_key().
+  - _real_extract(url):
+    - Extracts playlist_id from URL, then constructs an OnDemandPagedList to fetch pages via _fetch_page, and returns a playlist result.
+
+- DailymotionPlaylistIE(DailymotionPlaylistBaseIE)
+  - IE_NAME: 'dailymotion:playlist'
+  - _VALID_URL: matches Dailymotion playlists under /playlist/{id}
+  - _OBJECT_TYPE = 'collection'
+  - Minimal test case included to verify playlist id extraction and presence.
+
+- DailymotionUserIE(DailymotionPlaylistBaseIE)
+  - IE_NAME: 'dailymotion:user'
+  - _VALID_URL: matches Dailymotion user/channel pages (excluding embed, swf, #, video, playlist paths)
+  - _OBJECT_TYPE = 'channel'
+  - Tests include a few user URLs and expectations about playlist_mincount.
+
+Important implementation details
+- GraphQL-based API access with token management:
+  - If no Authorization header present, _call_api fetches an access token via cookies or requests one from https://graphql.api.dailymotion.com/oauth/token.
+  - Token acquisition uses either user credentials (password grant) or client_credentials, and the token is stored in cookies for subsequent requests.
+  - The Authorization header is set to Bearer <token> for GraphQL requests.
+- Family/Age filtering:
+  - _FAMILY_FILTER is determined from the ff cookie or the configured age_limit, influencing how videos are surfaced from the API.
+  - This affects which videos are included when enumerating playlist or channel contents.
+- Error handling and geo-restriction:
+  - When player metadata returns an error, particularly code DM007, the extractor attempts to surface geo-restriction information and uses raise_geo_restricted when possible.
+- Video formats extraction:
+  - For each format in metadata.qualities, if media_type is application/x-mpegURL, HLS formats are extracted via _extract_m3u8_formats.
+  - For other direct URLs, format_id is 'http-' + quality, and the URL is kept. If the URL contains /H264-<width>x<height>(-60)?, width/height/fps are parsed and included in the format as width, height, fps.
+  - After collecting formats, each URL is sanitized (strip hashes) and fps defaults to 60 for 60fps variants when not explicitly provided.
+  - Formats are sorted with _sort_formats.
+- Subtitles and thumbnails:
+  - Subtitles are read from metadata.subtitles.data and built as language-specific lists of URLs.
+  - Thumbnails (posters) are built from metadata.posters with height, id, and URL fields.
+- Metadata and fields:
+  - Uses a common field set _COMMON_MEDIA_FIELDS to fetch consistent data for both standard videos and live streams (stats, likes, views, geoblocking, etc.).
+  - The main video metadata (title, description, duration, created_time, owner) is extracted and cross-referenced with the media data to fill fields like uploader, uploader_id, view_count, like_count, etc.
+- Cross-site support:
+  - The _VALID_URL patterns also accommodate lequipe.fr/video pages, and _extract_urls includes logic to catch embedded Dailymotion players in pages.
+- Playlists and user pages:
+  - Playlist extraction uses GraphQL to fetch collection videos with pagination.
+  - User extraction uses GraphQL to fetch channel videos with pagination.
+  - The code uses OnDemandPagedList to lazily paginate through results, yielding video entries as DailymotionIE results.
+
+Summary
+- This file provides a robust Dailymotion extractor supporting videos, playlists, and user channels.
+- It integrates with Dailymotion’s GraphQL API, handles token management, family/age filtering, and geo-restrictions.
+- It builds rich video objects with multiple formats (including HLS), subtitles, thumbnails, and social stats, while also supporting playlist and user-page extraction through a shared paging mechanism.

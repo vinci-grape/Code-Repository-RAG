@@ -1,0 +1,61 @@
+Summary:
+- This file implements a set of extractors for Yaндекс.Music (Yandex.Music) used by youtube-dl to fetch tracks, albums, playlists, and artist pages from music.yandex.ru and related TLDs (ru, kz, ua, by, com).
+- Core idea: the extractors query Yandex Music's API endpoints, handle errors (including CAPTCHA), and construct playable entries (mp3 URLs or page links) with rich metadata (title, artist, album, year, track/disc numbers, genre, etc.).
+
+Key components and main functionality:
+- YandexMusicBaseIE (base extractor)
+  - Provides common URL base: music.yandex.(ru|kz|ua|by|com).
+  - Error handling via _handle_error; raises ExtractorError on API error or CAPTCHA signals.
+  - CAPTCHA handling via _raise_captcha with a detailed message and guidance.
+  - CAPTCHA detection in _download_webpage_handle (checks for specific Russian captcha text).
+  - _download_json overridden to run error checking on responses.
+  - _call_api(ep, tld, url, item_id, note, query): central helper to call endpoints under https://music.yandex.{tld}/handlers/{ep}.jsx with standard headers (Referer, X-Requested-With, X-Retpath-Y) and the given query parameters.
+
+- YandexMusicTrackIE (individual track)
+  - URL pattern: /album/{album_id}/track/{id}
+  - Downloads track metadata via the API (track) and then the actual download URL via a two-step process:
+    - Get download manifest from /api/v2.1/handlers/track/{track_id}:{album_id}/web-album_track-track-track-main/download/m withhq=1.
+    - Fetch fd_data from the manifest URL, compute a decryption-like key using an MD5 hash of a fixed string plus path data, and assemble the final MP3 URL get-mp3 host/key/ts+path?track-id=ID.
+  - Builds a track info dictionary with id, ext (mp3), url, filesize, duration, thumbnail, track title (including version if present), artist, album, album_artist, release_year, genre, disc_number, track_number, and audio codec/bitrate information from the manifest.
+  - Handles multiple artists/albums and formats title as "Artist - Title" when artist data is available.
+  - Thumbnail extraction from albums[].coverUri with proper URL normalization.
+
+- YandexMusicPlaylistBaseIE (shared for albums/artists/playlists)
+  - _extract_tracks(source, item_id, url, tld): given a source with tracks and trackIds, ensures all tracks are present by fetching missing entries via API endpoint track-entries in chunks (to avoid header-size issues). The chunk size is 250 entries.
+  - _build_playlist(tracks): converts raw track dictionaries into url_results pointing to YandexMusicTrackIE pages for each track, using album track IDs to form links like http://music.yandex.ru/album/{album_id}/track/{track_id}.
+
+- YandexMusicAlbumIE
+  - URL pattern: /album/{id}
+  - Fetches album JSON, expands volumes into a flat list of tracks, builds a playlist of track entries, and sets the playlist title with artist and year when available.
+  - If artist data is present, the title is "Artist - Title" and year is appended in parentheses.
+
+- YandexMusicPlaylistIE
+  - URL pattern: /users/{user}/playlists/{id}
+  - Fetches playlist JSON, extracts tracks (potentially across embedded tracks and missing track entries), builds a list of track entries, and returns a playlist result with title and description.
+
+- YandexMusicArtistBaseIE (base for artist-related pages)
+  - Provides _call_artist to fetch artist data for given id, including the what (tracks or albums), sort order, and language/tld, with proper headers and parameters.
+
+- YandexMusicArtistTracksIE
+  - URL pattern: /artist/{id}/tracks
+  - Concrete implementation of artist "tracks" listing.
+  - Uses _ARTIST_SORT (default empty) and _ARTIST_WHAT ('tracks') to request data, build a track list, and produce a playlist titled "<Artist> - Треки" or "<ID> - Треки" if artist name is unavailable.
+
+- YandexMusicArtistAlbumsIE
+  - URL pattern: /artist/{id}/albums
+  - Concrete implementation of artist "albums" listing.
+  - Uses _ARTIST_SORT = 'year' and _ARTIST_WHAT = 'albums' to fetch data, then builds a list of album page entries (album pages are linked via YandexMusicAlbumIE).
+
+Key implementation details:
+- Error and CAPTCHA handling is integral: _handle_error and _raise_captcha are used across API responses to detect CAPTCHA blocks or explicit errors and prompt the user accordingly.
+- Direct MP3 URL construction for tracks is performed through a two-step API workflow plus a hashing step to generate the final URL with a computed key, which is specific to Yandex Music’s protected download flow.
+- Metadata extraction is thorough:
+  - Tracks: id, title (with artist if possible), duration, filesize, thumbnail, album/artist info, release_year, genre, disc_number, track_number, abr, acodec.
+  - Albums/Playlists/Artists: builds entries via URL results to track pages or album pages, sets descriptive titles combining artist, album, year, or “Треки/Альбомы” as appropriate.
+- Handling of incomplete data from the playlist track dictionary: the code fetches missing tracks in chunks to work around API limitations and HTTP header size constraints.
+- Robust title construction and metadata extraction helpers:
+  - extract_artist_name and extract_artist compile artist names from nested structures (including decomposed artists).
+  - try_get and compat_str are used to safely extract optional fields and ensure consistent types.
+- Tests included for several scenarios across tracks, albums, and playlists, covering multiple TLDs and URL forms.
+
+Overall, the file provides a comprehensive, captcha-aware integration with Yandex.Music, enabling youtube-dl to fetch and assemble playable entries for tracks, albums, playlists, and artist pages with rich metadata.

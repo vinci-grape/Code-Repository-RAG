@@ -1,0 +1,20 @@
+Summary:
+- Purpose: A small CLI utility used in youtube-dl devscripts to generate a contributor-oriented file by extracting specific sections from an input document (typically a README).
+- Entry point: main() invoked when the script is run directly.
+- Command-line interface:
+  - Uses optparse to require two positional arguments: INFILE OUTFILE.
+  - Exits with an error message if the argument count is not 2.
+- Core functionality:
+  - Reads the entire content of INFILE via read_file (from utils).
+  - Extracts two sections using regular expressions:
+    - bug_text: content between the BUGS section header and the following COPYRIGHT header.
+      - Pattern: (?s)#\s*BUGS\s*[^\n]*\s*(.*?)#\s*COPYRIGHT
+    - dev_text: content from the DEVELOPER INSTRUCTIONS header up to the EMBEDDING YOUTUBE-DL header.
+      - Pattern: (?s)(#\s*DEVELOPER INSTRUCTIONS.*?)#\s*EMBEDDING YOUTUBE-DL
+  - Concatenates bug_text and dev_text and writes the result to OUTFILE via write_file.
+- Implementation notes:
+  - Uses inline DOTALL (?s) so newlines are included in matches.
+  - Both extractions rely on the existence of the specific headers; if a match fails, .group(1) will raise an exception (no explicit error handling for missing sections).
+  - The script does not modify or include headers beyond the captured contents; it outputs exactly bug_text + dev_text.
+  - Compatible with Python 2/3 style (unicode_literals imported, but uses optparse which is deprecated in Python 3+).
+- Dependencies: read_file and write_file from utils (not shown in this file).

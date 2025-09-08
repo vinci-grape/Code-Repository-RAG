@@ -1,0 +1,89 @@
+Here’s a concise but comprehensive summary of the MallTV extractor module.
+
+Overview
+- Module: youtube_dl.extractor.malltv.MallTVIE
+- Purpose: Extract video metadata and streaming formats from Mall.TV pages and return a unified information dictionary compatible with youtube-dl.
+- Key techniques: Scrapes a JSON object embedded in the page (videoObject) and derives HLS formats from an m3u8 URL derived from the page data. Also collects subtitles, view/like/dislike counts, and other metadata via JSON-LD when available.
+
+Main components
+- Class MallTVIE(InfoExtractor)
+  - _VALID_URL: Regex matching Mall.TV URLs. Accepts www or sk subdomains and captures the final path segment as the video id.
+  - _TESTS: Metadata-driven tests to validate extraction, including an example with:
+    - A sample URL
+    - Expected md5 of the video/file
+    - info_dict with id, display_id, ext, title, description, duration, timestamp/upload_date, view_count
+    - Additional only_matching tests for alternative paths/domains
+
+- _real_extract(self, url)
+  - display_id = self._match_id(url): uses the last path component as the display_id.
+  - webpage = self._download_webpage(url, display_id, headers=self.geo_verification_headers()): fetches the page with geo verification headers to handle regional restrictions.
+  - video = self._parse_json(self._search_regex(r'videoObject\s*=\s*JSON\.parse\(JSON\.stringify\(({.+?})\)\);', webpage, 'video object'), display_id):
+    - Extracts a JSON payload embedded in the page that contains video information.
+  - video_source = video['VideoSource']: URL-like string pointing to the video resource (often contains an index path).
+  - video_id = self._search_regex(r'/([\da-z]+)/index\b', video_source, 'video id'): extracts a short video identifier from the VideoSource URL.
+  - formats = self._extract_m3u8_formats(video_source + '.m3u8', video_id, 'mp4', 'm3u8_native'):
+    - Builds available streaming formats from the derived HLS manifest. Uses video_id as the format id, and assumes MP4 container for the formats.
+  - self._sort_formats(formats): sorts formats by quality/priority.
+
+- Subtitles
+  - Iterates over video.get('Subtitles') (or an empty dict) to collect subtitle URLs by language.
+  - If a subtitle entry has a Url, it is added to subtitles with language key (defaulting to 'cz' if Language is missing).
+
+- EntityCounts helper
+  - entity_counts = video.get('EntityCounts') or {}
+  - get_count(k): local helper to fetch counts for a key (e.g., 'View', 'Like', 'Dislike', 'Comment') by looking up k + 's' in EntityCounts and extracting either 'Count' or 'StrCount' as integer.
+
+- Additional info via JSON-LD
+  - info = self._search_json_ld(webpage, video_id, default={}): tries to enrich metadata from JSON-LD if present.
+
+- Return dictionary
+  - Base fields:
+    - id: video_id
+    - display_id: display_id
+    - title: video.get('Title')
+    - description: clean_html(video.get('Description'))
+    - thumbnail: video.get('ThumbnailUrl')
+    - formats: formats
+    - subtitles: subtitles
+    - duration: int_or_none(video.get('DurationSeconds')) or parse_duration(video.get('Duration'))
+    - view_count: get_count('View')
+    - like_count: get_count('Like')
+    - dislike_count: get_count('Dislike')
+    - average_rating: float_or_none(try_get(video, lambda x: x['EntityRating']['AvarageRate']))
+    - comment_count: get_count('Comment')
+  - Merges the above with any additional info from JSON-LD (info)
+
+Important implementation details
+- URL handling:
+  - _VALID_URL allows both mall.tv and sk.mall.tv, with optional www/sk subdomains, capturing the last path segment as the id/display_id.
+- Video data extraction:
+  - Video data is located inside a JavaScript snippet containing JSON: videoObject = JSON.parse(JSON.stringify({...}));
+  - The code uses a robust regex to extract that JSON, then parses it into a Python dict.
+- Video source and formats:
+  - VideoSource field is used to build an HLS manifest URL by appending .m3u8.
+  - _extract_m3u8_formats(..., 'mp4', 'm3u8_native') is used to fetch HLS formats, and _sort_formats is called to order them.
+- Subtitles:
+  - Subtitles entries are read from video['Subtitles'] and mapped to language keys (default 'cz' if none provided).
+- Counts and metadata:
+  - EntityCounts holds various counters; get_count helper looks up counts using pluralized keys (e.g., 'Views', 'Likes') and returns integers via int_or_none.
+  - Average rating is read from video['EntityRating']['AvarageRate'] (note the misspelling 'AvarageRate') with a safe float conversion.
+  - Duration supports either a numeric DurationSeconds or a textual Duration, parsed via int_or_none or parse_duration respectively.
+- Geo restrictions:
+  - geo_verification_headers() are included in _download_webpage to handle region-restricted content if needed.
+- Metadata enrichment:
+  - _search_json_ld(webpage, video_id, default={}) allows merging additional metadata from JSON-LD blocks into the final info dict.
+
+What you get from extraction
+- A complete information dictionary for a Mall.TV video, including:
+  - ID and display_id
+  - Title, description, and thumbnail
+  - A list of available streaming formats (derived from the M3U8 manifest)
+  - Subtitles by language
+  - Duration (seconds or parsed from a human-friendly duration)
+  - View/like/dislike/comment counts
+  - Average user rating (if available)
+  - Additional metadata from JSON-LD (merged into the final dict)
+
+Notes
+- The extractor relies on the presence of a specific JavaScript-embedded JSON structure (videoObject) and on a VideoSource URL that can be extended with .m3u8 to obtain the HLS manifest.
+- It handles potential missing fields gracefully via utilities like int_or_none, parse_duration, dict_get, and try_get.

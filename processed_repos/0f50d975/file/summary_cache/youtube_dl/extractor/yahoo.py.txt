@@ -1,0 +1,98 @@
+Here is a concise, comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/yahoo.py.
+
+Overview
+- This module adds multiple extractors to youtube-dl for Yahoo services, including Yahoo Screen/movies, Yahoo GyaO, and Yahoo Japan News. It handles both direct video pages and embedded/video API metadata, geo restrictions, and various delivery formats (HLS, MP4/WebM, Brightcove embeds).
+
+Main classes and their responsibilities
+1) YahooIE (InfoExtractor)
+   - Purpose: Core extractor for Yahoo Screen and Yahoo Movies video pages (screen.yahoo.com, etc.).
+   - URL pattern: _VALID_URL matches Yahoo video pages and embedded variations across countries and paths.
+   - Key method: _real_extract
+     - Resolves the page to content metadata via a content API (https://<country>.yahoo.com/caas/content/article) to get item data.
+     - If the item type is not a video, it assembles a playlist from related video entries (covers, iframes, etc.) or returns a playlist of embedded entries.
+     - If the item is a video, delegates to _extract_yahoo_video for actual video metadata and formats.
+   - Key helper: _extract_yahoo_video(video_id, country)
+     - Fetches video metadata from Yahoo VideoService API to obtain title, live state, and available streams.
+     - Determines formats based on live state: live videos use m3u8 (HLS) primarily; non-live use webm/mp4 formats.
+     - Fetches media streams via video-api.yql.yahoo.com for each format, constructing:
+       - Direct video formats (with url, format_id, width, height, tbr, fps)
+       - HLS formats via _extract_m3u8_formats when format is m3u8
+       - Subtitles from media_obj.closedcaptions
+     - Adds streaming_url (if present) as additional formats (HLS as needed).
+     - Handles geo restriction: raises geo-restricted if metadata indicates geo restriction and no formats were collected.
+     - Collects thumbnails, duration, timestamp, view count, and series/season/episode information when available.
+     - Returns a dict with id, title (live titles use _live_title), formats, thumbnails, description, timestamp, subtitles, duration, view_count, is_live, series, season_number, episode_number.
+
+2) YahooSearchIE (SearchInfoExtractor)
+   - Purpose: Yahoo Screen search results extractor.
+   - Constants: _MAX_RESULTS = 1000, IE_NAME = 'screen.yahoo:search', _SEARCH_KEY = 'yvsearch'
+   - Key method: _get_n_results(query, n)
+     - Iterates over search result pages by constructing a Yahoo video search URL and downloading a JSON result.
+     - Extracts video page URLs from the results using a regex that matches screen.yahoo.com pages ending in -.html.
+     - Builds a playlist-like result with entries pointing to Yahoo pages via url_result.
+     - Stops when the desired number of results is reached or when results are exhausted.
+
+3) YahooGyaOPlayerIE (InfoExtractor)
+   - Purpose: Player page extractor for Yahoo GyaO videos (the Brightcove-based player).
+   - URL pattern: _VALID_URL matches gyao.yahoo.co.jp player/episode URLs and related streaming paths.
+   - Key method: _real_extract
+     - Converts video_id to a form suitable for API (replacing / with :)
+     - Calls a Yahoo GyaO GraphQL API (https://gyao.yahoo.co.jp/apis/playback/graphql) with a content query to retrieve delivery id and title.
+     - If content is not available due to geolocation, raises geo_restricted for JP.
+     - Returns a url_transparent pointing to Brightcove player URL with the delivery id, wrapped via smuggle_url to enforce JP geo restriction, and sets ie_key to BrightcoveNewIE.ie_key() so the actual media is handled by BrightcoveNewIE.
+
+4) YahooGyaOIE (InfoExtractor)
+   - Purpose: Yahoo GyaO program pages that list multiple videos (p, title pages, etc.).
+   - URL pattern: _VALID_URL matches gyao.yahoo.co.jp video/program pages.
+   - Key method: _real_extract
+     - Fetches program videos from https://gyao.yahoo.co.jp/api/programs/{program_id}/videos
+     - For each video in the list, creates a playlist entry pointing to the corresponding Brightcove/Yahoo GyaO video page via YahooGyaOPlayerIE (ie_key()).
+     - Returns a playlist of these entries with the program_id as the playlist id.
+
+5) YahooJapanNewsIE (InfoExtractor)
+   - Purpose: Yahoo! Japan News video extractor (news.yahoo.co.jp, headlines.yahoo.co.jp, etc.).
+   - URL pattern: _VALID_URL matches Yahoo News host pages and related videonews paths; GEO restricted to JP.
+   - _extract_formats(json_data, content_id)
+     - Extracts video formats from Yahoo’s feapi-yvpub API response:
+       - Reads ResultSet.Result[0].VideoUrlSet.VideoUrl entries.
+       - For each entry:
+         - If delivery is 'hls', builds formats via _extract_m3u8_formats (HLS).
+         - Otherwise, adds a direct HTTP format with bitrate as tbr, and width/height if provided.
+       - Deduplicates and sorts formats.
+   - _real_extract(url)
+     - Downloads the page, extracts title from og:title or <title>.
+     - If the URL is a Brightcove playlist page (display_id equals host), extracts plist IDs from the page and builds Brightcove player entries (via BrightcoveNewIE) with geo JP wrapped using smuggle_url to enforce JP restriction.
+     - If the page is an article page:
+       - Extracts description and thumbnail.
+       - Attempts to locate space_id and content_id via several regexes in the page.
+       - Requests JSON from https://feapi-yvpub.yahooapis.jp/v1/content/{content_id} with parameters including space_id, domain, an MD5-derived ak key, and device_type.
+       - Builds formats via _extract_formats and returns a dict with id, title, description, thumbnail, and formats.
+
+Important implementation details
+- Geo handling:
+  - Uses geo_verification_headers() to request region-specific data.
+  - For Malaysia, country is normalized to my in _extract_yahoo_video.
+  - If content is geo-restricted, raises geo_restricted(), and for certain Yahoo GyaO cases can specify JP as required.
+  - Brightcove-based exports use smuggle_url to enforce geo restrictions (JP) on the embedded player URL.
+
+- Format handling:
+  - Distinguishes between live streams (HLS m3u8) and on-demand streams (webm/mp4).
+  - Builds format dictionaries with fields like url, format_id, width, height, tbr (bitrate), fps.
+  - Uses _extract_m3u8_formats for HLS, with fatal set to False where appropriate.
+  - Uses _remove_duplicate_formats and _sort_formats to normalize and order formats.
+
+- Metadata extraction:
+  - Timestamps parsed via parse_iso8601.
+  - Descriptions cleaned with clean_html.
+  - Thumbnails collected from video data or og:image metadata.
+  - Subtitles collected from media_obj.closedcaptions with language mapping and ext inferred from content_type.
+
+- Brightcove integration:
+  - Yahoo GyaO uses BrightcoveNewIE via a url_transparent result, enabling Brightcove to play the actual video. The video URL is wrapped with geo restrictions where appropriate.
+
+- Test coverage:
+  - The file includes a comprehensive _TESTS section for YahooIE, YahooGyaOPlayerIE, YahooGyaOIE, and YahooJapanNewsIE, covering live vs non-live, geo restrictions, embedded content, and playlists.
+
+In short
+- This module implements a suite of Yahoo-related extractors: main Yahoo Screen/Movies (YahooIE), Yahoo Screen search (YahooSearchIE), Yahoo GyaO (player and program views: YahooGyaOPlayerIE, YahooGyaOIE), and Yahoo Japan News (YahooJapanNewsIE).
+- It handles multiple delivery formats (HLS, MP4/WebM), live streams, geo restrictions, and Brightcove-based embeds, returning structured metadata and media formats suitable for downstream playback.

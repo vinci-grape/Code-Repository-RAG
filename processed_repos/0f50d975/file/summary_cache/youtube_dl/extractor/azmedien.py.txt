@@ -1,0 +1,44 @@
+Here's a concise, comprehensive summary of the AZMedien extractor code.
+
+What it does
+- Implements an InfoExtractor (AZMedienIE) for AZ Medien network videos (telezueri.ch, telebaern.tv, telem1.ch).
+- Resolves a page URL to a Kaltura video ID and delegates to the Kaltura extractor to download or provide metadata.
+- If the URL contains a fragment like #video=..., it uses that Kaltura ID directly.
+- If the fragment is not present, it queries a GraphQL API to obtain the Kaltura ID based on the article ID, then builds a Kaltura URL using the partner ID.
+
+Key classes, functions, and flow
+- AZMedienIE (subclass of InfoExtractor)
+  - IE_DESC: “AZ Medien videos”
+  - _VALID_URL: Regular expression (verbose mode) that matches:
+    - Host: telezueri.ch, telebaern.tv, or telem1.ch
+    - Path containing an article slug with an article_id
+    - Optional fragment #video=<kaltura_id> to directly specify the Kaltura entry
+    - Captures: host, id (slug), article_id, kaltura_id (optional)
+  - _TESTS: Examples for testing
+    - First test uses a real article URL with expected info (id, ext, title, uploader_id, upload_date, timestamp) and skip_download
+    - Second test checks only_matching behavior with a video fragment
+  - _API_TEMPL: Template URL for a GraphQL endpoint:
+    https://www.<host>/api/pub/gql/<subdomain>/NewsArticleTeaser/...
+  - _PARTNER_ID: The Kaltura partner ID to be used when constructing the final Kaltura URL (e.g., '1719221')
+  - _real_extract(self, url):
+    - Parses URL with _VALID_URL to obtain host, display_id, article_id, entry_id (kaltura_id)
+    - If entry_id is not present:
+      - Calls the GraphQL API using _download_json with:
+        - URL: _API_TEMPL % (host, host.split('.')[0])
+        - query: JSON-encoded variables with contextId = 'NewsArticle:' + article_id
+      - Extracts the Kaltura ID from the response path: data.context.mainAsset.video.kaltura.kalturaId
+    - Returns a URL result pointing to the Kaltura extractor:
+      - URL: 'kaltura:<PARTNER_ID>:<entry_id>'
+      - ie: KalturaIE.ie_key()
+      - video_id: entry_id
+
+Important implementation details
+- URL parsing relies on a structured capture of host, article_id, and an optional kaltura_id from the fragment.
+- When the fragment is present (#video=...), the extractor bypasses the GraphQL lookup and uses that Kaltura entry directly, which can be faster and more reliable for pages that embed a known Kaltura video.
+- When the fragment is absent, the extractor performs a GraphQL query to fetch the Kaltura ID based on the article_id, using:
+  - contextId = 'NewsArticle:' + article_id
+  - Endpoint derived from the host (host and its subdomain part)
+- The final video extraction is delegated to the Kaltura extractor (KalturaIE), using the partner ID and the Kaltura entry ID.
+- The information returned for cases with the fragment relies on KalturaIE to populate fields like title, uploader_id, upload_date, and timestamp, as per the test expectations.
+
+Overall, this extractor bridges AZ Medien article pages to Kaltura entries, using either an embedded video ID directly from the URL or a GraphQL lookup to retrieve the corresponding Kaltura ID, and then defers the actual download/metadata extraction to the Kaltura extractor.

@@ -1,0 +1,53 @@
+Summary:
+This file implements an AWS request signer for youtube-dl's AWS-based extractor. It constructs and signs an AWS Signature Version 4 request (SigV4) to call an AWS API Gateway endpoint, then fetches and returns the JSON response.
+
+Main components:
+- AWSIE class (subclass of InfoExtractor)
+  - Constants:
+    - _AWS_ALGORITHM = "AWS4-HMAC-SHA256"
+    - _AWS_REGION = "us-east-1"
+  - _aws_execute_api(self, aws_dict, video_id, query=None)
+    - Purpose: sign and execute a GET request to an AWS API Gateway endpoint using SigV4 and return the JSON response.
+    - Parameters:
+      - aws_dict: dict containing required keys (at least 'uri', 'access_key', 'secret_key', optional 'session_token')
+      - video_id: identifier used for the downloader
+      - query: optional dict of query parameters (default empty)
+    - How it works (high level):
+      1) Prepare headers and dates:
+         - amz_date = current UTC time in YYYYMMDD'T'HHMMSS'Z'
+         - date = first 8 chars of amz_date (YYYYMMDD)
+         - Headers include Accept, Host (self._AWS_PROXY_HOST), X-Amz-Date, X-Api-Key (self._AWS_API_KEY)
+         - If session_token present in aws_dict, include X-Amz-Security-Token
+      2) Build canonical request (SigV4 step 1):
+         - Canonical querystring from query (URL-encoded and sorted)
+         - Canonical headers: lower-cased header names with their values, each ending with newline
+         - SignedHeaders: semicolon-separated list of lower-cased header names
+         - Canonical request string composed of: GET, aws_dict['uri'], canonical_querystring, canonical_headers, signed_headers, and payload hash (hash of empty string)
+      3) Build string to sign (SigV4 step 2):
+         - credential_scope = date / region / execute-api / aws4_request
+         - string_to_sign = algorithm, amz_date, credential_scope, hash of canonical_request
+      4) Compute signing key and signature (SigV4 step 3):
+         - signing key derived by successive HMAC-SHA256 operations over the credential scope values starting with "AWS4" + secret_key
+         - signature = hex HMAC-SHA256 of string_to_sign using the derived signing key
+      5) Add Authorization header (SigV4 step 4):
+         - Authorization: AWS4-HMAC-SHA256 Credential=ACCESS_KEY/credential_scope, SignedHeaders=..., Signature=...
+      6) Execute the request:
+         - URL: https://{self._AWS_PROXY_HOST}{uri}?{canonical_querystring} (omit '?' if no query)
+         - Use _download_json with video_id and the prepared headers
+    - Returns: JSON data from the AWS API response
+
+Key implementation details:
+- Time-based signing: uses UTC time for amz_date and credential scope.
+- Canonical request formation strictly follows AWS SigV4 rules:
+  - GET method, path from aws_dict['uri'], sorted canonical querystring, canonical headers with lowercase header names, and hashed payload (empty string).
+  - SignedHeaders includes all header names that were included in the canonical request.
+- Signing key derivation begins with "AWS4" + secret_key (as bytes) and iterates over the credential scope values (date, region, service, 'aws4_request').
+- Authorization header is constructed explicitly with Credential, SignedHeaders, and Signature.
+- The request uses:
+  - Host = self._AWS_PROXY_HOST
+  - X-Api-Key = self._AWS_API_KEY
+  - Optional X-Amz-Security-Token if provided
+- Query string handling via compat_urllib_parse_urlencode to ensure proper encoding and sorting.
+
+Use case:
+- This enables youtube-dl extractors to access AWS-hosted endpoints protected by API keys and SigV4 authentication by programmatically signing requests to AWS API Gateway. The function is intended to be invoked by higher-level AWS-related extractors that supply aws_dict (with access_key, secret_key, etc.) and the target URI.

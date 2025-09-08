@@ -1,0 +1,30 @@
+Concise but comprehensive summary of the file:
+
+- Purpose
+  - A lightweight extractor (FiveMinIE) for 5min.com / Vidible / AOL video URLs that delegates actual extraction to the AOL “aol-video” extractor.
+
+- Class and registration
+  - Class: FiveMinIE(InfoExtractor)
+  - IE_NAME: '5min'
+  - _VALID_URL: Complex regex that matches:
+    - 5min: prefix or URLs on 5min.com or delivery.vidible.tv/aol
+    - Optional seed/player container paths (Scripts/PlayerSeed.js or playerseed/) with an optional playList query
+    - A trailing numeric video id captured as (?P<id>\d+)
+
+- Core functionality
+  - _real_extract(self, url)
+    - Extracts video_id using self._match_id(url)
+    - Returns a URL result pointing to the AOL video extractor: 'aol-video:<video_id>'
+    - No direct metadata extraction is performed here; it relies on the aol-video extractor for actual data
+
+- Tests
+  - _TESTS includes several scenarios:
+    - A 5min seed URL with playList parameter, expecting metadata (id, ext, title, description, duration, uploader, upload_date, timestamp) and an mp4 output; uses skip_download to request m3u8 download handling.
+    - A shorthand 5min:ID URL, expecting id, ext, title, and duration; includes a skip note indicating the video may no longer be available.
+    - Two cases marked only_matching (embed.5min.com and delivery.vidible.tv/aol with playList) to verify URL matching without full extraction.
+
+- Implementation notes
+  - The extractor is a thin wrapper that simply translates a 5min/Vidible URL into an aol-video URL by embedding the numeric id: self.url_result('aol-video:%s' % video_id)
+  - Regex-driven id extraction is centralized via _match_id, enabling consistent forwarding to the central AOL extractor.
+
+In short, FiveMinIE serves as a compatibility layer to handle 5min/Vidible URLs and reuse the existing aol-video extraction flow for actual metadata and media URL retrieval.

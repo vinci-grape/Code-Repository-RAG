@@ -1,0 +1,92 @@
+Concise summary of ./youtube-dl/youtube_dl/socks.py
+
+Purpose
+- Implement a public-domain SOCKS proxy client with support for SOCKS4, SOCKS4A, and SOCKS5 (including optional username/password authentication).
+- Provide a drop-in proxy-capable socket class for use by higher-level code (e.g., youtube-dl).
+
+Key components
+- Constants and protocol enums
+  - SOCKS4_VERSION, SOCKS4_REPLY_VERSION, SOCKS4_DEFAULT_DSTIP (0.0.0.255 as per SOCKS4A)
+  - SOCKS5_VERSION, SOCKS5_USER_AUTH_VERSION, SOCKS5_USER_AUTH_SUCCESS
+  - Socks4Command (CMD_CONNECT, CMD_BIND)
+  - Socks5Command (extends CMDs with CMD_UDP_ASSOCIATE)
+  - Socks5Auth (AUTH_NONE, AUTH_GSSAPI, AUTH_USER_PASS, AUTH_NO_ACCEPTABLE)
+  - Socks5AddressType (ATYP_IPV4, ATYP_DOMAINNAME, ATYP_IPV6)
+
+- Errors
+  - ProxyError: base socket.error with optional mapped error messages (CODES dict)
+  - InvalidVersionError: raised when proxy replies with an unexpected version
+  - Socks4Error: with common SOCKS4 error codes (91–93)
+  - Socks5Error: with SOCKS5 error codes (0x01–0x08, 0xFE, 0xFF)
+
+- Proxy descriptor
+  - ProxyType: SOCKS4, SOCKS4A, SOCKS5
+  - Proxy: namedtuple(type, host, port, username, password, remote_dns)
+
+- sockssocket class (subclass of socket.socket)
+  - setproxy(proxytype, addr, port, rdns=True, username=None, password=None)
+    - Configures remote DNS behavior (rdns) and credentials.
+  - connect/address methods
+    - connect(address) and connect_ex(address) delegate to a common _make_proxy flow.
+    - _make_proxy(connect_func, address): if no proxy, perform direct connect. If a proxy is configured, first attempt to connect to the proxy host:port; on success, perform the SOCKS handshake appropriate to the proxy type and final destination address.
+      - For connect_ex, it returns an error code if the proxy connect to the proxy fails; on success (0) it proceeds with the SOCKS handshake.
+
+Core handshake/setup methods
+- _resolve_address(destaddr, default, use_remote_dns)
+  - Try IPv4; if that fails and use_remote_dns is allowed (e.g., SOCKS4A), optionally return a default (0.0.0.255) so the server performs DNS resolution. Otherwise resolve locally via DNS.
+
+- SOCKS4 family
+  - _setup_socks4(address, is_4a=False)
+    - address: (destaddr, port)
+    - IP address selection: _resolve_address(..., default=SOCKS4_DEFAULT_DSTIP, use_remote_dns=is_4a)
+    - Build request: version (4), CMD_CONNECT, port, IP
+    - Append user ID + null terminator; for SOCKS4A (is_4a) with remote DNS enabled, append domain name + null terminator after user.
+    - Send request; read 8-byte reply: version, reply_code, dstport, dsthost
+    - Validate version; raise Socks4Error on non-success; return (dsthost, dstport)
+
+  - _setup_socks4a(address) is a thin wrapper around _setup_socks4 with is_4a=True
+
+- SOCKS5 protocol
+  - _socks5_auth()
+    - Negotiates authentication methods: always advertise AUTH_NONE; if username/password provided, include AUTH_USER_PASS
+    - Send: [SOCKS5_VERSION, NMETHODS, METHODS...]
+    - Receive: [version, method]
+    - Validate version; if NO_ACCEPTABLE or USER_PASS without creds, raise Socks5Error(AUTH_NO_ACCEPTABLE)
+    - If USER_PASS chosen: perform username/password sub-authentication per RFC: send [version=1, ULEN, UNAME, PLEN, PASSWD]; receive [version, status]; validate, raise on failure
+
+  - _setup_socks5(address)
+    - address: (destaddr, port)
+    - ipaddr = _resolve_address(destaddr, default=None, use_remote_dns=True)
+      - If ipaddr is None, destination is a domain name: ATYP_DOMAINNAME with length+data
+      - Else use ATYP_IPV4 with ipaddr
+    - Run _socks5_auth()
+    - Build connect request: [SOCKS5_VERSION, CMD_CONNECT, RSV=0], then address type + address bytes, then port
+    - Send; read reply: [version, status, reserved, atype]
+    - Validate version and status
+    - Read bound address according to atype (IPv4/DOMAINNAME/IPv6) and port; return (destaddr, destport)
+
+- _make_proxy flow
+  - If no proxy configured, perform the original connect through the socket
+  - If a proxy is configured:
+    - Attempt to connect to the proxy host:port using connect_ex (via connect/ex wrapper)
+    - If the initial connect to the proxy fails, abort and return the error code
+    - If the initial connect succeeds (connect_ex returns 0, or connect returns None), perform the appropriate SOCKS handshake via the mapping:
+      - ProxyType.SOCKS4 -> _setup_socks4
+      - ProxyType.SOCKS4A -> _setup_socks4a
+      - ProxyType.SOCKS5 -> _setup_socks5
+
+Important implementation details
+- Compatibility helpers: uses compat_struct_pack/unpack and compat_ord for portable byte handling.
+- SOCKS4A handling: supports domain name transfer to server when remote DNS is enabled and you’re using SOCKS4A (ip set to 0.0.0.255 with the domain appended).
+- DNS handling strategy:
+  - SOCKS4: can either pass through domain (SOCKS4A mode) or resolve locally, controlled by remote_dns flag and address type.
+  - SOCKS5: generally resolves domain either on client or server depending on IP address availability; remote DNS is used for the domain-name path.
+- Error handling: specific exceptions for protocol violations and server error codes with helpful messages.
+- API surface is focused and compact:
+  - ProxyType enum-like class
+  - Proxy namedtuple
+  - sockssocket with setproxy, connect, connect_ex
+
+Use case context
+- Designed to work with components that need SOCKS proxy support (e.g., youtube-dl) by providing a socket subclass that transparently handles SOCKS handshake when a proxy is configured.
+- Allows different proxy types and optional authentication/remote-DNS behavior to be configured per connection.

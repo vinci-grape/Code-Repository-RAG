@@ -1,0 +1,73 @@
+Concise summary of RoosterTeeth extractor (youtube_dl/youtube_dl/extractor/roosterteeth.py)
+
+Overview
+- This extractor handles Rooster Teeth video pages on roosterteeth.com, including episode and watch URLs.
+- It supports logging in (for FIRST members) to access restricted content and then retrieves video formats and episode metadata.
+
+Key components
+- Class: RoosterTeethIE(InfoExtractor)
+- Constants:
+  - _VALID_URL: Regex matching roosterteeth.com episode or watch pages and capturing an id (display_id).
+  - _EPISODE_BASE_URL: Base API URL for episode data: https://svod-be.roosterteeth.com/api/v1/episodes/
+  - _NETRC_MACHINE: 'roosterteeth' for stored credentials (if used)
+  - _TESTS: Examples/tests including a public episode and FIRST-member restricted cases
+- Core methods:
+  - _login(self): Performs OAuth password grant login to https://auth.roosterteeth.com/oauth/token using a hardcoded client_id, with username/password from _get_login_info(). Handles 401 by parsing error responses and issuing a warning instead of failing hard.
+  - _real_initialize(self): Ensures login is performed if there is no rt_access_token cookie already set for the episode API domain.
+  - _real_extract(self, url): Main extraction logic
+    - Extracts display_id from URL.
+    - Builds API endpoint for the episode: api_episode_url = _EPISODE_BASE_URL + display_id
+    - Fetches video metadata JSON at api_episode_url/videos to obtain the m3u8 URL from data[0].attributes.url
+    - If a 403 occurs, checks access via the error payload; if access is explicitly False, raises login_required (FIRST member restriction)
+    - Downloads and parses HLS formats via _extract_m3u8_formats(m3u8_url, display_id, 'mp4', 'm3u8_native', m3u8_id='hls')
+    - Sorts formats with _sort_formats
+    - Fetches episode metadata at api_episode_url to collect details
+      - title: prefer attributes.title, fallback to attributes.display_title
+      - description: attributes.description or attributes.caption
+      - series: attributes.show_title
+      - season_number, episode_number: int using int_or_none
+      - episode_id: episode.uuid (string) via str_or_none
+      - thumbnails: build from episode.included.images where type == 'episode_image'; collect thumb/small/medium/large if present
+      - duration: int from attributes.length
+      - other fields: channel_id, season_id, video id, etc.
+    - Returns a dictionary with:
+      - id (video_id)
+      - display_id
+      - title
+      - description
+      - thumbnails
+      - series
+      - season_number
+      - season_id
+      - episode
+      - episode_number
+      - episode_id
+      - formats
+      - channel_id
+      - duration
+
+Important implementation details
+- Authentication flow:
+  - _login posts to https://auth.roosterteeth.com/oauth/token with a fixed client_id and grant_type=password, plus provided username/password.
+  - On 401, attempts to read a JSON error message and warns instead of failing the parse, allowing access via cookies if possible.
+- Access handling:
+  - If the API returns 403, it checks the JSON payload for access; if access is False, it raises login_required for FIRST-members-only content.
+- Data extraction nuances:
+  - Title selection prefers episode attributes.title, with a fallback to attributes.display_title.
+  - Description uses attributes.description or attributes.caption.
+  - Thumbnails are discovered by scanning episode.included.images for type 'episode_image' and collecting multiple sizes (thumb, small, medium, large) with ids.
+  - Date/season/episode fields are normalized via helper int_or_none/str_or_none.
+- Media formats:
+  - m3u8 video URLs are resolved via the /videos endpoint and parsed into multiple formats using _extract_m3u8_formats with m3u8_id='hls' and native HLS parsing.
+  - Formats are sorted for prioritized playback.
+- Robustness:
+  - Handles both public and FIRST-member content, with login as needed.
+  - Uses _download_json for JSON retrieval and proper error handling via ExtractorError and compat_HTTPError.
+  - Caches login state via cookies to avoid repeated logins during a session.
+
+Usage flow
+- User provides a Rooster Teeth episode URL.
+- Extractor checks login state; if required, performs login.
+- Retrieves video m3u8 URL and derives playable formats.
+- Fetches episode metadata (title, description, series, season/episode numbers, thumbnails, duration, IDs).
+- Returns a consolidated info dict suitable for youtube-dl playback and metadata display.

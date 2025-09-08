@@ -1,0 +1,72 @@
+Overview
+- This is a FIFA extractor (FifaIE) for youtube-dl (or fork). It handles FIFA+ watch pages under www.fifa.com/fifaplus/... and returns video metadata plus downloadable formats.
+- It includes a compatibility shim to ensure _match_valid_url exists on InfoExtractor in older environments.
+
+Key components
+- Class FifaIE(InfoExtractor)
+  - _VALID_URL: Regex to match FIFA+ watch URLs and capture locale (two-letter) and id.
+  - _TESTS: Three sample URLs with expected info_dict results (title, description, duration, thumbnail, categories, release info, etc.) and an instruction to skip m3u8 downloads in tests.
+
+- Compatibility wrapper (optional)
+  - If InfoExtractor lacks _match_valid_url, a small subclassing shim is installed to provide one using the class’s _VALID_URL.
+
+Main workflow (_real_extract)
+1) URL parsing
+   - Extract video_id and locale from the URL using _match_valid_url.
+
+2) Page fetch
+   - Download the main webpage for the video_id.
+
+3) Retrieve preconnect base
+   - Parse the webpage to find a preconnect link: <link rel="preconnect" href="...">. This becomes the base URL for subsequent API calls.
+
+4) Fetch video details (optional)
+   - Request preconnect_link/sections/videoDetails/{video_id} to get video metadata (title, description, duration, dateOfRelease, categories, backgroundImage, etc.).
+   - This request uses fatal=False, so if it fails, extraction can continue with available data.
+
+5) Fetch preplay data
+   - Request preconnect_link/videoPlayerData/{video_id} to obtain preplayParameters, from which:
+     - contentId
+     - queryStr
+     - signature
+   - These parameters are used to fetch the actual content manifest.
+
+6) Fetch content data (Uplynk)
+   - Build a URL to Uplynk content: https://content.uplynk.com/preplay/{contentId}/multiple.json?{queryStr}&sig={signature}
+   - Download the JSON to obtain content_data, notably content_data['playURL'] which points to the media manifest.
+
+7) Extract formats
+   - Use _extract_m3u8_formats on content_data['playURL'] with:
+     - video_id as the id
+     - ext='mp4'
+     - entry_protocol='m3u8_native'
+   - Set subtitles to None initially.
+   - Sort formats with _sort_formats(formats).
+
+8) Build result dictionary
+   - id: video_id
+   - title: video_details['title']
+   - description: video_details.get('description')
+   - duration: int_or_none(video_details.get('duration'))
+   - release_timestamp: unified_timestamp(video_details.get('dateOfRelease'))
+   - categories: traverse_obj(video_details, (('videoCategory','videoSubcategory'),))
+   - thumbnail: traverse_obj(video_details, ('backgroundImage','src'))
+   - formats: formats
+   - subtitles: subtitles (None)
+
+Important implementation details
+- Data extraction helpers:
+  - int_or_none: converts numeric strings to integers safely.
+  - unified_timestamp: converts release date to a UNIX timestamp.
+  - traverse_obj: safely navigates nested dicts/lists to fetch fields (used for categories and thumbnail).
+- Flexibility with preconnect:
+  - The preconnect link serves as the base for subsequent API calls (videoDetails and videoPlayerData). This mirrors how the site structures its API endpoints.
+- Robustness:
+  - videoDetails fetch is optional (fatal=False) to avoid hard failure if that endpoint is temporarily unavailable; metadata may still be recovered from other fields.
+- Formats:
+  - The extractor relies on an HLS/MP4 manifest hosted at playURL, extracting formats via _extract_m3u8_formats with m3u8_native protocol support.
+- Metadata coverage:
+  - Title, description, duration, release date (timestamp), categories (videoCategory and/or videoSubcategory), and thumbnail are populated when available from the fetched JSON data.
+
+Summary
+- FifaIE is a dedicated extractor for FIFA+, using a two-step API flow rooted at a preconnect URL to retrieve video details and preplay parameters, then fetching a content manifest from Uplynk to obtain playable formats. It builds a complete info_dict with standard metadata and the available video formats, applying sensible fallbacks and type conversions.

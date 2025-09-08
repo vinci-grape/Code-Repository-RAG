@@ -1,0 +1,89 @@
+Summary of the code in ./youtube-dl/youtube_dl/extractor/americastestkitchen.py
+
+Overview
+- This module provides two extractors for America’s Test Kitchen sites (atk, cooks country, cooks illustrated):
+  - AmericasTestKitchenIE: extracts individual episodes/videos and defers to a Zype player for the actual streaming.
+  - AmericasTestKitchenSeasonIE: builds playlists (season/series pages) by querying Algolia and listing individual episode pages that link back to AmericasTestKitchenIE.
+
+Key components
+
+1) AmericasTestKitchenIE (InfoExtractor)
+- Purpose: Retrieve metadata for a single ATK-related video/episode and return a url_transparent entry that points to a Zype embed player.
+- URL matching
+  - _VALID_URL matches:
+    - https://www.americastestkitchen.com/episode/<id>
+    - https://www.americastestkitchen.com/videos/<id>
+    - Similar paths on cooks country / cooks illustrated domains
+  - It captures:
+    - resource_type: episode or videos
+    - id: numeric id
+- Core logic in _real_extract
+  - Determine if the URL is an episode. If so, switch resource_type to 'episodes' to use the API v6 structure.
+  - Fetch API data from https://www.americastestkitchen.com/api/v6/{resource_type}/{video_id}.
+  - For episodes, video = resource['video']; episode = resource. For non-episodes, video = resource and episode = resource.get('episode') or {}.
+  - Build a url_transparent result that points to a Zype embed URL:
+    - URL: https://player.zype.com/embed/{zypeId}.js?api_key=...
+    - ie_key: Zype
+  - Populate metadata from the API:
+    - description: cleaned via clean_html(video.get('description'))
+    - timestamp / release_date: based on publishDate via unified_timestamp and unified_strdate
+    - episode_number: from episode.get('number')
+    - season_number: from episode.get('season')
+    - series: from episode['show']['title'] using try_get
+    - episode: from episode.get('title')
+  - Other details implicitly conveyed by Zype (playback) rather than being stored in the final output.
+- Notable implementation details
+  - Handles differences in older vs newer episode structures by selecting the appropriate part of the API response.
+  - Uses utilities: clean_html, int_or_none, try_get, unified_timestamp, unified_strdate.
+  - The final result is a url_transparent entry, enabling the player to be resolved by the Zype extractor downstream.
+
+2) AmericasTestKitchenSeasonIE (InfoExtractor)
+- Purpose: Build playlists for seasons or series across ATK and its sister sites (Cook’s Country + Cook’s Illustrated) by querying Algolia and listing episode pages.
+- URL matching
+  - _VALID_URL matches various season/episodes browse paths depending on the site, including:
+    - americastestkitchen.com/episodes/browse/season_<n>
+    - cookscountry/episodes/browse/season_<n>
+    - and root/series pages
+- Core logic in _real_extract
+  - Parse matched components to determine:
+    - show slug (atk, cco, cio) and human-friendly title
+    - season_number (if present)
+  - Build facet filters for Algolia search:
+    - Always include: search_document_klass:episode and search_show_slug:<slug>
+    - If a specific season is requested, add search_season_list:Season <n> and set playlist_id/playlist_title accordingly
+  - Query Algolia endpoint:
+    - URL: https://y1fnzxui30-dsn.algolia.net/1/indexes/everest_search_<slug>_season_desc_production
+    - Headers include Origin and Algolia API keys/IDs
+    - Query parameters specify facetFilters, fields to retrieve (description, title, dates, etc.), and hitsPerPage = 1000
+  - Process Algolia results (season_search['hits'])
+    - For each hit with a search_url like '/episode/123-title-of-episode':
+      - Create an entry dict:
+        - _type: 'url'
+        - url: https://www.americastestkitchen.com + show_path + search_url
+        - id: episode objectID suffix after the last underscore
+        - title, description
+        - timestamp: unified_timestamp(search_document_date)
+        - season_number: the resolved season_number
+        - episode_number: int_or_none of search_<slug>_episode_number
+        - ie_key: AmericasTestKitchenIE (so the entry uses the ATK video extractor)
+  - Return a playlist_result with:
+    - entries(): the generator of episode entries
+    - playlist_id: season_<n> or show slug
+    - playlist_title: Season <n> or the series title
+- Notable implementation details
+  - Uses Algolia as a data source to gather episode metadata and URLs, then delegates playback extraction to AmericasTestKitchenIE by setting ie_key accordingly.
+  - Carefully maps slug to slug/title pairs for atk, cco, cio.
+  - Builds a cohesive playlist regardless of whether a specific season is requested or not.
+  - Includes thorough test cases covering ATK seasons, Cook’s Country seasons, and series pages, plus several “only_matching” tests for non-ATK domains.
+
+Key utilities and patterns used
+- _download_json for API/Algolia responses
+- clean_html for sanitizing descriptions
+- int_or_none, unified_timestamp, unified_strdate for date/number normalization
+- try_get for safe nested dictionary access
+- url_transparent with ie_key set to Zype for video playback
+- playlist_result to emit a playlist of episodes with proper IDs and titles
+- Explicit handling of different site domains (americastestkitchen.com, cookscountry.com, cooksillustrated.com)
+
+Main takeaway
+- The module provides two extractors: one to fetch and present individual ATK episodes via a Zype embed, and another to compile season/series playlists by querying Algolia and linking back to the ATK episode pages. It robustly handles variations between older/newer episode data formats and across ATK’s sister sites, producing clean, unified metadata and a playable streaming URL flow.

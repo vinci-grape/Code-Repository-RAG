@@ -1,0 +1,28 @@
+- Purpose: TruNewsIE is a YouTube-DL extractor that maps a TruNews streaming URL to a Zype video and delegates extraction to the Zype extractor.
+
+- Class and inheritance:
+  - TruNewsIE extends InfoExtractor.
+
+- Key attributes:
+  - _VALID_URL: Regex to match TruNews stream pages and capture the video id as display_id.
+  - _TEST: Example test case showing the expected output (id, display_id, ext, title, description, duration, timestamp, upload_date) and that this uses the Zype extractor.
+  - _ZYPE_TEMPL: Template URL for embedding the corresponding Zype player: https://player.zype.com/embed/%s.js?api_key=...
+
+- Main functionality (_real_extract):
+  - Extract display_id from the URL using _match_id.
+  - Fetch Zype video data via API call to https://api.zype.com/videos with query parameters:
+    - app_key: API key (PUVKp9WgGUb3-JUw6EqafLx8tFVP6VKZTWbUOR-HOm__g4fNDt1bCsm_LgYf_k9H)
+    - per_page: 1
+    - active: 'true'
+    - friendly_title: display_id
+  - Parse the response to obtain zype_id from response[0]['_id'].
+  - Return a final URL result pointing to the Zype embed using _ZYPE_TEMPL % zype_id, with the existing Zype extractor as the designated extractor and zype_id as the video id.
+
+- Implementation details:
+  - The extractor does not pull the video directly; it delegates to the Zype extractor after resolving the corresponding Zype video ID.
+  - Uses _download_json to perform the API request and handles JSON structure expecting response[0]['_id'].
+  - The _TEST indicates the final media is an mp4 with metadata provided by Zype (via the Zype extractor).
+
+- Notes:
+  - Contains hard-coded API keys for Zype, implying reliance on external services and potential maintenance if keys change.
+  - The add_ie = ['Zype'] mechanism ensures the final metadata (title, description, duration, etc.) is sourced from the Zype metadata.

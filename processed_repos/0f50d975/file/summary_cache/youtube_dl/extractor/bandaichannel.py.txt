@@ -1,0 +1,38 @@
+- Purpose
+  - A YouTube-DL extractor for Bandai Channel videos that use the Brightcove player. It fetches the Brightcove metadata via Bandai’s playback API and returns a standard info dict using the existing Brightcove extractor machinery.
+
+- Class and inheritance
+  - BandaiChannelIE(BrightcoveNewIE): Inherits from BrightcoveNewIE to leverage Brightcove metadata parsing and format extraction.
+
+- URL matching and tests
+  - _VALID_URL: https://www.b-ch.com/titles/{id}/{id}
+    - Example: https://www.b-ch.com/titles/514/001
+  - _TESTS: Includes a test case with a known URL, expected MP4 format, and metadata such as id, title, timestamp, uploader_id, upload_date, and duration.
+
+- Core functionality (_real_extract)
+  1. Extract video_id from the URL using _match_id.
+  2. Download the page HTML with _download_webpage.
+  3. Locate the Brightcove video element: a <video-js ... id="bcplayer" ...> tag via _search_regex.
+     - Uses the pattern (<video-js[^>]+\bid="bcplayer"[^>]*>).
+  4. Parse attributes from that tag with extract_attributes to obtain:
+     - data-info: identifier used for the playback API
+     - data-auth: API key (trimmed) needed for the request
+  5. Fetch playback information from Bandai’s API:
+     - URL: https://pbifcd.b-ch.com/v1/playbackinfo/ST/70/{data-info}
+     - Headers: X-API-KEY set to the value of data-auth
+     - Method: GET, parse JSON, take the 'bc' field
+  6. Return the result by delegating to Brightcove metadata parsing:
+     - self._parse_brightcove_metadata(bc, bc['id'])
+     - This converts Brightcove metadata into the standard youtube-dl info dictionary (id, title, duration, uploader, etc.).
+
+- Important implementation details
+  - Uses extract_attributes to convert the HTML element attributes into a Python dict, enabling easy access to data-info and data-auth.
+  - The API call is authenticated via the X-API-KEY header sourced from the page’s attributes.
+  - The final metadata is produced through the Brightcove parsing routine provided by BrightcoveNewIE, ensuring consistency with other Brightcove-based extractors.
+  - The video_id extracted from the URL is used for logging/download tracing, but the actual playback is driven by the data-info attribute and the Brightcove metadata returned from the API.
+
+- Data flow
+  - URL -> page HTML -> bcplayer element -> data-info/data-auth -> Bandai playback API -> bc metadata -> official video formats via Brightcove parser -> final info dict.
+
+- Summary
+  - This file implements a targeted extractor for Bandai Channel titles that rely on Brightcove. It retrieves a necessary API key and data-info from the page, queries Bandai’s playback API, and leverages the existing Brightcove parsing logic to produce the final downloadable video information.

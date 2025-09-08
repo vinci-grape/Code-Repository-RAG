@@ -1,0 +1,82 @@
+concise summary
+
+- Purpose
+  - This file provides two extractors for youtube-dl (or similar): one for individual iHeartRadio podcast episodes and one for entire podcasts (playlists of episodes).
+
+- Base helper
+  - IHeartRadioBaseIE(InfoExtractor)
+    - _call_api(self, path, video_id, fatal=True, query=None)
+      - Fetches JSON data from the iHeart API at https://api.iheart.com/api/v3/podcast/ + path using _download_json.
+      - Uses video_id for error context and supports optional query parameters.
+    - _extract_episode(self, episode)
+      - Converts an episode JSON object into a standard info dict with:
+        - thumbnail from imageUrl
+        - description cleaned via clean_html
+        - timestamp from startDate (milliseconds to seconds) using int_or_none(..., 1000)
+        - duration from duration via int_or_none
+
+- Episode extractor
+  - IHeartRadioIE(IHeartRadioBaseIE)
+    - IE name/identifier: IHeart radio episode extractor
+    - _VALID_URL
+      - Accepts either:
+        - A standard iHeart podcast episode URL: https://www.iheart.com/podcast/{podcast}/episode/{display_id}-{id}
+        - Or a URL pattern using iheartradio:{id}
+        - Captures the episode id as id
+    - _TEST
+      - Example test for a real episode with expected id, title, description (md5 checks), timestamp, and upload_date.
+    - _real_extract(self, url)
+      - Extracts episode_id via _match_id(url).
+      - Retrieves episode data from API at episodes/{episode_id}.
+      - Builds an info dict via _extract_episode(episode) and augments it with:
+        - id (episode_id)
+        - title (episode['title'])
+        - url (clean_podcast_url of episode['mediaUrl']) to normalize the media URL
+      - Returns the info dict.
+
+- Podcast (playlist) extractor
+  - IHeartRadioPodcastIE(IHeartRadioBaseIE)
+    - IE name: iheartradio:podcast
+    - _VALID_URL
+      - Accepts podcast pages across iHeart domains (iheart.com or iheartpodcastnetwork.com) with a trailing dash and numeric id: .../podcast/...-<id>/
+    - _TESTS
+      - Test case for a podcast page with id 30717896, including expected playlist title/description and a minimum episode count
+      - A second test using iheartpodcastnetwork.com domain with only_matching
+    - _real_extract(self, url)
+      - podcast_id = matched id from URL
+      - path = 'podcasts/' + podcast_id
+      - Fetches episodes list via path + '/episodes' with a large limit (query={'limit': huge_number})
+      - For each episode entry:
+        - episode_id = str_or_none(episode.get('id'))
+        - If valid, builds an episode info dict via _extract_episode(episode)
+        - Augments info with:
+          - _type: 'url' (to treat as sub-URLs for a playlist)
+          - id: episode_id
+          - title: episode.get('title')
+          - url: 'iheartradio:' + episode_id (linking to the episode extractor)
+          - ie_key: IHeartRadioIE.ie_key() (to route to the episode extractor)
+        - Appends to entries
+      - Fetches podcast metadata via path with fatal=False; defaults to {} if missing
+      - Returns a playlist_result(entries, podcast_id, podcast.get('title'), podcast.get('description'))
+
+Key implementation details
+- API integration
+  - All episode data comes from the iHeart API at https://api.iheart.com/api/v3/podcast/
+  - Episode metadata is enriched with thumbnail, description, timestamp, and duration using a helper method.
+- URL handling and normalization
+  - Episode media URLs are cleaned using clean_podcast_url.
+  - Episode-level info includes a direct url to the media resource.
+  - Podcast-level info constructs a playlist by emitting sub-entries using the episode IDs and routing through the episode extractor (ie_key set to IHeartRadioIE.ie_key()).
+- Data extraction and normalization
+  - Descriptions are sanitized via clean_html.
+  - Timestamps convert startDate from milliseconds to seconds by int_or_none(..., 1000).
+  - Safe handling for missing fields (e.g., skip episodes without an id).
+- Testing
+  - Includes tests for both an episode extraction and a podcast playlist extraction, with expectations on fields like id, title, description, timestamp, and playlist size.
+- Error handling
+  - The podcast extractor uses fatal=False when fetching the podcast metadata to gracefully handle missing podcast metadata.
+
+In short, the file implements an iHeartRadio integration with:
+- A base helper to call the API and normalize episode data.
+- An episode extractor for individual episodes.
+- A podcast extractor to build a playlist of all episodes for a given podcast, linking back to the episode extractor for each item.

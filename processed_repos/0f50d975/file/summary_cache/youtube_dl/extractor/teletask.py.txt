@@ -1,0 +1,39 @@
+Summary of TeleTask extractor (youtube_dl/extractor/teletask.py)
+
+Purpose
+- Extracts video entries from a TeleTask archive page that contains multiple video sources (e.g., speaker and slides) for a single lecture.
+- Returns a playlist of individual video entries, each with its own id, URL, and shared title/upload date.
+
+Key components
+- TeleTaskIE(InfoExtractor): main extractor class.
+- _VALID_URL: Regular expression that matches TeleTask archive pages with the pattern:
+  https://www.tele-task.de/archive/video/html5/<id> (id is numeric and captured).
+- _TEST: Example test case demonstrating a page that yields a playlist with two entries:
+  - IDs: 26168-speaker and 26168-slides
+  - Common title: Duplicate Detection
+  - Upload date: 20141218
+  - Video format ext: mp4 (as per test expectations)
+
+Core logic (_real_extract)
+1. Retrieve lecture_id from the URL using _match_id and download the page.
+2. Extract the page title using a regex on the HTML: itemprop="name">...< /a.
+3. Extract upload_date from a date cell in the page: Date:</td><td>...</td>, then convert to YYYYMMDD with unified_strdate. This extraction is non-fatal (fatal=False), so missing dates won’t crash extraction.
+4. Build the list of video entries by parsing all video sources:
+   - Regex to find pairs from HTML: <video class="CLASS" ...> ... <source src="URL"
+   - For each pair (format_id, video_url), create an entry with:
+     - id: "<lecture_id>-<format_id>"
+     - url: video_url
+     - title: title extracted earlier
+     - upload_date: upload_date (may be None if not found)
+5. Return a playlist_result(entries, lecture_id, title) to expose the set as a multi-video playlist.
+
+Implementation details
+- Video sources are discovered via: r'<video class="([^"]+)"[^>]*>\s*<source src="([^"]+)"'
+  - format_id is taken from the video tag’s class attribute
+  - video_url is taken from the source tag's src attribute
+- Entry IDs are composed by combining the lecture_id and the format_id with a hyphen (e.g., "26168-speaker").
+- All entries share the same title and upload_date; these are derived from the page header and date cell, respectively.
+- The date is normalized to a standard format using unified_strdate for consistency across entries.
+- The code relies on HTML structure of the TeleTask page; changes to the page layout or regex patterns could require updates.
+
+Overall, this extractor efficiently converts a TeleTask page with multiple video formats into a clean playlist of individual video entries, preserving a coherent title and date metadata across all items.

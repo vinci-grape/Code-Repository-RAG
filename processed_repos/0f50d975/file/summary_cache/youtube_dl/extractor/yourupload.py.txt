@@ -1,0 +1,34 @@
+- Purpose: A YouTube-dl extractor for the YourUpload video hosting site that retrieves video metadata and the actual video URL from an embed page.
+
+- Class and inheritance:
+  - YourUploadIE(InfoExtractor): Implements extraction logic for YourUpload.
+
+- URL matching (_VALID_URL):
+  - Supports HTTP/HTTPS.
+  - Accepts www.yourupload.com/watch/<id>, www.yourupload.com/embed/<id>, and embed.yourupload.com/<id>.
+  - Captures the video id as (?P<id>[A-Za-z0-9]+).
+
+- Tests (_TESTS):
+  - Test 1: URL http://yourupload.com/watch/14i14h, expects mp4 extension, id 14i14h, title BigBuckBunny_320x180.mp4, and a JPEG thumbnail URL pattern. Includes an md5 for the video file.
+  - Test 2/3: Embedded URL variants with only_matching=True to ensure URL normalization/workflow without full metadata.
+
+- Core extraction logic (_real_extract):
+  - Extracts video_id using _match_id(url).
+  - Builds embed_url as http://www.yourupload.com/embed/<video_id>.
+  - Downloads the embed page via _download_webpage(embed_url, video_id).
+  - Derives title from Open Graph via _og_search_title(webpage).
+  - Obtains the video URL via _og_search_video_url(webpage) and resolves it with urljoin(embed_url, ...).
+  - Retrieves thumbnail via _og_search_thumbnail(webpage, default=None) (optional).
+  - Returns a dict with:
+    - id: video_id
+    - title: extracted title
+    - url: direct video URL
+    - thumbnail: optional thumbnail URL
+    - http_headers: {'Referer': embed_url} to mimic a request from the embed page (helps with hotlink protection).
+
+- Implementation notes:
+  - Relies on Open Graph metadata present on the embed page for title, video URL, and optionally thumbnail.
+  - Uses urljoin to construct an absolute video URL from a possibly relative OG URL.
+  - Sets the Referer header to the embed page when fetching the video URL, which aligns with common hotlink protection practices.
+
+- File location: ./youtube-dl/youtube_dl/extractor/yourupload.py

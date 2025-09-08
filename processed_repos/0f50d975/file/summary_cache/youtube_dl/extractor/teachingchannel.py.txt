@@ -1,0 +1,31 @@
+Summary:
+
+- Purpose: Implement a YouTube-DL extractor for Teaching Channel video pages. It defers to JWPlatform for actual video retrieval/metadata.
+
+- Location: File youtube-dl/youtube_dl/extractor/teachingchannel.py
+
+- Main class:
+  - TeachingChannelIE(InfoExtractor)
+
+- Key components:
+  - _VALID_URL: Regular expression matching Teaching Channel video URLs
+    - Pattern: https?://(?:www\.)?teachingchannel\.org/videos?/(?P<id>[^/?&#]+)
+    - Accepts /video/ or /videos/ paths and captures an id slug
+  - _TEST: Test case that exercises the extractor
+    - URL: https://www.teachingchannel.org/videos/teacher-teaming-evolution
+    - Expected info_dict includes id (JWPlatform video id) '3swwlzkT', extension 'mp4', title, description (md5), duration, upload_date, timestamp
+    - Params: skip_download, add_ie: ['JWPlatform'] (indicating JWPlatform should be used)
+  - _real_extract(self, url):
+    - display_id = self._match_id(url): extracts the slug from the URL
+    - webpage = self._download_webpage(url, display_id): fetches the page HTML
+    - mid = self._search_regex(pattern, webpage, 'media id'):
+      - Pattern matches either data-mid="..." or id="jw-video-player-..." and captures an 8-character alphanumeric ID
+    - Returns self.url_result('jwplatform:' + mid, 'JWPlatform', mid): delegates to JWPlatform extractor with the found video id
+
+- Implementation details:
+  - The extractor does not parse detailed metadata itself (title, duration, etc.). Instead, it locates the 8-character JWPlatform video ID on the Teaching Channel page and forwards the handling to the JWPlatform extractor.
+  - The _TEST indicates the expected JWPlatform-driven metadata, such as title "A History of Teaming" and a 422-second duration.
+
+- Behavior:
+  - If the 8-character JWPlatform ID cannot be found, extraction will fail.
+  - By returning a JWPlatform URL result, youtube-dl will chain to JWPlatform for actual video retrieval and metadata extraction.

@@ -1,0 +1,67 @@
+Here is a concise but comprehensive summary of the code in ./youtube-dl/youtube_dl/extractor/theweatherchannel.py.
+
+Overview
+- Implements a YouTube-DL extractor for The Weather Channel videos.
+- Class TheWeatherChannelIE inherits from ThePlatformIE and fetches video data from Weather.com’s CMS API, then builds a list of available video formats and metadata.
+
+Main functionality
+- URL matching: Uses _VALID_URL to detect Weather.com video pages and to extract:
+  - asset_name: path segment identifying the assets
+  - locale: optional locale (e.g., en-US, en-CA) or defaults to en-US
+  - id/display_id: the raw video identifier in the URL
+- Data retrieval: Queries Weather.com’s API (redux-dal endpoint) with a JSON-RPC-like payload to obtain CMS asset configuration and video data.
+  - Endpoint: https://weather.com/api/v1/p/redux-dal
+  - Request body: JSON array with a single object { name: 'getCMSAssetsUrlConfig', params: { language, query: { assetName: { $in: asset_name } } } }
+  - Language formatting: locale with '-' replaced by '_' (e.g., en-US -> en_US)
+  - Response handling: Navigates through dal.getCMSAssetsUrlConfig to extract video_data for the asset
+- Metadata extraction:
+  - video_id: video_data['id']
+  - title: video_data['title'] or seo_meta['title']
+  - description: video_data.get('description') or seo_meta.get('description') or seo_meta.get('og:description')
+  - duration: parsed via parse_duration(video_data.get('duration'))
+  - uploader/uploader_id: video_data.get('providername'), video_data.get('providerid')
+  - timestamp: parsed via parse_iso8601(video_data.get('publishdate'))
+  - subtitles: if cc_url exists, provide subtitles with language code locale[:2] and CC URL
+  - thumbnails: collected from variants with extension 'jpg'
+- Formats construction:
+  - Iterates over video_data.get('variants', {}) items (variant_id, variant_url)
+  - Deduplicates and skips empty URLs
+  - Determine extension: determine_ext(variant_url)
+  - If extension is 'jpg': treat as thumbnail
+  - If ThePlatformIE.suitable(variant_url): extract The Platform formats via _extract_theplatform_smil(variant_url, video_id)
+  - If extension is 'm3u8': extract HLS formats via _extract_m3u8_formats(variant_url, video_id, 'mp4', 'm3u8_native', m3u8_id=variant_id, fatal=False)
+  - If extension is 'f4m': extract Flash (Adobe HDS) formats via _extract_f4m_formats(variant_url, video_id, f4m_id=variant_id, fatal=False)
+  - Else: fallback to a simple format dictionary with 'url' and 'format_id'
+  - All formats are collected and sorted with _sort_formats
+- Output: Returns a dict containing
+  - id: video_id
+  - display_id: display_id (from URL)
+  - title, description, duration
+  - uploader and uploader_id
+  - timestamp
+  - subtitles (if available): {'source_language_code': [{'url': cc_url}]}
+  - thumbnails: list of thumbnail dicts
+  - formats: list of format dicts
+
+Key implementation details
+- Inherits ThePlatformIE to leverage its format extraction helpers for The Platform-hosted content.
+- Robust URL parsing: _VALID_URL captures three groups (asset_name, locale, id) and handles missing locale by defaulting to en-US.
+- Data fetch uses a JSON payload to a CMS API endpoint and selects the first data payload returned from the nested structure.
+- Formats handling is flexible to accommodate multiple manifest types:
+  - ThePlatformIE.suitable for platform-specific media (e.g., embedded The Platform assets)
+  - HLS (m3u8) with native handling
+  - F4M (Flash) with legacy handling
+  - Direct URLs fall back to a simple format entry
+- Subtitles use a simple mapping of the first two characters of the locale as language code.
+- Thumbnails come from variants with a jpg extension.
+- Edge-case handling:
+  - If locale is missing in the URL, defaults to en-US
+  - When multiple variants exist, duplicates and empty URLs are skipped
+  - The m3u8 and f4m format extraction is non-fatal (fatal=False) to avoid aborting extraction if those formats fail
+
+Tests
+- _TESTS includes two tests:
+  - A real Weather.com video URL with expected metadata and md5 for the video.
+  - Another URL pattern that should only match (only_matching).
+
+In short, this extractor fetches Weather.com CMS asset data, derives video_id and metadata, enumerates all format variants (covering The Platform, HLS, and F4M or direct URLs), collects thumbnails and optional subtitles, and returns a unified metadata/formats dictionary suitable for downloading with youtube-dl.

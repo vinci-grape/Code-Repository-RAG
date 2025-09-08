@@ -1,0 +1,16 @@
+Summary:
+- Purpose: A youtube-dl extractor for Fox Sports video pages that delegates actual media extraction to ThePlatform.
+- Class and inheritance: FoxSportsIE inherits from InfoExtractor.
+- URL matching: _VALID_URL = r'https?://(?:www\.)?foxsports\.com/(?:[^/]+/)*video/(?P<id>\d+)'
+  - Captures the numeric video ID from Fox Sports URLs such as http(s)://www.foxsports.com/.../video/432609859715.
+- Testing data: _TEST provides a sample URL with expected metadata (id, ext, title, description, upload_date, uploader) and indicates to skip download and to use ThePlatform as the extraction engine.
+  - Note: upload_date is a placeholder (19700101) with a TODO about timestamp handling.
+- Core extraction logic: _real_extract(self, url)
+  - Extracts video_id via self._match_id(url).
+  - Builds a ThePlatform feed URL: https://feed.theplatform.com/f/BKQ29B/foxsports-all?byId=<video_id>.
+  - Returns self.url_result(<the_platform_url>, 'ThePlatformFeed'), delegating to ThePlatform extractor.
+- Implementation details:
+  - Uses the Platform feed approach rather than parsing Fox Sports media directly.
+  - _TEST includes 'add_ie': ['ThePlatform'] and 'params': {'skip_download': True} to rely on ThePlatform for media retrieval.
+  - The URL pattern allows multiple path segments before /video/ to accommodate various Fox Sports page structures.
+- Overall behavior: When given a Fox Sports video page, the extractor derives the ThePlatform feed identifier and hands off to ThePlatformFeed to obtain the actual video formats, metadata, and download options.

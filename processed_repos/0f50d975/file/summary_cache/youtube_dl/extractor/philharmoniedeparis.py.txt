@@ -1,0 +1,36 @@
+- Purpose: A youtube-dl extractor for Philharmonie de Paris that can fetch either a single video or a playlist of chapters from the Philharmonie live site or the CIMU pad site.
+
+- Key class:
+  - PhilharmonieDeParisIE (inherits from InfoExtractor)
+    - IE_DESC: "Philharmonie de Paris"
+    - _VALID_URL: Regex that matches:
+      - live.philharmoniedeparis.fr with paths for Concert, embed/app, misc/Playlist.ashx?id=
+      - pad.philharmoniedeparis.fr/doc/CIMU/ with a numeric id
+    - _LIVE_URL constant: https://live.philharmoniedeparis.fr
+    - _TESTS: Includes examples for both single videos and playlists, and several only_matching cases to ensure proper URL matching
+    - _real_extract(url): Core extraction logic
+
+- Main workflow in _real_extract:
+  - Extract video_id from URL with _match_id(url).
+  - Download config JSON from https://live.philharmoniedeparis.fr/otoPlayer/config.ashx with query id=video_id and lang=fr-FR.
+  - Local helper extract_entry(source):
+    - Validates source is a dict and has a title and a files dict.
+    - Iterates over format_ids ('mobile', 'desktop'), collecting unique file URLs.
+    - Resolves each format URL to an absolute m3u8 URL (using urljoin with _LIVE_URL) and extracts formats with _extract_m3u8_formats (HLS, native protocol, m3u8_id='hls', fatal=False).
+    - If any formats found, sorts them and returns a dict with 'title' and 'formats'.
+  - thumbnail: built from config['image'] via urljoin with _LIVE_URL.
+  - First tries to create a single entry from the root config using extract_entry(config). If successful, adds 'id' and 'thumbnail' and returns this entry.
+  - If not a single entry (i.e., a playlist), iterates over config['chapters'], creating per-chapter entries:
+    - Each chapter uses extract_entry(chapter) and gets an id of the form "video_id-N" (N = chapter index starting at 1).
+  - Returns a playlist with playlist_result(entries, video_id, config.get('title')) when multiple chapters exist.
+
+- Important implementation details:
+  - Uses try_get to safely access nested fields and compat_str to ensure string handling.
+  - Formats extraction relies on HLS (.m3u8) manifests found under the 'files' dictionary for each source, first trying 'mobile' then 'desktop'.
+  - Dedupe logic prevents duplicate format URLs from being processed.
+  - The code supports both a single video and a playlist of chapters within the same config structure.
+  - For playlists, per-entry IDs are composed from the main video_id and chapter index (video_id-1, video_id-2, ...).
+
+- Summary of behavior:
+  - If the config contains a title and files, returns a single video entry with title, formats, id, and thumbnail.
+  - If the config contains chapters, returns a playlist where each chapter is a separate entry with its own id (video_id-N) and the same extraction process for formats and titles.

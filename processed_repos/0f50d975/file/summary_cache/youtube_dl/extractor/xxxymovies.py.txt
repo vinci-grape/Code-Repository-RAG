@@ -1,0 +1,65 @@
+Concise summary of ./youtube-dl/youtube_dl/extractor/xxxymovies.py
+
+Overview
+- Implements an information extractor (InfoExtractor) for the XXXYMOVIES site.
+- Class XXXYMoviesIE parses video pages under xxxymovies.com and returns metadata and the actual video URL.
+
+Key components
+- Class: XXXYMoviesIE(InfoExtractor)
+- URL pattern: _VALID_URL = r'https?://(?:www\.)?xxxymovies\.com/videos/(?P<id>\d+)/(?P<display_id>[^/]+)'
+  - Matches URLs like https://www.xxxymovies.com/videos/138669/ecstatic-orgasm-sofcore/
+- Test data: _TEST provides an example URL, expected MD5, and expected info_dict fields (id, display_id, ext, title, duration, categories, view_count, like_count, dislike_count, age_limit)
+
+Main extraction flow (_real_extract)
+1. Parse URL
+   - Extract video_id from the numeric id in the URL.
+   - Extract display_id from the slug part of the URL.
+2. Download the webpage
+   - webpage = self._download_webpage(url, display_id)
+3. Video URL extraction
+   - video_url = self._search_regex(r"video_url\s*:\s*'([^']+)'", webpage, 'video URL')
+4. Title extraction
+   - Try two patterns via _html_search_regex:
+     - Pattern 1 targets a title inside a block_header <div> with an <h1>.
+     - Pattern 2 uses the <title> tag with a suffix like "XXXYMovies.com" or "XXX Movies".
+5. Thumbnail (optional)
+   - thumbnail = self._search_regex(r"preview_url\s*:\s*'([^']+)'", webpage, 'thumbnail', fatal=False)
+6. Categories
+   - categories = self._html_search_meta('keywords', webpage, 'categories', default='').split(',')
+7. Duration
+   - duration_str = self._search_regex(r'<span>Duration:</span>\s*(\d+:\d+)', webpage, 'duration', fatal=False)
+   - duration = parse_duration(duration_str) if duration_str found
+8. Statistics (optional)
+   - view_count = int_or_none(self._html_search_regex(r'<div class="video_views">\s*(\d+)', webpage, 'view count', fatal=False))
+   - like_count = int_or_none(self._search_regex(r'>\s*Likes? <b>\((\d+)\)', webpage, 'like count', fatal=False))
+   - dislike_count = int_or_none(self._search_regex(r'>\s*Dislike <b>\((\d+)\)</b>', webpage, 'dislike count', fatal=False))
+9. Age rating
+   - age_limit = self._rta_search(webpage)  # uses restricted/age rating info on page
+10. Return info dictionary
+   - id: video_id
+   - display_id: display_id
+   - url: video_url (actual video file URL)
+   - title: extracted title
+   - thumbnail: thumbnail URL (if found)
+   - categories: list of categories from keywords meta tag
+   - duration: duration in seconds (if found)
+   - view_count: integer (if found)
+   - like_count: integer (if found)
+   - dislike_count: integer (if found)
+   - age_limit: age rating (if found)
+
+Important implementation details
+- Robust extraction with multiple fallbacks:
+  - Title extraction supports two patterns to accommodate page structure variations.
+  - Thumbnail and some counts are optional (fatal=False) to avoid failing extraction if missing.
+- Helper utilities used:
+  - _download_webpage, _search_regex, _html_search_regex, _html_search_meta
+  - parse_duration to convert "MM:SS" or "HH:MM:SS" strings to seconds
+  - int_or_none to safely parse integers or return None
+  - _rta_search to obtain age restrictions from the page
+- Data fields produced align with common youtube-dl metadata expectations:
+  - id, display_id, url, title, thumbnail, categories, duration, view_count, like_count, dislike_count, age_limit
+- Designed for a specific site structure: video_url is expected to appear in the page as video_url: '...'
+- The _TEST block provides a concrete example including an MD5 for the video file, indicating the extractor can also verify the downloaded file integrity in tests.
+
+Overall, this extractor fetches a XXXYMOVIES video page, locates the video file URL and metadata (title, duration, categories, view/like/dislike counts, age rating, thumbnail), and returns a structured info dictionary suitable for youtube-dl’s downstream processing.

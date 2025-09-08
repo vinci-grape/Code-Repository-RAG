@@ -1,0 +1,56 @@
+Concise summary of the code in ./youtube-dl/youtube_dl/extractor/zoom.py
+
+Purpose:
+- Implement an InfoExtractor for Zoom recordings shared via Zoom’s rec/play/rec/share URLs. It extracts the direct MP4 URL, title, video dimensions, and approximate filesize, handling optional password protection.
+
+Key components:
+- Class: ZoomIE(InfoExtractor)
+  - IE_NAME: 'zoom'
+  - _VALID_URL: Regex to match Zoom recording URLs (recording/play or recording/share) and capture base_url and id.
+  - _TEST: Example test case with expected id, extension, and title.
+
+Main workflow in _real_extract(self, url):
+1. URL parsing and page download
+   - Extract base_url and play_id from URL using _VALID_URL.
+   - Download the webpage content.
+
+2. Optional password protection handling
+   - Try to extract a hidden form named 'password_form' via _form_hidden_inputs.
+   - If the form exists:
+     - Retrieve password from self._downloader.params['videopassword'].
+     - If no password provided, raise an ExtractorError instructing to use --video-password.
+     - Determine if the protection is a meeting vs a file via form['useWhichPasswd'].
+     - Post to the appropriate validation endpoint base_url + 'rec/validate[_meet]_passwd' with:
+       - id: either meetId or fileId (depending on whether it's a meeting or file)
+       - passwd: the provided password
+       - action: form.get('action')
+     - If validation.status is false, raise ExtractorError with the server-provided errorMessage (marked as expected).
+     - Re-download the webpage after successful validation.
+
+3. Data extraction
+   - Parse a JSON-like data blob embedded in the page by locating a JavaScript snippet window.__data__ = {...};
+     - Use _search_regex to grab the JSON, then convert with js_to_json, then _parse_json.
+   - Expected fields from data:
+     - id: play_id
+     - title: data['topic']
+     - url: data['viewMp4Url'] (direct MP4 URL)
+     - width: int_or_none(data.get('viewResolvtionsWidth'))
+     - height: int_or_none(data.get('viewResolvtionsHeight'))
+     - fileSize: used to compute filesize_approx via parse_filesize
+   - http_headers: set Referer to base_url to satisfy potential hotlink protection.
+
+Return value:
+- A dictionary with:
+  - id: play_id
+  - title: data['topic']
+  - url: data['viewMp4Url']
+  - width, height: optional integers
+  - http_headers: {'Referer': base_url}
+  - filesize_approx: parsed file size if available
+
+Important implementation details:
+- Graceful handling of optional password protection: if no password form is present, it proceeds without password checks.
+- Password validation path supports both meeting and file password flows, selecting endpoint dynamically.
+- Uses window.__data__ embedded JSON in the page to obtain video metadata, converting with js_to_json.
+- Uses Referer header (base_url) for the final MP4 request to satisfy potential anti-leech protections.
+- Robust error handling via ExtractorError, including user-facing messages when password is missing or incorrect.

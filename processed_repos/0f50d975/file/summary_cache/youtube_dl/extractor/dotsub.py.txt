@@ -1,0 +1,47 @@
+concise summary of the code in ./youtube-dl/youtube_dl/extractor/dotsub.py
+
+- Purpose
+  - Implement a YouTube-DL extractor for dotsub.com video pages (DotsubIE).
+
+- Key class and constants
+  - DotsubIE(InfoExtractor): inherits common extractor behavior.
+  - _VALID_URL: regex matching URLs like https://dotsub.com/view/<id>.
+  - _TESTS: two sample tests with expected info_dict fields (id, ext, title, description, thumbnail, duration, uploader, timestamp, upload_date, view_count, etc.). Second test includes uploader_id and add_ie: ['Vimeo'].
+
+- Core functionality (_real_extract)
+  1. Extract video_id from URL using _match_id.
+  2. Try to fetch metadata via API:
+     - info = self._download_json('https://dotsub.com/api/media/%s/metadata' % video_id, video_id)
+     - video_url = info.get('mediaURI')
+  3. If API does not provide a direct URL (video_url is missing):
+     - Download the page HTML (webpage).
+     - Try to locate a direct video URL in the HTML via regex:
+       - <source src="..."
+       - "file": '...'
+     - If found, build info_dict with id, url, and ext: 'flv'.
+  4. If video_url is still not found (another fallback):
+     - Search for a data-setup attribute in the page, parse its JSON content to obtain a src.
+     - Build info_dict as a URL-transparent entry: {'_type': 'url_transparent', 'url': setup_data['src']}.
+  5. Enrich the info_dict with common metadata from the API:
+     - 'title': from info['title']
+     - 'description': from info.get('description')
+     - 'thumbnail': from info.get('screenshotURI')
+     - 'duration': int_or_none(info.get('duration'), 1000)  # converts ms to seconds
+     - 'uploader': from info.get('user')
+     - 'timestamp': float_or_none(info.get('dateCreated'), 1000)  # ms to seconds
+     - 'view_count': int_or_none(info.get('numberOfViews'))
+  6. Return the assembled info_dict.
+
+- Important implementation details
+  - Uses a two-tier retrieval strategy:
+    - Primary: API metadata endpoint (media/<id>/metadata) for reliable fields.
+    - Secondary: HTML scraping for direct video URLs if API does not provide mediaURI.
+    Tertiary: data-setup JSON extraction from the page for a potential URL inside a JS setup object.
+  - Ext inference:
+    - When a direct URL is found via API or HTML, sets ext to 'flv' (or uses provided URL to determine format later).
+    - If URL-transparently derived via data-setup, relies on that external source (URL is provided, actual ext inferred elsewhere).
+  - Robust metadata extraction with utility helpers:
+    - int_or_none and float_or_none convert numeric fields with optional multipliers (e.g., 1000 for ms to seconds).
+  - The code is careful to only reference 'webpage' when it has been downloaded (to avoid NameError).
+
+Overall, the extractor targets dotsub video pages by first querying a metadata API, then gracefully falling back to HTML/JS-based extraction to obtain a direct video URL, while still enriching the resulting info with standard fields like title, description, duration, uploader, timestamp, and view count.

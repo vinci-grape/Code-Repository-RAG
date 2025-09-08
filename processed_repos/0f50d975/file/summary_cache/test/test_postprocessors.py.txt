@@ -1,0 +1,18 @@
+- Purpose: A small unit test file for the postprocessor that extracts metadata from a title string (MetadataFromTitlePP) in youtube-dl.
+
+- Key class/functionality:
+  - Tests the MetadataFromTitlePP postprocessor, specifically its ability to generate an internal regular expression from a given title format template.
+  - The test focuses on the format string "%(title)s - %(artist)s" and checks the resulting internal regex.
+
+- Test details:
+  - test_format_to_regex creates an instance with the format "%(title)s - %(artist)s" (the first constructor argument is None, the second is the format).
+  - It asserts that the private attribute _titleregex equals the string:
+    (?P<title>.+)\ \-\ (?P<artist>.+)
+  - This indicates the postprocessor uses named capture groups 'title' and 'artist' and escapes the dash and spaces in the regex.
+
+- Implementation notes:
+  - The test imports MetadataFromTitlePP from youtube_dl.postprocessor.
+  - It temporarily adjusts sys.path to include the project root so the module can be imported.
+  - The test directly asserts the exact string of the internal regex, implying the _titleregex attribute is a string representing the regex used to parse a title according to the template.
+
+- Overall: The file provides a focused validation that the format-to-regex translation for metadata extraction is implemented correctly, ensuring the parsing of a title like "Title - Artist" yields the expected named groups.
